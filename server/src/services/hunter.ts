@@ -16,7 +16,7 @@ export async function searchDomain(
 ): Promise<HunterContact[]> {
   const url = new URL('https://api.hunter.io/v2/domain-search');
   url.searchParams.set('domain', domain);
-  url.searchParams.set('limit', '20');
+  url.searchParams.set('limit', '10');
   url.searchParams.set('api_key', apiKey);
 
   const res = await fetch(url.toString());

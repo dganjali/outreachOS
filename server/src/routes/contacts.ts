@@ -45,17 +45,7 @@ router.post('/missions/:missionId/research', async (req: AuthedRequest, res) => 
         data: { status: ContactStatus.RESEARCHING }
       });
 
-      let domainContacts;
-      try {
-        domainContacts = await searchDomain(contact.domain, apiKey);
-      } catch {
-        await prisma.contact.update({
-          where: { id: contact.id },
-          data: { status: ContactStatus.SKIPPED }
-        });
-        await sleep(1100);
-        continue;
-      }
+      const domainContacts = await searchDomain(contact.domain, apiKey);
 
       const filtered = await filterByRole(
         domainContacts,
@@ -74,14 +64,13 @@ router.post('/missions/:missionId/research', async (req: AuthedRequest, res) => 
 
       const primary = filtered[0];
 
-      const verification = await verifyEmail(primary.email, apiKey);
-      if (verification === 'undeliverable') {
-        await prisma.contact.update({
-          where: { id: contact.id },
-          data: { status: ContactStatus.SKIPPED }
-        });
-        await sleep(1100);
-        continue;
+      // Verification is advisory only for now; even if the verifier reports
+      // an undeliverable address, we still move the contact to PENDING_APPROVAL
+      // so the user can inspect and decide.
+      try {
+        await verifyEmail(primary.email, apiKey);
+      } catch {
+        // Swallow verification errors and fall back to using the contact as-is.
       }
 
       await prisma.contact.update({

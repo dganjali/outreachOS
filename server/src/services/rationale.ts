@@ -16,8 +16,20 @@ export async function generateRationale(
     'Be specific and direct. No filler phrases.'
   ].join(' ');
 
-  const text = await generateText({ system, prompt: user });
+  try {
+    return await generateText({ system, prompt: user });
+  } catch (err) {
+    const fallback = [
+      'This mission targets senior decision-makers at the listed companies who are closest to your ask.',
+      `Focus on roles that match: ${criteria}.`,
+      'Prioritize people whose public profiles mention budget ownership, partnerships, or content/podcast responsibilities.'
+    ].join(' ');
 
-  return text;
+    if (err instanceof Error) {
+      return `${fallback} (LLM rationale unavailable: ${err.message})`;
+    }
+
+    return `${fallback} (LLM rationale unavailable.)`;
+  }
 }
 

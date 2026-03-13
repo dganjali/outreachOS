@@ -3,8 +3,8 @@ import { google } from 'googleapis';
 import { prisma } from '../db/client.js';
 
 const GMAIL_SCOPES = [
-  'https://www.googleapis.com/auth/gmail.send',
-  'https://www.googleapis.com/auth/gmail.readonly'
+  // Allows managing drafts and sending messages.
+  'https://www.googleapis.com/auth/gmail.compose'
 ];
 
 function createOAuthClient() {
@@ -86,14 +86,11 @@ export async function sendEmail(
       .replace(/\//g, '_')
       .replace(/=+$/, '');
 
-    // For now: create drafts instead of sending directly. Safer for testing.
-    // TODO: switch to messages.send for prod
-    await gmail.users.drafts.create({
+    // Send the message directly from Gmail.
+    await gmail.users.messages.send({
       userId: 'me',
       requestBody: {
-        message: {
-          raw: encodedMessage
-        }
+        raw: encodedMessage
       }
     });
   } catch (err) {
