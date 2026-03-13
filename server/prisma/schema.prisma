@@ -1,0 +1,70 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MissionStatus {
+  DRAFT
+  ACTIVE
+  COMPLETE
+}
+
+enum ContactStatus {
+  QUEUED
+  RESEARCHING
+  PENDING_APPROVAL
+  SENT
+  SKIPPED
+}
+
+model User {
+  id               String    @id @default(cuid())
+  email            String    @unique
+  createdAt        DateTime  @default(now())
+  gmailRefreshToken String?
+  hunterApiKey     String?
+
+  missions         Mission[]
+}
+
+model Mission {
+  id                String        @id @default(cuid())
+  userId            String
+  name              String
+  ask               String
+  targetCriteria    String
+  contactsPerCompany Int          @default(1)
+  rationale         String?
+  status            MissionStatus @default(DRAFT)
+  createdAt         DateTime      @default(now())
+
+  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contacts           Contact[]
+
+  @@index([userId])
+}
+
+model Contact {
+  id         String       @id @default(cuid())
+  missionId  String
+  domain     String
+  email      String?
+  firstName  String?
+  lastName   String?
+  role       String?
+  confidence Int?
+  draft      String?
+  status     ContactStatus @default(QUEUED)
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  mission    Mission       @relation(fields: [missionId], references: [id], onDelete: Cascade)
+
+  @@index([missionId])
+  @@index([status])
+}
+
