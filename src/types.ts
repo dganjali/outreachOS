@@ -1,5 +1,7 @@
 export type OnboardingStep = 1 | 2 | 3 | 4;
 
+export type MissionMode = 'sponsorship' | 'bd' | 'internship' | 'recruiting' | 'sales';
+
 export interface Profile {
   id: string;
   user_id: string;
@@ -28,27 +30,160 @@ export interface Mission {
   name: string;
   goal: string;
   target_description: string;
+  mode: MissionMode;
+  offer_details: string | null;
   status: string;
   created_at: string;
   updated_at: string;
 }
 
+export type TargetStatus = 'suggested' | 'approved' | 'rejected' | 'contacted';
+
 export interface Target {
   id: string;
   mission_id: string;
   company_name: string;
+  domain: string | null;
+  score: number | null;
+  why_now: string | null;
+  fit_reason: string | null;
+  signal_type: string | null;
+  status: TargetStatus;
   created_at: string;
 }
+
+export type ContactStatus = 'suggested' | 'approved' | 'rejected' | 'contacted' | 'replied';
 
 export interface Contact {
   id: string;
   target_id: string;
   name: string;
   role: string;
-  email: string;
+  email: string | null;
+  linkedin_url: string | null;
+  likely_email_pattern: string | null;
+  confidence: number | null;
+  reasoning: string | null;
+  status: ContactStatus;
   created_at: string;
 }
 
+export interface EvidenceBullet {
+  fact: string;
+  source_url: string;
+  source_title: string;
+  signal_type: string;
+  recency: string;
+}
+
+export interface EvidencePack {
+  id: string;
+  target_id: string;
+  bullets: EvidenceBullet[];
+  citations: Array<{ url: string; title?: string }>;
+  created_at: string;
+}
+
+export type SequenceStatus = 'draft' | 'approved' | 'sent' | 'bounced' | 'replied' | 'archived';
+
+export interface EmailSequence {
+  id: string;
+  contact_id: string;
+  target_id: string;
+  mission_id: string;
+  evidence_pack_id: string | null;
+  primary_angle: string | null;
+  anchored_bullets: number[];
+  subject: string;
+  body: string;
+  followups: Array<{ wait_days: number; subject: string; body: string }>;
+  status: SequenceStatus;
+  scheduled_send_at: string | null;
+  sent_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Integration {
+  provider: 'gmail';
+  provider_account_email: string | null;
+  status: 'active' | 'revoked' | 'error';
+  last_error: string | null;
+  updated_at: string;
+}
+
+export interface SentMessage {
+  id: string;
+  user_id: string;
+  sequence_id: string;
+  contact_id: string;
+  mission_id: string;
+  touch_index: number;
+  subject: string;
+  body: string;
+  to_email: string;
+  gmail_draft_id: string | null;
+  gmail_message_id: string | null;
+  gmail_thread_id: string | null;
+  status: 'draft' | 'queued' | 'sent' | 'failed' | 'bounced';
+  scheduled_send_at: string | null;
+  sent_at: string | null;
+  failed_reason: string | null;
+  created_at: string;
+}
+
+export type ReplyClassification =
+  | 'interested'
+  | 'not_now'
+  | 'wrong_person'
+  | 'referral'
+  | 'oof'
+  | 'unsubscribe'
+  | 'question'
+  | 'other';
+
+export interface Reply {
+  id: string;
+  user_id: string | null;
+  contact_id: string;
+  sent_message_id: string | null;
+  gmail_message_id: string | null;
+  gmail_thread_id: string | null;
+  from_email: string | null;
+  subject: string | null;
+  body: string | null;
+  snippet: string | null;
+  classification: ReplyClassification | null;
+  urgency: 'low' | 'normal' | 'high' | null;
+  key_points: string[] | null;
+  suggested_response: { subject: string; body: string } | null;
+  recommended_action: string | null;
+  status: string;
+  notes: string | null;
+  handled: boolean;
+  received_at: string | null;
+  created_at: string;
+}
+
+export type AgentType = 'targeting' | 'contacts' | 'evidence' | 'sequence' | 'reply';
+export type RunStatus = 'running' | 'completed' | 'failed';
+
+export interface AgentRun {
+  id: string;
+  user_id: string;
+  mission_id: string | null;
+  target_id: string | null;
+  contact_id: string | null;
+  agent_type: AgentType;
+  status: RunStatus;
+  input: Record<string, unknown> | null;
+  output: Record<string, unknown> | null;
+  error: string | null;
+  started_at: string;
+  completed_at: string | null;
+}
+
+// Legacy types kept for backwards compatibility with existing pages
 export interface EmailDraft {
   id: string;
   contact_id: string;

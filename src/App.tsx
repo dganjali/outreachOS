@@ -13,6 +13,7 @@ import { Dashboard } from './pages/Dashboard';
 import { Missions } from './pages/Missions';
 import { MissionNew } from './pages/MissionNew';
 import { MissionPage } from './pages/MissionPage';
+import { Inbox } from './pages/Inbox';
 import { ProfilePage } from './pages/ProfilePage';
 import { SettingsPage } from './pages/SettingsPage';
 
@@ -73,6 +74,7 @@ function App() {
             <Route path="missions" element={<Missions />} />
             <Route path="missions/new" element={<MissionNew />} />
             <Route path="missions/:id" element={<MissionPage />} />
+            <Route path="inbox" element={<Inbox />} />
             <Route path="profile" element={<ProfilePage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
