@@ -2,11 +2,21 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
+import type { MissionMode } from '../types';
+
+const MODES: Array<{ value: MissionMode; label: string; hint: string }> = [
+  { value: 'sponsorship', label: 'Sponsorship', hint: 'Get companies to sponsor an event/community' },
+  { value: 'bd', label: 'BD / Partnerships', hint: 'Land integration or partnership deals' },
+  { value: 'internship', label: 'Internship / Job', hint: 'Land a role at a target org' },
+  { value: 'recruiting', label: 'Recruiting', hint: 'Source candidates for an open role' },
+  { value: 'sales', label: 'Cold Sales', hint: 'Sell a product or service' },
+];
 
 export function MissionNew() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [name, setName] = useState('');
+  const [mode, setMode] = useState<MissionMode>('sponsorship');
   const [whatSending, setWhatSending] = useState('');
   const [whoAndWhy, setWhoAndWhy] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -21,6 +31,7 @@ export function MissionNew() {
       .insert({
         user_id: user!.id,
         name: name.trim(),
+        mode,
         goal: whatSending.trim(),
         target_description: whoAndWhy.trim(),
         status: 'active',
@@ -42,7 +53,7 @@ export function MissionNew() {
       </Link>
       <h1>Create Mission</h1>
       <p style={{ margin: '0 0 1.5rem', fontSize: '0.9375rem', color: 'var(--text-muted)' }}>
-        Define what you’re sending and who you want to reach. You can add the rest later.
+        Pick a mode, define what you're sending, and describe who you want to reach. The agent will do the rest.
       </p>
 
       <form onSubmit={handleSubmit} className="mission-form">
@@ -57,23 +68,42 @@ export function MissionNew() {
             required
           />
         </div>
+
         <div className="field">
-          <label htmlFor="mission-what">What you’re sending</label>
+          <label>Mode</label>
+          <div className="mode-grid">
+            {MODES.map((m) => (
+              <button
+                key={m.value}
+                type="button"
+                className={`mode-card ${mode === m.value ? 'selected' : ''}`}
+                onClick={() => setMode(m.value)}
+                aria-pressed={mode === m.value}
+              >
+                <span className="mode-card-label">{m.label}</span>
+                <span className="mode-card-hint">{m.hint}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="field">
+          <label htmlFor="mission-what">What you're sending / your offer</label>
           <textarea
             id="mission-what"
             value={whatSending}
             onChange={(e) => setWhatSending(e.target.value)}
-            placeholder="Describe your offer, pitch, or message — e.g. sponsorship tiers, partnership proposal, internship opportunity."
+            placeholder="Be specific. e.g. 'Sponsorship tiers $5k–25k for Hack the North 2026 (1.4k attendees, 60% senior CS).'"
             required
           />
         </div>
         <div className="field">
-          <label htmlFor="mission-who">Who you want to send it to (the why)</label>
+          <label htmlFor="mission-who">Who you want to reach (the why)</label>
           <textarea
             id="mission-who"
             value={whoAndWhy}
             onChange={(e) => setWhoAndWhy(e.target.value)}
-            placeholder="General idea of your audience and why they’re a fit — e.g. dev tools with active communities, HR leads at Series B, hackathon organizers."
+            placeholder="e.g. 'Dev tools companies with active student programs and recent hackathon sponsorships in 2025.'"
             required
           />
         </div>
