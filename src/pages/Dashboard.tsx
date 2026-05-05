@@ -58,6 +58,7 @@ export function Dashboard() {
           .from('missions')
           .select('*')
           .eq('user_id', user!.id)
+          .is('archived_at', null)
           .order('created_at', { ascending: false }),
         supabase.from('targets').select('id', { count: 'exact', head: true }),
         supabase.from('contacts').select('id', { count: 'exact', head: true }),

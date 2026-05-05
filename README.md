@@ -52,6 +52,7 @@ Run in the Supabase SQL editor in this order:
 1. `supabase/schema.sql` — base tables + RLS
 2. `supabase/migrations/002_agent_layer.sql` — mode, scoring, evidence_packs, email_sequences, agent_runs
 3. `supabase/migrations/003_gmail_integration.sql` — user_integrations, sent_messages, replies extensions
+4. `supabase/migrations/004_cleanup.sql` — drops dead `emails` table, tightens replies RLS, adds `missions.archived_at`
 
 ## Google Cloud setup (Gmail OAuth)
 

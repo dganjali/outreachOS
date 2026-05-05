@@ -26,53 +26,83 @@ export function Missions() {
   const { user } = useAuth();
   const [missions, setMissions] = useState<MissionWithCounts[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showArchived, setShowArchived] = useState(false);
+
+  async function load(uid: string, includeArchived: boolean) {
+    let query = supabase
+      .from('missions')
+      .select('*')
+      .eq('user_id', uid)
+      .order('created_at', { ascending: false });
+    if (!includeArchived) query = query.is('archived_at', null);
+    const { data: ms } = await query;
+    const list = (ms ?? []) as Mission[];
+    const withCounts = await Promise.all(
+      list.map(async (m) => {
+        const [{ count: tc }, { count: dc }] = await Promise.all([
+          supabase.from('targets').select('id', { count: 'exact', head: true }).eq('mission_id', m.id),
+          supabase.from('email_sequences').select('id', { count: 'exact', head: true }).eq('mission_id', m.id),
+        ]);
+        return { ...m, target_count: tc ?? 0, draft_count: dc ?? 0 };
+      })
+    );
+    setMissions(withCounts);
+    setLoading(false);
+  }
 
   useEffect(() => {
     if (!user?.id) return;
-    let cancelled = false;
-    async function load() {
-      const { data: ms } = await supabase
-        .from('missions')
-        .select('*')
-        .eq('user_id', user!.id)
-        .order('created_at', { ascending: false });
-      const list = (ms ?? []) as Mission[];
-      const withCounts = await Promise.all(
-        list.map(async (m) => {
-          const [{ count: tc }, { count: dc }] = await Promise.all([
-            supabase.from('targets').select('id', { count: 'exact', head: true }).eq('mission_id', m.id),
-            supabase.from('email_sequences').select('id', { count: 'exact', head: true }).eq('mission_id', m.id),
-          ]);
-          return { ...m, target_count: tc ?? 0, draft_count: dc ?? 0 };
-        })
-      );
-      if (cancelled) return;
-      setMissions(withCounts);
-      setLoading(false);
-    }
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.id]);
+    setLoading(true);
+    load(user.id, showArchived);
+  }, [user?.id, showArchived]);
+
+  async function archive(e: React.MouseEvent, mission: MissionWithCounts) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!confirm(`Archive "${mission.name}"? You can restore it from the archived view.`)) return;
+    await supabase.from('missions').update({ archived_at: new Date().toISOString() }).eq('id', mission.id);
+    if (user?.id) load(user.id, showArchived);
+  }
+
+  async function restore(e: React.MouseEvent, mission: MissionWithCounts) {
+    e.preventDefault();
+    e.stopPropagation();
+    await supabase.from('missions').update({ archived_at: null }).eq('id', mission.id);
+    if (user?.id) load(user.id, showArchived);
+  }
 
   return (
     <div>
       <header className="dashboard-header">
         <h1 style={{ margin: 0 }}>Missions</h1>
-        <Link to="/missions/new" className="dashboard-create">
-          + Create Mission
-        </Link>
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => setShowArchived((v) => !v)}
+          >
+            {showArchived ? 'Hide archived' : 'Show archived'}
+          </button>
+          <Link to="/missions/new" className="dashboard-create">
+            + Create Mission
+          </Link>
+        </div>
       </header>
 
       {loading ? (
         <p style={{ color: 'var(--text-muted)', fontSize: '0.9375rem' }}>Loading…</p>
       ) : missions.length === 0 ? (
         <div className="empty-card">
-          <p>No missions yet. Create one to define what you're sending and let the agent find targets.</p>
-          <Link to="/missions/new" className="dashboard-create">
-            Create your first mission
-          </Link>
+          <p>
+            {showArchived
+              ? 'No archived missions.'
+              : "No missions yet. Create one to define what you're sending and let the agent find targets."}
+          </p>
+          {!showArchived && (
+            <Link to="/missions/new" className="dashboard-create">
+              Create your first mission
+            </Link>
+          )}
         </div>
       ) : (
         <div className="mission-cards">
@@ -89,6 +119,15 @@ export function Missions() {
                 <span>{m.target_count} targets</span>
                 <span>{m.draft_count} drafts</span>
                 <span className={`status-pill status-${m.status}`}>{m.status}</span>
+                {m.archived_at ? (
+                  <button type="button" className="link-button" onClick={(e) => restore(e, m)}>
+                    Restore
+                  </button>
+                ) : (
+                  <button type="button" className="link-button" onClick={(e) => archive(e, m)}>
+                    Archive
+                  </button>
+                )}
               </div>
             </Link>
           ))}

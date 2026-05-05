@@ -1,21 +1,21 @@
 # OutreachOS — TODO
 
-Sorted by ship-blocker / pre-launch / post-launch. See full audit in conversation history.
+Sorted by ship-blocker / pre-launch / post-launch.
 
 ---
 
-## P0 — fix before going live (a few hours)
+## P0 — fix before going live (DONE)
 
 ### Security holes
 
-- [ ] **Cron is open to the world if `CRON_SECRET` is unset** — `api/cron/poll-gmail.ts:16` is `if (cronSecret) { check }`. Fail-closed instead: `if (!cronSecret || auth !== ...) return 401`.
-- [ ] **No rate limit on agent endpoints** — one user can fire `/api/agents/target` in a loop and burn the Anthropic budget. Add per-user-per-minute counter (cheapest: count rows in `agent_runs` from last 60s; or Vercel KV). Hard daily cap too.
-- [ ] **Outgoing emails have no unsubscribe / sender identity footer** — CAN-SPAM/GDPR require it. Reply Router *handles* unsubscribes but the outgoing email itself doesn't include the link. Inject in `buildRfc2822` (`api/_lib/gmail.ts:152`) or have the sequence prompt always include one.
+- [x] **Cron is open to the world if `CRON_SECRET` is unset** — fail-closed.
+- [x] **No rate limit on agent endpoints** — 5/min, 50/day via `agent_runs` count.
+- [x] **Outgoing emails have no unsubscribe / sender identity footer** — injected in `buildRfc2822`.
 
 ### Bugs
 
-- [ ] **`createDraft` returns possibly-null `threadId`** — `api/_lib/gmail.ts:219` destructures `j.message.threadId`. Gmail's draft API can return null when no `threadId` was passed. Guard or fallback.
-- [ ] **`requireUser.accessToken` field is never consumed** — `api/_lib/auth.ts:26`. Either use it (e.g., for user-scoped Supabase calls) or drop it.
+- [x] **`createDraft` returns possibly-null `threadId`** — fallback to `''`.
+- [x] **`requireUser.accessToken` field is never consumed** — dropped.
 
 ---
 
@@ -23,19 +23,19 @@ Sorted by ship-blocker / pre-launch / post-launch. See full audit in conversatio
 
 ### Architecture cleanups
 
-- [ ] **Centralize env access** — `ENCRYPTION_KEY`, `CRON_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` are read via `process.env.X` in three files. `api/_lib/env.ts` only handles 4 of 8 vars. Move all of them into `env.ts`.
-- [ ] **De-duplicate `required()`** — defined in `api/_lib/env.ts:1` *and* `api/_lib/gmail.ts:144`. Pick one home.
-- [ ] **Drop the dead `public.emails` table** — `supabase/schema.sql:59` defines + RLS-policies it; no code reads/writes it (everything uses `email_sequences`). Delete in a 004 migration. Same for the original contact-only `replies` RLS that's now redundant with the user_id-scoped policy in 003.
+- [x] **Centralize env access** — all 8 vars now flow through `api/_lib/env.ts`.
+- [x] **De-duplicate `required()`** — only lives in `env.ts` now.
+- [x] **Drop the dead `public.emails` table** — `004_cleanup.sql`. Same migration tightens redundant `replies` RLS.
 - [ ] **Type drift between server and client** — `MissionMode` lives in `api/_lib/prompts.ts`, `Target`/`Contact`/`EmailSequence` in `src/types.ts`. Move shared shapes to a `shared/` folder both can import, or generate from Supabase via `supabase gen types`.
-- [ ] **Anthropic 5xx/529 retry/backoff** — agent endpoints have zero retry. One Claude overload mid-run wastes the whole call. Wrap `messages.create` in 1–2 retries with exponential backoff, only on 5xx / 529.
-- [ ] **Cron processes users sequentially** — `api/cron/poll-gmail.ts:37`. With ~30+ active users you'll hit the 60s timeout. Chunk by hash bucket per cron tick, or move to Inngest/QStash.
-- [ ] **MissionPage 552-line file** — `src/pages/MissionPage.tsx` holds 3 components (MissionPage, SequenceCard, Touch). Split into 3 files when next touched.
+- [x] **Anthropic 5xx/529 retry/backoff** — `createMessageWithRetry` wraps every agent call with 1s+3s backoff on 5xx/529.
+- [x] **Cron processes users sequentially** — now runs in parallel chunks of 10.
+- [x] **MissionPage 552-line file** — split into `MissionPage.tsx` + `components/SequenceCard.tsx` + `components/SequenceTouch.tsx`.
 
 ### UX gaps
 
-- [ ] **No first-run guidance** — onboarding doesn't auto-route into "create your first mission". Wire that into the last onboarding step.
-- [ ] **Soft delete missions** — `delete cascade` from `missions` annihilates targets/contacts/sequences/sent/replies. Add `archived_at` and filter; protect against fat-finger loss.
-- [ ] **`web_search_20250305 max_uses: 5`** — `api/_lib/anthropic.ts:17`. For `count: 10` targeting runs, 5 searches is tight — sparse `why_now`. Bump to 10, monitor cost.
+- [x] **No first-run guidance** — onboarding finish now routes to `/missions/new?welcome=1` with a tailored heading + copy.
+- [x] **Soft delete missions** — `archived_at` column; UI has Archive/Restore + "Show archived" toggle. Dashboard hides archived.
+- [x] **`web_search_20250305 max_uses: 5`** — bumped to 10.
 - [ ] **Confirm-email + real SMTP for prod** — Supabase free tier limits to 4 emails/hr. Configure a real SMTP provider before public launch.
 
 ---
@@ -53,14 +53,8 @@ Sorted by ship-blocker / pre-launch / post-launch. See full audit in conversatio
 ## Pre-deploy checkups
 
 - [ ] All 10 env vars from `.env.example` set in Vercel for **Production + Preview + Development**.
-- [ ] Three SQL files run **in order** in Supabase prod project (`schema.sql` → `002_agent_layer.sql` → `003_gmail_integration.sql`).
+- [ ] Four SQL files run **in order** in Supabase prod project (`schema.sql` → `002_agent_layer.sql` → `003_gmail_integration.sql` → `004_cleanup.sql`).
 - [ ] Google OAuth client has **both** redirect URIs (localhost for dev, prod domain for prod).
 - [ ] OAuth consent screen still in "Testing"? — only listed test users can connect Gmail. Confirm that's intentional for soft-launch.
 - [ ] Smoke test: sign-up → onboarding → new mission → run all 5 agents on one target → connect Gmail → save draft → check Inbox after 10 min for the polled reply.
 - [ ] `vercel logs --follow` during smoke test — watch for unhandled rejections.
-
----
-
-## Recommendation
-
-Ship after **P0 (1–5)** done. P1 is real cleanup but none of it blocks "first 10 users." P2 is the next feature epic, not pre-launch hygiene.
