@@ -14,8 +14,27 @@ export const MODEL = () => env.ANTHROPIC_MODEL();
 export const WEB_SEARCH_TOOL = {
   type: 'web_search_20250305' as const,
   name: 'web_search' as const,
-  max_uses: 5,
+  max_uses: 10,
 };
+
+export async function createMessageWithRetry(
+  params: Anthropic.MessageCreateParamsNonStreaming
+): Promise<Anthropic.Message> {
+  const delays = [1000, 3000];
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    try {
+      return await anthropic().messages.create(params);
+    } catch (err) {
+      lastErr = err;
+      const status = (err as { status?: number })?.status;
+      const retryable = status === 529 || (typeof status === 'number' && status >= 500 && status < 600);
+      if (!retryable || attempt === delays.length) throw err;
+      await new Promise((r) => setTimeout(r, delays[attempt]));
+    }
+  }
+  throw lastErr;
+}
 
 export interface JsonExtraction<T> {
   ok: boolean;

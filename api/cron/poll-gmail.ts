@@ -7,11 +7,12 @@ import {
   extractPlainText,
   headerValue,
 } from '../_lib/gmail';
+import { env } from '../_lib/env';
 
 // Vercel Cron hits this with `Authorization: Bearer ${CRON_SECRET}`.
 // Configure schedule in vercel.json.
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const cronSecret = process.env.CRON_SECRET;
+  const cronSecret = env.CRON_SECRET();
   const auth = req.headers.authorization;
   if (!cronSecret || auth !== `Bearer ${cronSecret}`) {
     return res.status(401).json({ error: 'unauthorized' });
@@ -30,13 +31,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const userIds = (users ?? []).map((u) => u.user_id as string);
   if (userIds.length === 0) return res.status(200).json({ checked: 0 });
 
-  let inserted = 0;
-  let scanned = 0;
   const errors: Array<{ user_id: string; error: string }> = [];
 
-  for (const userId of userIds) {
+  async function processUser(userId: string): Promise<{ scanned: number; inserted: number }> {
+    let scanned = 0;
+    let inserted = 0;
     try {
-      // Fetch active threads for this user
       const { data: threads } = await db
         .from('sent_messages')
         .select('gmail_thread_id, gmail_message_id, contact_id, sent_at, id')
@@ -58,10 +58,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
 
-      if (grouped.size === 0) continue;
+      if (grouped.size === 0) return { scanned, inserted };
 
       const tok = await getActiveAccessToken(userId);
-      if (!tok) continue;
+      if (!tok) return { scanned, inserted };
       const ourEmail = (tok.email ?? '').toLowerCase();
 
       for (const [threadId, ctx] of grouped) {
@@ -71,9 +71,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           for (const m of thread.messages ?? []) {
             const fromHeader = headerValue(m.payload?.headers, 'From') ?? '';
             const fromEmail = extractEmail(fromHeader).toLowerCase();
-            if (!fromEmail || fromEmail === ourEmail) continue; // skip our own sends
+            if (!fromEmail || fromEmail === ourEmail) continue;
 
-            // Already recorded?
             const { data: existing } = await db
               .from('replies')
               .select('id')
@@ -81,7 +80,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               .maybeSingle();
             if (existing) continue;
 
-            // Fetch body
             const full = await getMessageFull(tok.accessToken, m.id);
             const body = extractPlainText(full.payload);
             const subject = headerValue(full.payload.headers, 'Subject');
@@ -111,9 +109,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch (err) {
       errors.push({ user_id: userId, error: err instanceof Error ? err.message : 'user_failed' });
     }
+    return { scanned, inserted };
   }
 
-  return res.status(200).json({ users: userIds.length, threads_scanned: scanned, replies_inserted: inserted, errors });
+  // Process users in parallel chunks to stay under the 60s function timeout
+  // while parallelism handles I/O wait. Concurrency = 10 keeps Gmail API
+  // happy and lets ~40+ users finish well inside the limit.
+  const CONCURRENCY = 10;
+  let totalScanned = 0;
+  let totalInserted = 0;
+  for (let i = 0; i < userIds.length; i += CONCURRENCY) {
+    const slice = userIds.slice(i, i + CONCURRENCY);
+    const results = await Promise.all(slice.map(processUser));
+    for (const r of results) {
+      totalScanned += r.scanned;
+      totalInserted += r.inserted;
+    }
+  }
+
+  return res.status(200).json({
+    users: userIds.length,
+    threads_scanned: totalScanned,
+    replies_inserted: totalInserted,
+    errors,
+  });
 }
 
 function extractEmail(header: string): string {

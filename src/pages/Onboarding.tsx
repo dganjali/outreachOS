@@ -85,7 +85,7 @@ export function Onboarding() {
         onboarding_completed_at: new Date().toISOString(),
       });
       await refreshProfile();
-      navigate('/dashboard', { replace: true });
+      navigate('/missions/new?welcome=1', { replace: true });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {

@@ -1,10 +1,8 @@
 import { createCipheriv, createDecipheriv, randomBytes, createHash } from 'node:crypto';
+import { env } from './env';
 
 function key(): Buffer {
-  const raw = process.env.ENCRYPTION_KEY;
-  if (!raw) throw new Error('Missing ENCRYPTION_KEY env var');
-  // Accept any length; derive 32-byte key via SHA-256.
-  return createHash('sha256').update(raw).digest();
+  return createHash('sha256').update(env.ENCRYPTION_KEY()).digest();
 }
 
 const ALG = 'aes-256-gcm';

@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { adminClient } from '../_lib/supabase';
-import { anthropic, MODEL, WEB_SEARCH_TOOL, extractJson } from '../_lib/anthropic';
+import { createMessageWithRetry, MODEL, WEB_SEARCH_TOOL, extractJson } from '../_lib/anthropic';
 import { TARGETING_SYSTEM, type MissionMode } from '../_lib/prompts';
 import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
 
@@ -62,7 +62,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .join('\n');
 
   try {
-    const message = await anthropic().messages.create({
+    const message = await createMessageWithRetry({
       model: MODEL(),
       max_tokens: 4096,
       system: TARGETING_SYSTEM,
