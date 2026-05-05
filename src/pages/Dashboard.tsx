@@ -153,9 +153,13 @@ export function Dashboard() {
           {loading ? (
             <p style={{ color: 'var(--text-muted)' }}>Loading…</p>
           ) : missions.length === 0 ? (
-            <div className="empty-card">
-              <p>No missions yet. Create one to start finding targets and drafting outreach.</p>
-              <Link to="/missions/new" className="dashboard-create">
+            <div className="empty-illo">
+              <div className="empty-illo-graphic" aria-hidden>✨</div>
+              <h3>Your first mission is one click away</h3>
+              <p>
+                Define what you're sending and who you want to reach. Targeting, evidence, contacts, and drafts run from there.
+              </p>
+              <Link to="/missions/new" className="dashboard-create" style={{ marginTop: '1.25rem' }}>
                 Create your first mission
               </Link>
             </div>

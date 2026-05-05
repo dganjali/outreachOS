@@ -36,7 +36,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { data: profile } = await db
     .from('profiles')
-    .select('name, role, organization, bio, proof_points, achievements, metrics, writing_tone, example_emails')
+    .select('name, role, organization, bio, proof_points, achievements, metrics, writing_tone, example_emails, linkedin_url, linkedin_data')
     .eq('user_id', user.id)
     .single();
 
@@ -66,14 +66,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .map((b, i) => `[${i}] ${b.fact} — ${b.source_title ?? ''} (${b.recency ?? ''})`)
     .join('\n');
 
+  const linkedinSummary = profile?.linkedin_data
+    ? summarizeLinkedinData(profile.linkedin_data as Record<string, unknown>)
+    : '';
+
   const senderBlock = profile
     ? [
         `Name: ${profile.name ?? 'Unknown'}`,
         profile.role ? `Role: ${profile.role}` : '',
         profile.organization ? `Org: ${profile.organization}` : '',
+        profile.bio ? `Bio: ${profile.bio}` : '',
         profile.proof_points ? `Proof points: ${profile.proof_points}` : '',
+        profile.achievements ? `Achievements: ${profile.achievements}` : '',
         profile.metrics ? `Metrics: ${profile.metrics}` : '',
         profile.writing_tone ? `Preferred tone: ${profile.writing_tone}` : '',
+        profile.linkedin_url ? `LinkedIn: ${profile.linkedin_url}` : '',
+        linkedinSummary ? `LinkedIn signal:\n${linkedinSummary}` : '',
       ]
         .filter(Boolean)
         .join('\n')
@@ -145,4 +153,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     await failRun(db, run.id, msg);
     return res.status(500).json({ error: 'agent_failed', detail: msg });
   }
+}
+
+function summarizeLinkedinData(data: Record<string, unknown>): string {
+  const out: string[] = [];
+  if (data.headline) out.push(`Headline: ${data.headline}`);
+  if (data.title) out.push(`Title: ${data.title}`);
+  const org = data.organization as { name?: string; industry?: string } | undefined;
+  if (org?.name) out.push(`Org: ${org.name}${org.industry ? ` (${org.industry})` : ''}`);
+  const history = data.employment_history as Array<{ title?: string; organization?: string; current?: boolean }> | undefined;
+  if (history?.length) {
+    const recent = history
+      .slice(0, 4)
+      .map((h) => `- ${h.title ?? '?'} @ ${h.organization ?? '?'}${h.current ? ' (current)' : ''}`);
+    out.push(`Recent roles:\n${recent.join('\n')}`);
+  }
+  return out.join('\n');
 }

@@ -6,6 +6,7 @@ import type {
   EmailSequence,
   AgentRun,
   Integration,
+  Profile,
   ReplyClassification,
 } from '../types';
 
@@ -36,12 +37,15 @@ async function authedFetch<T>(path: string, body: unknown, method: 'GET' | 'POST
 
 export const agents = {
   target: (mission_id: string, count?: number) =>
-    authedFetch<{ run_id: string; targets: Target[] }>('/api/agents/target', {
+    authedFetch<{ run_id: string; targets: Target[]; source: 'apollo' | 'web_search' }>('/api/agents/target', {
       mission_id,
       count,
     }),
   contacts: (target_id: string) =>
-    authedFetch<{ run_id: string; contacts: Contact[] }>('/api/agents/contacts', { target_id }),
+    authedFetch<{ run_id: string; contacts: Contact[]; source: 'apollo' | 'web_search' }>(
+      '/api/agents/contacts',
+      { target_id }
+    ),
   evidence: (target_id: string) =>
     authedFetch<{ run_id: string; evidence_pack: EvidencePack }>('/api/agents/evidence', {
       target_id,
@@ -54,6 +58,11 @@ export const agents = {
     authedFetch<{ run_id: string; classification: { classification: ReplyClassification; urgency: string; key_points: string[]; suggested_response: { subject: string; body: string } | null; recommended_action: string } }>(
       '/api/agents/reply',
       { reply_id }
+    ),
+  enrichProfile: () =>
+    authedFetch<{ run_id: string; profile: Profile; source: 'apollo' | 'web_search' }>(
+      '/api/agents/enrich-profile',
+      {}
     ),
 };
 

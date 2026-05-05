@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { Logo } from './Logo';
 
 const NAV = [
   { to: '/dashboard', label: 'Dashboard' },
@@ -19,6 +20,9 @@ export function AppLayout() {
   return (
     <div className="app-root">
       <aside className="app-sidebar">
+        <div className="app-sidebar-brand">
+          <Logo size={24} to="/dashboard" />
+        </div>
         <nav>
           {NAV.map(({ to, label }) => (
             <Link

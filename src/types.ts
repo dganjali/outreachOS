@@ -18,6 +18,9 @@ export interface Profile {
   metrics: string | null;
   example_emails: string | null;
   writing_tone: string | null;
+  linkedin_data: Record<string, unknown> | null;
+  linkedin_enriched_at: string | null;
+  linkedin_source: 'apollo' | 'web_search' | null;
   onboarding_step: number;
   onboarding_completed_at: string | null;
   created_at: string;
@@ -39,6 +42,7 @@ export interface Mission {
 }
 
 export type TargetStatus = 'suggested' | 'approved' | 'rejected' | 'contacted';
+export type TargetSource = 'web_search' | 'apollo' | 'csv' | 'manual';
 
 export interface Target {
   id: string;
@@ -50,10 +54,17 @@ export interface Target {
   fit_reason: string | null;
   signal_type: string | null;
   status: TargetStatus;
+  source: TargetSource;
+  apollo_organization_id: string | null;
+  industry: string | null;
+  employee_count: number | null;
+  headquarters_location: string | null;
   created_at: string;
 }
 
 export type ContactStatus = 'suggested' | 'approved' | 'rejected' | 'contacted' | 'replied';
+export type ContactSource = 'web_search' | 'apollo' | 'csv' | 'manual';
+export type EmailStatus = 'verified' | 'likely' | 'guessed' | 'none';
 
 export interface Contact {
   id: string;
@@ -61,11 +72,17 @@ export interface Contact {
   name: string;
   role: string;
   email: string | null;
+  email_status: EmailStatus;
   linkedin_url: string | null;
   likely_email_pattern: string | null;
   confidence: number | null;
   reasoning: string | null;
   status: ContactStatus;
+  source: ContactSource;
+  apollo_person_id: string | null;
+  seniority: string | null;
+  headline: string | null;
+  location: string | null;
   created_at: string;
 }
 
@@ -166,7 +183,7 @@ export interface Reply {
   created_at: string;
 }
 
-export type AgentType = 'targeting' | 'contacts' | 'evidence' | 'sequence' | 'reply';
+export type AgentType = 'targeting' | 'contacts' | 'evidence' | 'sequence' | 'reply' | 'enrich_profile';
 export type RunStatus = 'running' | 'completed' | 'failed';
 
 export interface AgentRun {
