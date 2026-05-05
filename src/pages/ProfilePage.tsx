@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
+import { agents } from '../lib/api';
 import type { Profile } from '../types';
 
 export function ProfilePage() {
@@ -23,6 +24,8 @@ export function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [enriching, setEnriching] = useState(false);
+  const [enrichMessage, setEnrichMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (profile) {
@@ -79,6 +82,22 @@ export function ProfilePage() {
   const portfolioStr = Array.isArray(form.portfolio_links)
     ? form.portfolio_links.join('\n')
     : '';
+
+  async function handleEnrich() {
+    setEnrichMessage(null);
+    setEnriching(true);
+    try {
+      const r = await agents.enrichProfile();
+      await refreshProfile();
+      setEnrichMessage(
+        `Enriched from ${r.source === 'apollo' ? 'Apollo' : 'web search'}. Review and tweak below.`
+      );
+    } catch (err) {
+      setEnrichMessage(err instanceof Error ? err.message : 'Enrichment failed');
+    } finally {
+      setEnriching(false);
+    }
+  }
 
   return (
     <div className="profile-page">
@@ -158,6 +177,23 @@ export function ProfilePage() {
               />
             </div>
           </div>
+          <div className="profile-actions" style={{ marginTop: '0.75rem' }}>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={handleEnrich}
+              disabled={enriching || !form.linkedin_url}
+              title={!form.linkedin_url ? 'Add a LinkedIn URL first' : 'Auto-fill bio, proof points, and tone from your LinkedIn'}
+            >
+              {enriching ? 'Enriching…' : profile?.linkedin_enriched_at ? 'Re-enrich from LinkedIn' : 'Enrich from LinkedIn'}
+            </button>
+            {profile?.linkedin_enriched_at && (
+              <span className="profile-saved">
+                Last enriched {new Date(profile.linkedin_enriched_at).toLocaleDateString()}
+              </span>
+            )}
+          </div>
+          {enrichMessage && <p className="section-hint" style={{ marginTop: '0.5rem' }}>{enrichMessage}</p>}
           <div className="field">
             <label>Portfolio links (one per line)</label>
             <textarea

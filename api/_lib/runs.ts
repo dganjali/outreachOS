@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-export type AgentType = 'targeting' | 'contacts' | 'evidence' | 'sequence' | 'reply';
+export type AgentType = 'targeting' | 'contacts' | 'evidence' | 'sequence' | 'reply' | 'enrich_profile';
 export type RunStatus = 'running' | 'completed' | 'failed';
 
 export interface AgentRunRow {

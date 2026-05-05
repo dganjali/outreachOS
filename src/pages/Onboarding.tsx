@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
+import { agents } from '../lib/api';
 import type { Profile } from '../types';
 
 const TOTAL_STEPS = 5;
@@ -13,10 +14,12 @@ export function Onboarding() {
   const [direction, setDirection] = useState<'forward' | 'back'>('forward');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [enrichmentStatus, setEnrichmentStatus] = useState<string | null>(null);
 
   const [name, setName] = useState(profile?.name ?? '');
   const [occupation, setOccupation] = useState(profile?.role ?? '');
   const [resumeUrl, setResumeUrl] = useState(profile?.resume_url ?? '');
+  const [linkedinUrl, setLinkedinUrl] = useState(profile?.linkedin_url ?? '');
   const [emailTemplates, setEmailTemplates] = useState(profile?.example_emails ?? '');
 
   const navigate = useNavigate();
@@ -27,6 +30,7 @@ export function Onboarding() {
     setName(profile.name ?? '');
     setOccupation(profile.role ?? '');
     setResumeUrl(profile.resume_url ?? '');
+    setLinkedinUrl(profile.linkedin_url ?? '');
     setEmailTemplates(profile.example_emails ?? '');
   }, [profile?.id]);
 
@@ -85,6 +89,24 @@ export function Onboarding() {
         onboarding_completed_at: new Date().toISOString(),
       });
       await refreshProfile();
+
+      // If the user gave us a LinkedIn URL (or a LinkedIn link in the resume slot),
+      // enrich their profile in the background so the first mission they create has
+      // proof points + tone ready. Failures are non-blocking — they can also retry
+      // from the Profile page.
+      const hasLinkedin = /linkedin\.com/i.test(linkedinUrl) || /linkedin\.com/i.test(resumeUrl);
+      if (hasLinkedin) {
+        try {
+          setEnrichmentStatus('Enriching your profile from LinkedIn…');
+          await agents.enrichProfile();
+          await refreshProfile();
+          setEnrichmentStatus('Profile enriched.');
+        } catch (err) {
+          console.error('enrich_profile_failed', err);
+          setEnrichmentStatus(null);
+        }
+      }
+
       navigate('/dashboard', { replace: true });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
@@ -103,7 +125,7 @@ export function Onboarding() {
     1: "What's your name?",
     2: "Here's the email we have on file.",
     3: "What's your occupation?",
-    4: 'Add your resume (link) so we can personalize outreach.',
+    4: 'Drop your LinkedIn (and résumé, if you have one) so we can personalize outreach.',
     5: 'Templates of successful emails you’ve drafted (if any)',
   };
 
@@ -193,20 +215,33 @@ export function Onboarding() {
                   {stepQuestions[4]}
                 </p>
                 <div className="field">
-                  <label htmlFor="onboarding-resume">Resume or LinkedIn URL</label>
+                  <label htmlFor="onboarding-linkedin">LinkedIn URL</label>
+                  <input
+                    id="onboarding-linkedin"
+                    type="url"
+                    value={linkedinUrl}
+                    onChange={(e) => setLinkedinUrl(e.target.value)}
+                    placeholder="https://www.linkedin.com/in/..."
+                    autoFocus
+                  />
+                  <p className="section-hint">
+                    We use this to auto-fill your bio, proof points, and tone — so the first mission's emails sound like you.
+                  </p>
+                </div>
+                <div className="field">
+                  <label htmlFor="onboarding-resume">Résumé URL (optional)</label>
                   <input
                     id="onboarding-resume"
                     type="url"
                     value={resumeUrl}
                     onChange={(e) => setResumeUrl(e.target.value)}
                     placeholder="https://..."
-                    autoFocus
                   />
                 </div>
                 <div className="get-to-know-you-skip">
                   <button
                     type="button"
-                    onClick={() => saveAndNext({ resume_url: null }, 5)}
+                    onClick={() => saveAndNext({ linkedin_url: null, resume_url: null }, 5)}
                     disabled={saving}
                   >
                     Skip for now
@@ -285,7 +320,15 @@ export function Onboarding() {
               <button
                 type="button"
                 className="btn-primary"
-                onClick={() => saveAndNext({ resume_url: resumeUrl.trim() || null }, 5)}
+                onClick={() =>
+                  saveAndNext(
+                    {
+                      linkedin_url: linkedinUrl.trim() || null,
+                      resume_url: resumeUrl.trim() || null,
+                    },
+                    5
+                  )
+                }
                 disabled={saving}
               >
                 Next
@@ -305,6 +348,9 @@ export function Onboarding() {
         </div>
 
         {error && <p role="alert">{error}</p>}
+        {enrichmentStatus && (
+          <p className="section-hint" style={{ marginTop: '0.75rem' }}>{enrichmentStatus}</p>
+        )}
       </div>
     </div>
   );

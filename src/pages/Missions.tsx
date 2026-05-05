@@ -68,9 +68,13 @@ export function Missions() {
       {loading ? (
         <p style={{ color: 'var(--text-muted)', fontSize: '0.9375rem' }}>Loading…</p>
       ) : missions.length === 0 ? (
-        <div className="empty-card">
-          <p>No missions yet. Create one to define what you're sending and let the agent find targets.</p>
-          <Link to="/missions/new" className="dashboard-create">
+        <div className="empty-illo">
+          <div className="empty-illo-graphic" aria-hidden>🚀</div>
+          <h3>No missions yet</h3>
+          <p>
+            A mission is one outreach campaign — a mode (sponsorship, BD, sales…), an offer, and an audience. Create one and the agents take it from there.
+          </p>
+          <Link to="/missions/new" className="dashboard-create" style={{ marginTop: '1.25rem' }}>
             Create your first mission
           </Link>
         </div>

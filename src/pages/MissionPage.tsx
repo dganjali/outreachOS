@@ -145,6 +145,51 @@ export function MissionPage() {
     if (r) await loadSequencesForContact(contact.id);
   }
 
+  async function runFullPipeline() {
+    if (!mission) return;
+    setError(null);
+    setBusy('pipeline');
+    try {
+      // Step 1: targets, if we don't have any yet
+      let workingTargets = targets;
+      if (workingTargets.length === 0) {
+        const r = await agents.target(mission.id, 8);
+        workingTargets = (r.targets ?? []) as Target[];
+        await loadTargets();
+      }
+
+      // Step 2: for each of the top 5 by score, build evidence + contacts
+      const top = workingTargets
+        .slice()
+        .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+        .slice(0, 5);
+
+      for (const t of top) {
+        try {
+          await agents.evidence(t.id);
+          await loadEvidenceForTarget(t.id);
+          const cr = await agents.contacts(t.id);
+          await loadContactsForTarget(t.id);
+          // Step 3: draft a sequence for the top contact at this target
+          const topContact = (cr.contacts ?? [])
+            .slice()
+            .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))[0];
+          if (topContact) {
+            await agents.sequence(topContact.id);
+            await loadSequencesForContact(topContact.id);
+          }
+        } catch (err) {
+          console.error('pipeline_step_failed', t.id, err);
+          // Continue with next target rather than aborting the whole run.
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Pipeline failed');
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function setTargetStatus(target: Target, status: Target['status']) {
     await supabase.from('targets').update({ status }).eq('id', target.id);
     setTargets((ts) => ts.map((t) => (t.id === target.id ? { ...t, status } : t)));
@@ -181,11 +226,20 @@ export function MissionPage() {
           <CsvImport missionId={mission.id} onImported={loadTargets} />
           <button
             type="button"
-            className="btn-primary"
-            disabled={busy === 'targeting'}
+            className="btn-secondary"
+            disabled={busy === 'targeting' || busy === 'pipeline'}
             onClick={findTargets}
           >
             {busy === 'targeting' ? 'Researching…' : targets.length === 0 ? 'Find targets' : 'Find more targets'}
+          </button>
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={busy === 'pipeline'}
+            onClick={runFullPipeline}
+            title="Find targets, build evidence packs, find contacts, and draft initial emails — all in one click."
+          >
+            {busy === 'pipeline' ? 'Running pipeline…' : 'Run full pipeline'}
           </button>
         </div>
       </header>
@@ -210,8 +264,12 @@ export function MissionPage() {
       <section>
         <h2 style={{ marginBottom: '0.75rem' }}>Targets</h2>
         {targets.length === 0 ? (
-          <div className="empty-card">
-            <p>No targets yet. Click <strong>Find targets</strong> to have the agent research and rank companies based on your mission.</p>
+          <div className="empty-illo">
+            <div className="empty-illo-graphic" aria-hidden>🎯</div>
+            <h3>No targets yet</h3>
+            <p>
+              Click <strong>Run full pipeline</strong> to find targets, build evidence packs, find contacts, and draft initial emails — all in one go. Or use <strong>Find targets</strong> if you want to drive each step manually.
+            </p>
           </div>
         ) : (
           <div className="target-list">
@@ -238,6 +296,13 @@ export function MissionPage() {
                         </span>
                       )}
                       {t.signal_type && <span className="signal-pill">{t.signal_type}</span>}
+                      {t.source === 'apollo' && (
+                        <span className="signal-pill subtle" title="Sourced via Apollo">apollo</span>
+                      )}
+                      {t.industry && <span className="signal-pill subtle">{t.industry}</span>}
+                      {typeof t.employee_count === 'number' && (
+                        <span className="signal-pill subtle">{t.employee_count.toLocaleString()} ppl</span>
+                      )}
                     </div>
                     <div className="target-card-actions">
                       <select
@@ -262,14 +327,14 @@ export function MissionPage() {
                   {t.why_now && <p className="target-whynow"><strong>Why now:</strong> {t.why_now}</p>}
                   {t.fit_reason && <p className="target-fit">{t.fit_reason}</p>}
 
-                  <div className="target-actions">
+                  <div className="target-actions target-actions-grouped">
                     <button
                       type="button"
                       className="btn-secondary"
                       disabled={busy === `evidence:${t.id}`}
                       onClick={() => buildEvidence(t)}
                     >
-                      {busy === `evidence:${t.id}` ? 'Researching…' : pack ? 'Refresh evidence' : 'Build evidence pack'}
+                      {busy === `evidence:${t.id}` ? 'Researching…' : pack ? '↻ Refresh evidence' : '+ Evidence pack'}
                     </button>
                     <button
                       type="button"
@@ -277,13 +342,17 @@ export function MissionPage() {
                       disabled={busy === `contacts:${t.id}`}
                       onClick={() => findContacts(t)}
                     >
-                      {busy === `contacts:${t.id}` ? 'Searching…' : contacts.length > 0 ? 'Find more contacts' : 'Find contacts'}
+                      {busy === `contacts:${t.id}`
+                        ? 'Searching…'
+                        : contacts.length > 0
+                          ? `↻ Find more contacts (${contacts.length})`
+                          : '+ Find contacts'}
                     </button>
                   </div>
 
                   {pack && pack.bullets.length > 0 && (
-                    <div className="evidence-pack">
-                      <div className="evidence-pack-title">Evidence pack</div>
+                    <details className="evidence-pack-collapsible" open={contacts.length === 0}>
+                      <summary>Evidence pack ({pack.bullets.length} bullets)</summary>
                       <ol>
                         {pack.bullets.map((b, i) => (
                           <li key={i}>
@@ -304,7 +373,7 @@ export function MissionPage() {
                           </li>
                         ))}
                       </ol>
-                    </div>
+                    </details>
                   )}
 
                   {contacts.length > 0 && (
@@ -322,6 +391,9 @@ export function MissionPage() {
                                   <span className="confidence" title="Confidence">
                                     {Math.round(c.confidence * 100)}%
                                   </span>
+                                )}
+                                {c.source === 'apollo' && (
+                                  <span className="signal-pill subtle" title="Sourced via Apollo">apollo</span>
                                 )}
                               </div>
                               <div className="contact-row-actions">
@@ -341,10 +413,16 @@ export function MissionPage() {
                                 </button>
                               </div>
                             </div>
-                            {c.email && <div className="contact-email">{c.email}</div>}
+                            {c.email && (
+                              <div className="contact-email">
+                                {c.email}{' '}
+                                <EmailStatusPill status={c.email_status} />
+                              </div>
+                            )}
                             {!c.email && c.likely_email_pattern && (
                               <div className="contact-email muted">Pattern: {c.likely_email_pattern}</div>
                             )}
+                            {c.headline && <div className="contact-reason muted">{c.headline}</div>}
                             {c.reasoning && <div className="contact-reason">{c.reasoning}</div>}
 
                             {seq && <SequenceCard sequence={seq} contact={c} />}
@@ -476,6 +554,17 @@ function SequenceCard({ sequence, contact }: { sequence: EmailSequence; contact:
         </div>
       )}
     </div>
+  );
+}
+
+function EmailStatusPill({ status }: { status: Contact['email_status'] }) {
+  if (!status || status === 'none') return null;
+  const label = status === 'verified' ? 'verified' : status === 'likely' ? 'likely' : 'guessed';
+  const tone = status === 'verified' ? 'verified' : status === 'likely' ? 'likely' : 'guessed';
+  return (
+    <span className={`email-status email-status-${tone}`} title={`Email status: ${label}`}>
+      {label}
+    </span>
   );
 }
 

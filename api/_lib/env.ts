@@ -9,4 +9,5 @@ export const env = {
   SUPABASE_URL: () => required('SUPABASE_URL'),
   SUPABASE_SERVICE_ROLE_KEY: () => required('SUPABASE_SERVICE_ROLE_KEY'),
   ANTHROPIC_MODEL: () => process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5',
+  APOLLO_API_KEY: () => process.env.APOLLO_API_KEY || null,
 };

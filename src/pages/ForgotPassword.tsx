@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
+import { AuthShell } from '../components/AuthShell';
 
 export function ForgotPassword() {
   const [email, setEmail] = useState('');
@@ -25,58 +26,42 @@ export function ForgotPassword() {
 
   if (sent) {
     return (
-      <div className="auth-page">
-        <div className="auth-card">
-          <div className="auth-card-header">
-            <span className="auth-card-brand">OutreachOS</span>
-            <h1>Check your email</h1>
-          </div>
-          <div className="auth-card-body">
-            <p className="auth-card-message">
-              We sent a password reset link to <strong>{email}</strong>.
-            </p>
-          </div>
-          <div className="auth-card-footer">
-            <p className="links">
-              <Link to="/sign-in">Back to sign in</Link>
-            </p>
-          </div>
-        </div>
-      </div>
+      <AuthShell
+        title="Check your email"
+        subtitle={<>We sent a password reset link to <strong>{email}</strong>.</>}
+        footer={<Link to="/sign-in">Back to sign in</Link>}
+      >
+        <p className="auth-info">
+          Didn’t arrive? Check spam, or try again in a minute.
+        </p>
+      </AuthShell>
     );
   }
 
   return (
-    <div className="auth-page">
-      <div className="auth-card">
-        <div className="auth-card-header">
-          <span className="auth-card-brand">OutreachOS</span>
-          <h1>Forgot password</h1>
+    <AuthShell
+      title="Reset your password"
+      subtitle="We’ll email you a secure reset link."
+      footer={<Link to="/sign-in">Back to sign in</Link>}
+    >
+      <form onSubmit={handleSubmit} noValidate>
+        <div className="field">
+          <label htmlFor="forgot-email">Email</label>
+          <input
+            id="forgot-email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            autoComplete="email"
+            placeholder="you@example.com"
+          />
         </div>
-        <form onSubmit={handleSubmit}>
-          <div className="field">
-            <label htmlFor="forgot-email">Email</label>
-            <input
-              id="forgot-email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              autoComplete="email"
-              placeholder="you@example.com"
-            />
-          </div>
-          <button type="submit" className="btn-primary" disabled={loading}>
-            {loading ? 'Sending…' : 'Send reset link'}
-          </button>
-        </form>
-        <div className="auth-card-footer">
-          <p className="links">
-            <Link to="/sign-in">Back to sign in</Link>
-          </p>
-        </div>
-        {error && <p role="alert">{error}</p>}
-      </div>
-    </div>
+        <button type="submit" className="btn-primary" disabled={loading}>
+          {loading ? 'Sending…' : 'Send reset link'}
+        </button>
+      </form>
+      {error && <p role="alert" className="auth-alert">{error}</p>}
+    </AuthShell>
   );
 }

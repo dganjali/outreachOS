@@ -1,15 +1,18 @@
 # OutreachOS
 
-Agent-powered cold outreach. Vendor-neutral: just an LLM API key + Supabase. No Apollo / RocketReach / etc.
+Agent-powered cold outreach. Vendor-neutral by default — just an LLM API key + Supabase + Gmail. Optional **Apollo.io** integration upgrades target hunting, contact discovery, and sender personalization when you add a single env var.
 
 ## What it does
 
 End-to-end agent pipeline per mission:
 
-1. **Targeting Agent** — researches the web for high-fit target organizations with "why now" signals.
-2. **Contact Graph Agent** — finds 2–4 likely decision-makers per target with confidence scores.
+1. **Targeting Agent** — pulls high-fit organizations. With `APOLLO_API_KEY`, it derives Apollo filters from the mission, fetches a candidate pool, and re-ranks with web_search "why now" signals. Without Apollo, it runs pure web_search.
+2. **Contact Graph Agent** — finds 2–4 decision-makers per target. With Apollo, contacts come back with verified emails + LinkedIn URLs + seniority. Without Apollo, it falls back to web_search and likely-email patterns.
 3. **Evidence Agent** — builds a 4–6 bullet sourced evidence pack per target.
-4. **Sequence Agent** — drafts a mode-aware initial email + 2 follow-ups, anchored in evidence.
+4. **Sequence Agent** — drafts a mode-aware initial email + 2 follow-ups, anchored in evidence and the sender's enriched profile.
+5. **Profile Enrichment Agent** — reads the sender's LinkedIn URL during onboarding (or on demand from the Profile page) and auto-fills bio, proof points, achievements, metrics, and tone for personalization.
+
+Click **Run full pipeline** on a mission to fire steps 1–4 sequentially for the top 5 targets.
 
 Modes: `sponsorship`, `bd`, `internship`, `recruiting`, `sales` — each shifts the system prompt to surface the right angles.
 
@@ -44,6 +47,7 @@ vercel dev                    # frontend + /api/* serverless on :3000
 | `GOOGLE_CLIENT_ID` | server | Gmail OAuth client ID |
 | `GOOGLE_CLIENT_SECRET` | server | Gmail OAuth client secret |
 | `CRON_SECRET` | server | shared secret Vercel Cron sends as Bearer; protects `/api/cron/*` |
+| `APOLLO_API_KEY` | server (optional) | Apollo.io API key. When set, target search and contact discovery use Apollo first (verified emails, firmographics) and fall back to web search if Apollo returns nothing. |
 
 ## Database
 
@@ -52,6 +56,17 @@ Run in the Supabase SQL editor in this order:
 1. `supabase/schema.sql` — base tables + RLS
 2. `supabase/migrations/002_agent_layer.sql` — mode, scoring, evidence_packs, email_sequences, agent_runs
 3. `supabase/migrations/003_gmail_integration.sql` — user_integrations, sent_messages, replies extensions
+4. `supabase/migrations/004_apollo_personalization.sql` — Apollo identifiers on targets/contacts, email status, LinkedIn enrichment cache on profiles
+
+## Apollo.io setup (optional)
+
+Apollo turns vague mission descriptions into a real list of orgs + verified contacts in one shot. Without it, the agents fall back to web_search and likely-email patterns.
+
+1. Sign up at https://app.apollo.io and grab an API key from **Settings → Integrations → API**.
+2. Set `APOLLO_API_KEY` in Vercel project env vars (and locally in `.env.local` for `vercel dev`).
+3. That's it — the next time you click **Find targets** or **Find contacts** the agent will use Apollo. UI shows an `apollo` pill on sourced rows and an `email-status` badge (`verified` / `likely` / `guessed`) on contacts.
+
+Apollo cost / rate notes: each `Find targets` run hits `/mixed_companies/search` once; each `Find contacts` hits `/mixed_people/search` once per target; each profile enrichment hits `/people/match` once. Plan accordingly against your Apollo quota.
 
 ## Google Cloud setup (Gmail OAuth)
 
@@ -83,16 +98,18 @@ Run in the Supabase SQL editor in this order:
 api/
   _lib/
     anthropic.ts      Anthropic client + JSON extraction
+    apollo.ts         Optional Apollo.io client (active when APOLLO_API_KEY is set)
     supabase.ts       Service-role client
     auth.ts           JWT verification
     prompts.ts        Mode-aware system prompts + angles
     runs.ts           agent_runs lifecycle helpers
     env.ts            Lazy env var access
   agents/
-    target.ts         POST /api/agents/target
-    contacts.ts       POST /api/agents/contacts
-    evidence.ts       POST /api/agents/evidence
-    sequence.ts       POST /api/agents/sequence
+    target.ts         POST /api/agents/target          (Apollo + web_search hybrid)
+    contacts.ts      POST /api/agents/contacts        (Apollo + web_search hybrid)
+    evidence.ts      POST /api/agents/evidence
+    sequence.ts      POST /api/agents/sequence
+    enrich-profile.ts POST /api/agents/enrich-profile  (LinkedIn → sender bio/proof/tone)
 
 src/
   lib/api.ts          Frontend client (auto-attaches Supabase JWT)
@@ -109,6 +126,13 @@ src/
 - Vercel Cron (`*/10 * * * *`) polls connected mailboxes for replies → writes to `replies`.
 - Reply Router agent classifies replies (interested / not_now / wrong_person / etc.) and drafts a suggested response.
 - `Inbox` page lists replies, classifications, and lets you re-classify on demand.
+
+## Apollo + LinkedIn personalization (shipped)
+
+- `APOLLO_API_KEY` toggles Apollo for both targeting (`/mixed_companies/search`) and contact discovery (`/mixed_people/search`). Falls back to web_search when unset, when Apollo errors, or when filters return nothing.
+- Onboarding step 4 captures a LinkedIn URL; on finish the **Profile Enrichment Agent** auto-fills bio, proof points, achievements, metrics, and tone — used by the Sequence Agent for personalization. The Profile page exposes a manual **Enrich from LinkedIn** button.
+- **Run full pipeline** button on each mission orchestrates target → evidence → contacts → sequence client-side for the top 5 targets, so a fresh mission goes from blank to ready-to-review drafts in one click.
+- UI surfaces an `apollo` pill on Apollo-sourced rows, an `email-status` badge (`verified` / `likely` / `guessed`) on contacts, and firmographic chips (industry, employee count) on targets.
 
 ## What's not in MVP yet
 
