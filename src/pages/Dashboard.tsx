@@ -112,7 +112,7 @@ export function Dashboard() {
       setLoading(false);
     }
 
-    load();
+    load().catch(() => setLoading(false));
     return () => {
       cancelled = true;
     };

@@ -13,8 +13,8 @@ import {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const cronSecret = process.env.CRON_SECRET;
   const auth = req.headers.authorization;
-  if (cronSecret) {
-    if (auth !== `Bearer ${cronSecret}`) return res.status(401).json({ error: 'unauthorized' });
+  if (!cronSecret || auth !== `Bearer ${cronSecret}`) {
+    return res.status(401).json({ error: 'unauthorized' });
   }
 
   const db = adminClient();

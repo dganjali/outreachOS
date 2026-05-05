@@ -3,7 +3,7 @@ import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { adminClient } from '../_lib/supabase';
 import { anthropic, MODEL, WEB_SEARCH_TOOL, extractJson } from '../_lib/anthropic';
 import { EVIDENCE_SYSTEM, type MissionMode } from '../_lib/prompts';
-import { startRun, completeRun, failRun } from '../_lib/runs';
+import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
 
 interface EvidenceBullet {
   fact: string;
@@ -17,6 +17,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return methodNotAllowed(res, ['POST']);
   const user = await requireUser(req, res);
   if (!user) return;
+
+  if (!await checkRateLimit(adminClient(), res, user.id)) return;
 
   const { target_id } = (req.body ?? {}) as { target_id?: string };
   if (!target_id) return res.status(400).json({ error: 'missing_target_id' });

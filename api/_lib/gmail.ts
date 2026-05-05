@@ -177,7 +177,8 @@ function buildRfc2822({
   ];
   if (inReplyTo) headers.push(`In-Reply-To: ${inReplyTo}`);
   if (references) headers.push(`References: ${references}`);
-  return `${headers.join('\r\n')}\r\n\r\n${body.replace(/\r?\n/g, '\r\n')}`;
+  const footer = '\r\n\r\n--\r\nTo stop receiving these emails, reply with "UNSUBSCRIBE" in the subject line.';
+  return `${headers.join('\r\n')}\r\n\r\n${body.replace(/\r?\n/g, '\r\n')}${footer}`;
 }
 
 function quoteIfNeeded(s: string): string {
@@ -215,8 +216,8 @@ export async function createDraft(args: SendArgs): Promise<{ draftId: string; me
     }),
   });
   if (!r.ok) throw new Error(`create_draft_failed: ${await r.text()}`);
-  const j = (await r.json()) as { id: string; message: { id: string; threadId: string } };
-  return { draftId: j.id, messageId: j.message.id, threadId: j.message.threadId };
+  const j = (await r.json()) as { id: string; message: { id: string; threadId: string | null } };
+  return { draftId: j.id, messageId: j.message.id, threadId: j.message.threadId ?? '' };
 }
 
 export async function sendNow(args: SendArgs): Promise<{ messageId: string; threadId: string }> {
