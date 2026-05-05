@@ -101,17 +101,6 @@ export function Missions() {
           <Link to="/missions/new" className="dashboard-create" style={{ marginTop: '1.25rem' }}>
             Create your first mission
           </Link>
-        <div className="empty-card">
-          <p>
-            {showArchived
-              ? 'No archived missions.'
-              : "No missions yet. Create one to define what you're sending and let the agent find targets."}
-          </p>
-          {!showArchived && (
-            <Link to="/missions/new" className="dashboard-create">
-              Create your first mission
-            </Link>
-          )}
         </div>
       ) : (
         <div className="mission-cards">
