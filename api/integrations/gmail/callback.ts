@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { adminClient } from '../../_lib/supabase';
-import { exchangeCode, fetchGoogleUserEmail } from '../../_lib/gmail';
+import { exchangeCode, fetchGoogleUserEmail, GMAIL_SCOPES } from '../../_lib/gmail';
 import { encrypt, decrypt } from '../../_lib/crypto';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -30,6 +30,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const tokens = await exchangeCode(code, state.redirect);
+
+    const grantedScopes = new Set(tokens.scope.split(' '));
+    const requiredScopes = GMAIL_SCOPES.filter((s) => s !== 'openid');
+    const missing = requiredScopes.filter((s) => !grantedScopes.has(s));
+    if (missing.length > 0) {
+      return redirectBack(res, `error=${encodeURIComponent('missing_scopes')}`);
+    }
+
     const email = await fetchGoogleUserEmail(tokens.access_token);
     const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
 

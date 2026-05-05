@@ -4,7 +4,6 @@ import { adminClient } from './supabase';
 export interface AuthedUser {
   id: string;
   email: string | null;
-  accessToken: string;
 }
 
 export async function requireUser(
@@ -23,7 +22,7 @@ export async function requireUser(
     res.status(401).json({ error: 'invalid_token' });
     return null;
   }
-  return { id: data.user.id, email: data.user.email ?? null, accessToken: token };
+  return { id: data.user.id, email: data.user.email ?? null };
 }
 
 export function methodNotAllowed(res: VercelResponse, allow: string[]) {

@@ -3,7 +3,7 @@ import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { adminClient } from '../_lib/supabase';
 import { anthropic, MODEL, extractJson } from '../_lib/anthropic';
 import { sequenceSystem, type MissionMode } from '../_lib/prompts';
-import { startRun, completeRun, failRun } from '../_lib/runs';
+import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
 
 interface SequenceOutput {
   primary_angle: string;
@@ -16,6 +16,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return methodNotAllowed(res, ['POST']);
   const user = await requireUser(req, res);
   if (!user) return;
+
+  if (!await checkRateLimit(adminClient(), res, user.id)) return;
 
   const { contact_id } = (req.body ?? {}) as { contact_id?: string };
   if (!contact_id) return res.status(400).json({ error: 'missing_contact_id' });

@@ -1,4 +1,43 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { VercelResponse } from '@vercel/node';
+
+const RATE_PER_MINUTE = 5;
+const RATE_PER_DAY = 50;
+
+export async function checkRateLimit(
+  client: SupabaseClient,
+  res: VercelResponse,
+  userId: string
+): Promise<boolean> {
+  const now = Date.now();
+  const minuteAgo = new Date(now - 60_000).toISOString();
+  const dayAgo = new Date(now - 86_400_000).toISOString();
+
+  const [{ count: perMinute }, { count: perDay }] = await Promise.all([
+    client
+      .from('agent_runs')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .gte('started_at', minuteAgo)
+      .then((r) => ({ count: r.count ?? 0 })),
+    client
+      .from('agent_runs')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .gte('started_at', dayAgo)
+      .then((r) => ({ count: r.count ?? 0 })),
+  ]);
+
+  if (perMinute >= RATE_PER_MINUTE) {
+    res.status(429).json({ error: 'rate_limit_exceeded', detail: 'Too many requests — wait a minute and retry.' });
+    return false;
+  }
+  if (perDay >= RATE_PER_DAY) {
+    res.status(429).json({ error: 'rate_limit_exceeded', detail: 'Daily agent run limit reached.' });
+    return false;
+  }
+  return true;
+}
 
 export type AgentType = 'targeting' | 'contacts' | 'evidence' | 'sequence' | 'reply';
 export type RunStatus = 'running' | 'completed' | 'failed';
