@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import type { MissionMode } from '../types';
@@ -15,6 +15,8 @@ const MODES: Array<{ value: MissionMode; label: string; hint: string }> = [
 export function MissionNew() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const isWelcome = params.get('welcome') === '1';
   const [name, setName] = useState('');
   const [mode, setMode] = useState<MissionMode>('sponsorship');
   const [whatSending, setWhatSending] = useState('');
@@ -51,9 +53,11 @@ export function MissionNew() {
       <Link to="/missions" className="mission-detail-back">
         ← Missions
       </Link>
-      <h1>Create Mission</h1>
+      <h1>{isWelcome ? 'Create your first mission' : 'Create Mission'}</h1>
       <p style={{ margin: '0 0 1.5rem', fontSize: '0.9375rem', color: 'var(--text-muted)' }}>
-        Pick a mode, define what you're sending, and describe who you want to reach. The agent will do the rest.
+        {isWelcome
+          ? "You're all set. A mission tells the agent who you're trying to reach and what you're offering — fill it in and we'll find targets, contacts, and draft emails for you."
+          : "Pick a mode, define what you're sending, and describe who you want to reach. The agent will do the rest."}
       </p>
 
       <form onSubmit={handleSubmit} className="mission-form">

@@ -10,4 +10,8 @@ export const env = {
   SUPABASE_SERVICE_ROLE_KEY: () => required('SUPABASE_SERVICE_ROLE_KEY'),
   ANTHROPIC_MODEL: () => process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5',
   APOLLO_API_KEY: () => process.env.APOLLO_API_KEY || null,
+  ENCRYPTION_KEY: () => required('ENCRYPTION_KEY'),
+  CRON_SECRET: () => process.env.CRON_SECRET || '',
+  GOOGLE_CLIENT_ID: () => required('GOOGLE_CLIENT_ID'),
+  GOOGLE_CLIENT_SECRET: () => required('GOOGLE_CLIENT_SECRET'),
 };

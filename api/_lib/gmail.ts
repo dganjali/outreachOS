@@ -1,5 +1,6 @@
 import { adminClient } from './supabase';
 import { encrypt, decrypt } from './crypto';
+import { env } from './env';
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1';
@@ -14,7 +15,7 @@ export const GMAIL_SCOPES = [
 ];
 
 export function authUrl(state: string, redirectUri: string): string {
-  const clientId = required('GOOGLE_CLIENT_ID');
+  const clientId = env.GOOGLE_CLIENT_ID();
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
@@ -32,8 +33,8 @@ export async function exchangeCode(
   code: string,
   redirectUri: string
 ): Promise<{ access_token: string; refresh_token: string; expires_in: number; scope: string }> {
-  const clientId = required('GOOGLE_CLIENT_ID');
-  const clientSecret = required('GOOGLE_CLIENT_SECRET');
+  const clientId = env.GOOGLE_CLIENT_ID();
+  const clientSecret = env.GOOGLE_CLIENT_SECRET();
   const r = await fetch(TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -50,8 +51,8 @@ export async function exchangeCode(
 }
 
 export async function refreshAccessToken(refreshToken: string): Promise<{ access_token: string; expires_in: number }> {
-  const clientId = required('GOOGLE_CLIENT_ID');
-  const clientSecret = required('GOOGLE_CLIENT_SECRET');
+  const clientId = env.GOOGLE_CLIENT_ID();
+  const clientSecret = env.GOOGLE_CLIENT_SECRET();
   const r = await fetch(TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -141,12 +142,6 @@ export async function getActiveAccessToken(userId: string): Promise<{ accessToke
   }
 }
 
-function required(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing required env var: ${name}`);
-  return v;
-}
-
 // === Gmail API operations ===
 
 function buildRfc2822({
@@ -177,7 +172,8 @@ function buildRfc2822({
   ];
   if (inReplyTo) headers.push(`In-Reply-To: ${inReplyTo}`);
   if (references) headers.push(`References: ${references}`);
-  return `${headers.join('\r\n')}\r\n\r\n${body.replace(/\r?\n/g, '\r\n')}`;
+  const footer = '\r\n\r\n--\r\nTo stop receiving these emails, reply with "UNSUBSCRIBE" in the subject line.';
+  return `${headers.join('\r\n')}\r\n\r\n${body.replace(/\r?\n/g, '\r\n')}${footer}`;
 }
 
 function quoteIfNeeded(s: string): string {
@@ -215,8 +211,8 @@ export async function createDraft(args: SendArgs): Promise<{ draftId: string; me
     }),
   });
   if (!r.ok) throw new Error(`create_draft_failed: ${await r.text()}`);
-  const j = (await r.json()) as { id: string; message: { id: string; threadId: string } };
-  return { draftId: j.id, messageId: j.message.id, threadId: j.message.threadId };
+  const j = (await r.json()) as { id: string; message: { id: string; threadId: string | null } };
+  return { draftId: j.id, messageId: j.message.id, threadId: j.message.threadId ?? '' };
 }
 
 export async function sendNow(args: SendArgs): Promise<{ messageId: string; threadId: string }> {

@@ -56,17 +56,7 @@ Run in the Supabase SQL editor in this order:
 1. `supabase/schema.sql` — base tables + RLS
 2. `supabase/migrations/002_agent_layer.sql` — mode, scoring, evidence_packs, email_sequences, agent_runs
 3. `supabase/migrations/003_gmail_integration.sql` — user_integrations, sent_messages, replies extensions
-4. `supabase/migrations/004_apollo_personalization.sql` — Apollo identifiers on targets/contacts, email status, LinkedIn enrichment cache on profiles
-
-## Apollo.io setup (optional)
-
-Apollo turns vague mission descriptions into a real list of orgs + verified contacts in one shot. Without it, the agents fall back to web_search and likely-email patterns.
-
-1. Sign up at https://app.apollo.io and grab an API key from **Settings → Integrations → API**.
-2. Set `APOLLO_API_KEY` in Vercel project env vars (and locally in `.env.local` for `vercel dev`).
-3. That's it — the next time you click **Find targets** or **Find contacts** the agent will use Apollo. UI shows an `apollo` pill on sourced rows and an `email-status` badge (`verified` / `likely` / `guessed`) on contacts.
-
-Apollo cost / rate notes: each `Find targets` run hits `/mixed_companies/search` once; each `Find contacts` hits `/mixed_people/search` once per target; each profile enrichment hits `/people/match` once. Plan accordingly against your Apollo quota.
+4. `supabase/migrations/004_cleanup.sql` — drops dead `emails` table, tightens replies RLS, adds `missions.archived_at`
 
 ## Google Cloud setup (Gmail OAuth)
 

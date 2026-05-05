@@ -36,6 +36,7 @@ export interface Mission {
   mode: MissionMode;
   offer_details: string | null;
   status: string;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 }

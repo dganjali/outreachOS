@@ -1,9 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { adminClient } from '../_lib/supabase';
-import { anthropic, MODEL, extractJson } from '../_lib/anthropic';
+import { createMessageWithRetry, MODEL, extractJson } from '../_lib/anthropic';
 import { REPLY_ROUTER_SYSTEM } from '../_lib/prompts';
-import { startRun, completeRun, failRun } from '../_lib/runs';
+import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
 
 interface ReplyClassification {
   classification: string;
@@ -17,6 +17,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return methodNotAllowed(res, ['POST']);
   const user = await requireUser(req, res);
   if (!user) return;
+
+  if (!await checkRateLimit(adminClient(), res, user.id)) return;
 
   const { reply_id } = (req.body ?? {}) as { reply_id?: string };
   if (!reply_id) return res.status(400).json({ error: 'missing_reply_id' });
@@ -78,7 +80,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .join('\n');
 
   try {
-    const message = await anthropic().messages.create({
+    const message = await createMessageWithRetry({
       model: MODEL(),
       max_tokens: 1024,
       system: REPLY_ROUTER_SYSTEM,

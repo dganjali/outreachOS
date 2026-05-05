@@ -15,6 +15,9 @@ import {
   type ApolloOrganization,
   type OrgSearchFilters,
 } from '../_lib/apollo';
+import { createMessageWithRetry, MODEL, WEB_SEARCH_TOOL, extractJson } from '../_lib/anthropic';
+import { TARGETING_SYSTEM, type MissionMode } from '../_lib/prompts';
+import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
 
 interface TargetSuggestion {
   company_name: string;
@@ -29,6 +32,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return methodNotAllowed(res, ['POST']);
   const user = await requireUser(req, res);
   if (!user) return;
+
+  if (!await checkRateLimit(adminClient(), res, user.id)) return;
 
   const { mission_id, count } = (req.body ?? {}) as { mission_id?: string; count?: number };
   if (!mission_id) return res.status(400).json({ error: 'missing_mission_id' });
@@ -191,6 +196,13 @@ async function runApolloHybrid(args: {
     console.error('apollo_search_failed', err);
     return runWebSearchOnly(args);
   }
+    const message = await createMessageWithRetry({
+      model: MODEL(),
+      max_tokens: 4096,
+      system: TARGETING_SYSTEM,
+      tools: [WEB_SEARCH_TOOL],
+      messages: [{ role: 'user', content: userPrompt }],
+    });
 
   if (candidates.length === 0) {
     // Apollo returned nothing for these filters — fall back so the user still gets results.

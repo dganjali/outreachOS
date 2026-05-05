@@ -108,6 +108,7 @@ export function Onboarding() {
       }
 
       navigate('/dashboard', { replace: true });
+      navigate('/missions/new?welcome=1', { replace: true });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {

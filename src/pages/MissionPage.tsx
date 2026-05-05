@@ -2,15 +2,15 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
-import { agents, gmail } from '../lib/api';
+import { agents } from '../lib/api';
 import { CsvImport } from '../components/CsvImport';
+import { SequenceCard } from '../components/SequenceCard';
 import type {
   Mission,
   Target,
   Contact,
   EvidencePack,
   EmailSequence,
-  SentMessage,
 } from '../types';
 
 const MODE_LABEL: Record<string, string> = {
