@@ -8,13 +8,11 @@ export function SignUp() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
   const navigate = useNavigate();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    setMessage(null);
     setLoading(true);
     const { data, error: err } = await supabase.auth.signUp({ email, password });
     setLoading(false);
@@ -26,8 +24,7 @@ export function SignUp() {
       navigate('/onboarding', { replace: true });
       return;
     }
-    setMessage('Check your email to confirm your account, then sign in.');
-    navigate('/sign-in', { replace: true });
+    navigate('/check-email', { replace: true, state: { email } });
   }
 
   return (
@@ -71,7 +68,6 @@ export function SignUp() {
         </button>
       </form>
       {error && <p role="alert" className="auth-alert">{error}</p>}
-      {message && <p role="status" className="auth-info">{message}</p>}
     </AuthShell>
   );
 }

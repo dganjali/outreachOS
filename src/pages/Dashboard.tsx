@@ -39,10 +39,14 @@ export function Dashboard() {
   });
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     if (!user?.id) return;
     let cancelled = false;
+    setLoading(true);
+    setError(null);
 
     async function load() {
       const [
@@ -113,11 +117,15 @@ export function Dashboard() {
       setLoading(false);
     }
 
-    load().catch(() => setLoading(false));
+    load().catch((err) => {
+      if (cancelled) return;
+      setError(err instanceof Error ? err.message : 'Failed to load dashboard');
+      setLoading(false);
+    });
     return () => {
       cancelled = true;
     };
-  }, [user?.id]);
+  }, [user?.id, reloadKey]);
 
   const responseRate =
     stats.contacted > 0 ? Math.round((stats.replied / stats.contacted) * 100) : null;
@@ -137,6 +145,15 @@ export function Dashboard() {
           + Create Mission
         </Link>
       </header>
+
+      {error && (
+        <div className="error-banner" role="alert">
+          <span>{error}</span>
+          <button type="button" className="link-button" onClick={() => setReloadKey((k) => k + 1)}>
+            Retry
+          </button>
+        </div>
+      )}
 
       <div className="kpi-grid">
         <KPI label="Missions" value={stats.missions} />

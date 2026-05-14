@@ -26,33 +26,41 @@ export function Missions() {
   const { user } = useAuth();
   const [missions, setMissions] = useState<MissionWithCounts[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
 
   async function load(uid: string, includeArchived: boolean) {
-    let query = supabase
-      .from('missions')
-      .select('*')
-      .eq('user_id', uid)
-      .order('created_at', { ascending: false });
-    if (!includeArchived) query = query.is('archived_at', null);
-    const { data: ms } = await query;
-    const list = (ms ?? []) as Mission[];
-    const withCounts = await Promise.all(
-      list.map(async (m) => {
-        const [{ count: tc }, { count: dc }] = await Promise.all([
-          supabase.from('targets').select('id', { count: 'exact', head: true }).eq('mission_id', m.id),
-          supabase.from('email_sequences').select('id', { count: 'exact', head: true }).eq('mission_id', m.id),
-        ]);
-        return { ...m, target_count: tc ?? 0, draft_count: dc ?? 0 };
-      })
-    );
-    setMissions(withCounts);
-    setLoading(false);
+    setLoading(true);
+    setError(null);
+    try {
+      let query = supabase
+        .from('missions')
+        .select('*')
+        .eq('user_id', uid)
+        .order('created_at', { ascending: false });
+      if (!includeArchived) query = query.is('archived_at', null);
+      const { data: ms, error: qErr } = await query;
+      if (qErr) throw qErr;
+      const list = (ms ?? []) as Mission[];
+      const withCounts = await Promise.all(
+        list.map(async (m) => {
+          const [{ count: tc }, { count: dc }] = await Promise.all([
+            supabase.from('targets').select('id', { count: 'exact', head: true }).eq('mission_id', m.id),
+            supabase.from('email_sequences').select('id', { count: 'exact', head: true }).eq('mission_id', m.id),
+          ]);
+          return { ...m, target_count: tc ?? 0, draft_count: dc ?? 0 };
+        })
+      );
+      setMissions(withCounts);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load missions');
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
     if (!user?.id) return;
-    setLoading(true);
     load(user.id, showArchived);
   }, [user?.id, showArchived]);
 
@@ -89,7 +97,14 @@ export function Missions() {
         </div>
       </header>
 
-      {loading ? (
+      {error ? (
+        <div className="error-banner" role="alert">
+          <span>{error}</span>
+          <button type="button" className="link-button" onClick={() => user?.id && load(user.id, showArchived)}>
+            Retry
+          </button>
+        </div>
+      ) : loading ? (
         <p style={{ color: 'var(--text-muted)', fontSize: '0.9375rem' }}>Loading…</p>
       ) : missions.length === 0 ? (
         <div className="empty-illo">

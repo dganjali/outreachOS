@@ -2,27 +2,47 @@ import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { AuthShell } from '../components/AuthShell';
+import { useToast } from '../context/ToastContext';
 
 export function SignIn() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [needsConfirm, setNeedsConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [resending, setResending] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+  const toast = useToast();
   const from = (location.state as { from?: { pathname: string } })?.from?.pathname ?? '/dashboard';
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setNeedsConfirm(false);
     setLoading(true);
     const { error: err } = await supabase.auth.signInWithPassword({ email, password });
     setLoading(false);
     if (err) {
-      setError(err.message);
+      if (/email not confirmed/i.test(err.message)) {
+        setNeedsConfirm(true);
+      } else {
+        setError(err.message);
+      }
       return;
     }
     navigate(from, { replace: true });
+  }
+
+  async function handleResend() {
+    setResending(true);
+    const { error: err } = await supabase.auth.resend({ type: 'signup', email });
+    setResending(false);
+    if (err) {
+      toast.error(err.message);
+      return;
+    }
+    toast.success('Verification email resent.');
   }
 
   return (
@@ -68,6 +88,20 @@ export function SignIn() {
         </button>
       </form>
       {error && <p role="alert" className="auth-alert">{error}</p>}
+      {needsConfirm && (
+        <div role="alert" className="auth-alert" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <span>Your email isn't verified yet. Check your inbox for the link, or resend it below.</span>
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={handleResend}
+            disabled={resending || !email}
+            style={{ alignSelf: 'flex-start' }}
+          >
+            {resending ? 'Resending…' : 'Resend verification email'}
+          </button>
+        </div>
+      )}
     </AuthShell>
   );
 }
