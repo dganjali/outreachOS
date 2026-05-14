@@ -1,5 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
+import { ToastProvider } from './context/ToastContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { PublicOnlyRoute } from './components/PublicOnlyRoute';
 import { OnboardingRoute } from './components/OnboardingRoute';
@@ -8,6 +9,7 @@ import { Landing } from './pages/Landing';
 import { SignIn } from './pages/SignIn';
 import { SignUp } from './pages/SignUp';
 import { ForgotPassword } from './pages/ForgotPassword';
+import { CheckEmail } from './pages/CheckEmail';
 import { Onboarding } from './pages/Onboarding';
 import { Dashboard } from './pages/Dashboard';
 import { Missions } from './pages/Missions';
@@ -21,6 +23,7 @@ function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
+        <ToastProvider>
         <Routes>
           <Route
             path="/"
@@ -54,6 +57,7 @@ function App() {
               </PublicOnlyRoute>
             }
           />
+          <Route path="/check-email" element={<CheckEmail />} />
           <Route
             path="/onboarding"
             element={
@@ -80,6 +84,7 @@ function App() {
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </ToastProvider>
       </AuthProvider>
     </BrowserRouter>
   );

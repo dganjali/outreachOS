@@ -1,4 +1,6 @@
-export type MissionMode = 'sponsorship' | 'bd' | 'internship' | 'recruiting' | 'sales';
+import type { MissionMode } from '../../shared/types';
+
+export type { MissionMode };
 
 export const MODE_LABEL: Record<MissionMode, string> = {
   sponsorship: 'Sponsorship Outreach',
