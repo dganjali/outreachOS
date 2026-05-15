@@ -63,6 +63,11 @@ export interface Integration {
   updated_at: string;
 }
 
+export interface ProfileRef {
+  field: 'bio' | 'proof_points' | 'achievements' | 'metrics' | 'writing_tone' | 'example_emails';
+  snippet: string;
+}
+
 export interface SentMessage {
   id: string;
   user_id: string;
@@ -80,6 +85,8 @@ export interface SentMessage {
   scheduled_send_at: string | null;
   sent_at: string | null;
   failed_reason: string | null;
+  profile_version_id: string | null;
+  profile_refs: ProfileRef[];
   created_at: string;
 }
 
@@ -116,7 +123,62 @@ export interface Reply {
   created_at: string;
 }
 
-export type AgentType = 'targeting' | 'contacts' | 'evidence' | 'sequence' | 'reply' | 'enrich_profile';
+export type ProfileVersionSource = 'manual' | 'enrich' | 'coach' | 'import' | 'restore';
+
+export interface ProfileVersion {
+  id: string;
+  user_id: string;
+  snapshot: Record<string, unknown>;
+  source: ProfileVersionSource;
+  label: string | null;
+  created_at: string;
+}
+
+export type AgentType =
+  | 'targeting'
+  | 'contacts'
+  | 'evidence'
+  | 'sequence'
+  | 'reply'
+  | 'enrich_profile'
+  | 'coach'
+  | 'parse_resume';
+
+export type ProfileAssetKind = 'resume' | 'portfolio_pdf' | 'case_study' | 'screenshot';
+
+export interface ParsedResumeRole {
+  title: string;
+  organization: string;
+  start: string;
+  end: string;
+  summary: string;
+}
+
+export interface ParsedResumeFields {
+  headline?: string;
+  bio?: string;
+  proof_points?: string;
+  achievements?: string;
+  metrics?: string;
+  writing_tone?: string;
+  roles?: ParsedResumeRole[];
+}
+
+export interface ProfileAsset {
+  id: string;
+  user_id: string;
+  kind: ProfileAssetKind;
+  storage_path: string;
+  file_name: string;
+  file_size: number;
+  mime_type: string | null;
+  parsed_text: string | null;
+  parsed_fields: ParsedResumeFields | null;
+  parsed_at: string | null;
+  parse_error: string | null;
+  source_url: string | null;
+  created_at: string;
+}
 export type RunStatus = 'running' | 'completed' | 'failed';
 
 export interface AgentRun {

@@ -57,6 +57,11 @@ Run in the Supabase SQL editor in this order:
 2. `supabase/migrations/002_agent_layer.sql` — mode, scoring, evidence_packs, email_sequences, agent_runs
 3. `supabase/migrations/003_gmail_integration.sql` — user_integrations, sent_messages, replies extensions
 4. `supabase/migrations/004_cleanup.sql` — drops dead `emails` table, tightens replies RLS, adds `missions.archived_at`
+5. `supabase/migrations/004_apollo_personalization.sql` — Apollo IDs on targets/contacts, LinkedIn enrichment fields on profiles (only needed if you set `APOLLO_API_KEY`)
+6. `supabase/migrations/005_profile_versions.sql` — `profile_versions` table for the Me section's History tab
+7. `supabase/migrations/006_coach_agent.sql` — allows `'coach'` agent_type in `agent_runs` (Me section Coach drawer)
+8. `supabase/migrations/007_profile_assets.sql` — `profile_assets` table + private `profile-assets` Storage bucket with per-user folder policies (Me section uploads)
+9. `supabase/migrations/008_profile_outcomes.sql` — adds `profile_refs` + `profile_version_id` to `email_sequences` and `sent_messages` + `profile_version_outcomes` view (Me section outcome attribution)
 
 ## Google Cloud setup (Gmail OAuth)
 

@@ -5,11 +5,57 @@ import { createMessageWithRetry, MODEL, extractJson } from '../_lib/anthropic';
 import { sequenceSystem, type MissionMode } from '../_lib/prompts';
 import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
 
+type ProfileRefField =
+  | 'bio'
+  | 'proof_points'
+  | 'achievements'
+  | 'metrics'
+  | 'writing_tone'
+  | 'example_emails';
+
+interface ProfileRef {
+  field: ProfileRefField;
+  snippet: string;
+}
+
 interface SequenceOutput {
   primary_angle: string;
   anchored_bullets: number[];
+  profile_refs?: Record<string, ProfileRef[]>;
   initial: { subject: string; body: string };
   followups: Array<{ wait_days: number; subject: string; body: string }>;
+}
+
+const PROFILE_REF_FIELDS = new Set<ProfileRefField>([
+  'bio',
+  'proof_points',
+  'achievements',
+  'metrics',
+  'writing_tone',
+  'example_emails',
+]);
+
+function cleanProfileRefs(raw: unknown): Record<string, ProfileRef[]> {
+  if (!raw || typeof raw !== 'object') return {};
+  const out: Record<string, ProfileRef[]> = {};
+  for (const [touchKey, refs] of Object.entries(raw as Record<string, unknown>)) {
+    if (!Array.isArray(refs)) continue;
+    const cleaned: ProfileRef[] = [];
+    for (const r of refs) {
+      if (!r || typeof r !== 'object') continue;
+      const obj = r as Record<string, unknown>;
+      const field = obj.field;
+      const snippet = obj.snippet;
+      if (typeof field === 'string' && PROFILE_REF_FIELDS.has(field as ProfileRefField)) {
+        cleaned.push({
+          field: field as ProfileRefField,
+          snippet: typeof snippet === 'string' ? snippet.slice(0, 240) : '',
+        });
+      }
+    }
+    if (cleaned.length > 0) out[touchKey] = cleaned;
+  }
+  return out;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -125,6 +171,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const seq = parsed.data;
+    const profileRefs = cleanProfileRefs(seq.profile_refs);
+
+    // Stamp the profile_version active at draft time so outcomes can attribute back.
+    const { data: latestVersion } = await db
+      .from('profile_versions')
+      .select('id')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
     const { data: row, error: insErr } = await db
       .from('email_sequences')
       .insert({
@@ -138,6 +195,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         body: seq.initial.body,
         followups: seq.followups ?? [],
         status: 'draft',
+        profile_version_id: latestVersion?.id ?? null,
+        profile_refs: profileRefs,
       })
       .select('*')
       .single();

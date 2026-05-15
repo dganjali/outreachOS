@@ -8,6 +8,7 @@ import type {
   Integration,
   Profile,
   ReplyClassification,
+  ParsedResumeFields,
 } from '../types';
 
 async function authedFetch<T>(path: string, body: unknown, method: 'GET' | 'POST' = 'POST'): Promise<T> {
@@ -64,7 +65,28 @@ export const agents = {
       '/api/agents/enrich-profile',
       {}
     ),
+  coach: (field: CoachField, current_value: string) =>
+    authedFetch<{
+      run_id: string;
+      field: CoachField;
+      suggestions: Array<{ title: string; rewrite: string; why: string }>;
+      gaps: string[];
+      outcomes: { sent_count: number; reply_count: number; reply_rate: number };
+    }>('/api/agents/coach', { field, current_value }),
+  parseResume: (asset_id: string) =>
+    authedFetch<{ run_id: string; asset_id: string; parsed_fields: ParsedResumeFields }>(
+      '/api/agents/parse-resume',
+      { asset_id }
+    ),
 };
+
+export type CoachField =
+  | 'bio'
+  | 'proof_points'
+  | 'achievements'
+  | 'metrics'
+  | 'writing_tone'
+  | 'example_emails';
 
 export const gmail = {
   start: () =>
