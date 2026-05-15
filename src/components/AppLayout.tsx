@@ -7,7 +7,7 @@ const NAV = [
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/missions', label: 'Missions' },
   { to: '/inbox', label: 'Inbox' },
-  { to: '/profile', label: 'Profile' },
+  { to: '/me', label: 'Me' },
   { to: '/settings', label: 'Settings' },
 ];
 
@@ -63,8 +63,8 @@ export function AppLayout() {
                   aria-hidden
                 />
                 <div role="menu" className="app-user-dropdown">
-                  <Link to="/profile" onClick={() => setUserOpen(false)}>
-                    Profile
+                  <Link to="/me" onClick={() => setUserOpen(false)}>
+                    Me
                   </Link>
                   <Link to="/settings" onClick={() => setUserOpen(false)}>
                     Settings

@@ -81,6 +81,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(409).json({ error: 'already_sent', sent_message_id: existing.id });
   }
 
+  // Carry the profile_version + per-touch refs from the source sequence so this
+  // sent_messages row can be attributed back in the Me > History outcomes view.
+  const refsByTouch = (seq.profile_refs ?? {}) as Record<string, Array<{ field: string; snippet: string }>>;
+  const touchKey = touchIndex === 0 ? 'initial' : `followup_${touchIndex - 1}`;
+  const touchRefs = Array.isArray(refsByTouch[touchKey]) ? refsByTouch[touchKey] : [];
+
   const insertPayload = {
     user_id: user.id,
     sequence_id: sequenceId,
@@ -91,6 +97,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     body: bodyText,
     to_email: toEmail,
     status: 'queued' as const,
+    profile_version_id: (seq.profile_version_id as string | null) ?? null,
+    profile_refs: touchRefs,
   };
 
   const upsertRes = existing

@@ -39,7 +39,15 @@ export async function checkRateLimit(
   return true;
 }
 
-export type AgentType = 'targeting' | 'contacts' | 'evidence' | 'sequence' | 'reply' | 'enrich_profile';
+export type AgentType =
+  | 'targeting'
+  | 'contacts'
+  | 'evidence'
+  | 'sequence'
+  | 'reply'
+  | 'enrich_profile'
+  | 'coach'
+  | 'parse_resume';
 export type RunStatus = 'running' | 'completed' | 'failed';
 
 export interface AgentRunRow {
