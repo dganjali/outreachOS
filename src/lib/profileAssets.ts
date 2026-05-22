@@ -58,19 +58,24 @@ export async function uploadAsset(opts: {
   }
 
   const ext = safeExtension(file.name, file.type);
-  const path = `${userId}/${kind}/${randomSegment()}.${ext}`;
-  const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, file, {
+  // Path hint — the server will derive the real GCS path from `kind` (in this
+  // hint) and ignore the rest. We read the actual path back from upload().
+  const pathHint = `${userId}/${kind}/${randomSegment()}.${ext}`;
+  const { data: uploaded, error: upErr } = await supabase.storage.from(BUCKET).upload(pathHint, file, {
     contentType: file.type || 'application/octet-stream',
     upsert: false,
   });
-  if (upErr) throw new Error(upErr.message);
+  if (upErr || !uploaded) throw new Error(upErr?.message ?? 'upload_failed');
+
+  // Use the path the server actually stored at — not the client-side hint.
+  const storedPath = uploaded.path;
 
   const { data: row, error: insErr } = await supabase
     .from('profile_assets')
     .insert({
       user_id: userId,
       kind,
-      storage_path: path,
+      storage_path: storedPath,
       file_name: file.name.slice(0, 200),
       file_size: file.size,
       mime_type: file.type || null,
@@ -79,7 +84,7 @@ export async function uploadAsset(opts: {
     .single();
   if (insErr || !row) {
     // Best-effort cleanup of the orphaned object.
-    await supabase.storage.from(BUCKET).remove([path]).catch(() => undefined);
+    await supabase.storage.from(BUCKET).remove([storedPath]).catch(() => undefined);
     throw new Error(insErr?.message ?? 'asset_insert_failed');
   }
   return row as ProfileAsset;

@@ -14,6 +14,26 @@ import type {
   ParsedResumeFields,
 } from '../types';
 
+// Mongo stores docs in camelCase + `_id`; frontend types use snake_case + `id`.
+// Convert response payloads in place so agent endpoints look identical to data
+// queries that go through src/lib/db.ts.
+function snakeKey(k: string): string {
+  if (k === '_id' || k === 'id') return 'id';
+  return k.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+}
+
+function toFrontend(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(toFrontend);
+  if (v && typeof v === 'object' && !(v instanceof Date)) {
+    const out: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+      out[snakeKey(k)] = toFrontend(val);
+    }
+    return out;
+  }
+  return v;
+}
+
 async function authedFetch<T>(path: string, body: unknown, method: 'GET' | 'POST' = 'POST'): Promise<T> {
   const token = await currentIdToken();
   if (!token) throw new Error('Not signed in');
@@ -36,7 +56,7 @@ async function authedFetch<T>(path: string, body: unknown, method: 'GET' | 'POST
     const err = (payload as { error?: string; detail?: string; message?: string }) ?? {};
     throw new Error(err.detail || err.message || err.error || `HTTP ${res.status}`);
   }
-  return payload as T;
+  return toFrontend(payload) as T;
 }
 
 export const agents = {

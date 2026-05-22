@@ -53,7 +53,7 @@ export function Me() {
   const percent = score.total === 0 ? 0 : Math.round((score.filled / score.total) * 100);
 
   async function persistProfile(snapshot: ProfileSnapshot) {
-    if (!profile?.user_id) throw new Error('No profile');
+    if (!profile?.id) throw new Error('No profile');
     const { error: err } = await supabase
       .from('profiles')
       .update({
@@ -72,7 +72,7 @@ export function Me() {
         writing_tone: snapshot.writing_tone || null,
         updated_at: new Date().toISOString(),
       })
-      .eq('user_id', profile.user_id);
+      .eq('id', profile.id);
     if (err) throw new Error(err.message);
   }
 

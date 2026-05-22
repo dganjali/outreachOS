@@ -39,17 +39,16 @@ export function Onboarding() {
     const { data: existing } = await supabase
       .from('profiles')
       .select('id')
-      .eq('user_id', user.id)
+      .limit(1)
       .single();
 
     const row = {
-      user_id: user.id,
       updated_at: new Date().toISOString(),
       ...updates,
     };
 
-    if (existing) {
-      await supabase.from('profiles').update(row).eq('user_id', user.id);
+    if (existing?.id) {
+      await supabase.from('profiles').update(row).eq('id', existing.id);
     } else {
       await supabase.from('profiles').insert({
         ...row,
