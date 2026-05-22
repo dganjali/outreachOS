@@ -1,0 +1,13 @@
+node_modules
+dist
+dist-server
+.git
+.env
+.env.local
+src
+public
+index.html
+vite.config.ts
+*.md
+.claude
+supabase

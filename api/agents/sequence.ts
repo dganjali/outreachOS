@@ -1,9 +1,26 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
+// Sequence agent — writes the initial + follow-up emails.
+//
+// New (vs Supabase version):
+//   - Uses Atlas Vector Search to retrieve past sequences that got replies as
+//     exemplars for new generations. Falls back gracefully if vector index
+//     isn't ready.
+
+import type { Request, Response } from 'express';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
-import { adminClient } from '../_lib/supabase';
+import { adminDb, forUser, newId, type InsertDoc } from '../_lib/db';
 import { createMessageWithRetry, MODEL, extractJson } from '../_lib/anthropic';
 import { sequenceSystem, type MissionMode } from '../_lib/prompts';
 import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
+import { embedOne } from '../_lib/embeddings';
+import type {
+  ContactDoc,
+  EmailSequenceDoc,
+  EvidencePackDoc,
+  MissionDoc,
+  ProfileDoc,
+  ProfileVersionDoc,
+  TargetDoc,
+} from '../../shared/schemas';
 
 type ProfileRefField =
   | 'bio'
@@ -27,12 +44,7 @@ interface SequenceOutput {
 }
 
 const PROFILE_REF_FIELDS = new Set<ProfileRefField>([
-  'bio',
-  'proof_points',
-  'achievements',
-  'metrics',
-  'writing_tone',
-  'example_emails',
+  'bio', 'proof_points', 'achievements', 'metrics', 'writing_tone', 'example_emails',
 ]);
 
 function cleanProfileRefs(raw: unknown): Record<string, ProfileRef[]> {
@@ -58,62 +70,51 @@ function cleanProfileRefs(raw: unknown): Record<string, ProfileRef[]> {
   return out;
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: Request, res: Response) {
   if (req.method !== 'POST') return methodNotAllowed(res, ['POST']);
   const user = await requireUser(req, res);
   if (!user) return;
-
-  if (!await checkRateLimit(adminClient(), res, user.id)) return;
+  const scope = forUser(user.id);
+  if (!(await checkRateLimit(scope, res))) return;
 
   const { contact_id } = (req.body ?? {}) as { contact_id?: string };
   if (!contact_id) return res.status(400).json({ error: 'missing_contact_id' });
 
-  const db = adminClient();
-  const { data: contact, error: cErr } = await db
-    .from('contacts')
-    .select('*, targets!inner(*, missions!inner(*))')
-    .eq('id', contact_id)
-    .eq('targets.missions.user_id', user.id)
-    .single();
-  if (cErr || !contact) return res.status(404).json({ error: 'contact_not_found' });
+  const contact = await scope.collection<ContactDoc>('contacts').findById(contact_id);
+  if (!contact) return res.status(404).json({ error: 'contact_not_found' });
+  const target = await scope.collection<TargetDoc>('targets').findById(contact.targetId);
+  if (!target) return res.status(404).json({ error: 'target_not_found' });
+  const mission = await scope.collection<MissionDoc>('missions').findById(target.missionId);
+  if (!mission) return res.status(404).json({ error: 'mission_not_found' });
 
-  const target = contact.targets as { id: string; company_name: string; domain: string | null; why_now: string | null; fit_reason: string | null; missions: { id: string; name: string; goal: string; target_description: string; mode: MissionMode | null } };
-  const mission = target.missions;
+  const profile = await scope.collection<ProfileDoc>('profiles').findOne();
 
-  const { data: profile } = await db
-    .from('profiles')
-    .select('name, role, organization, bio, proof_points, achievements, metrics, writing_tone, example_emails, linkedin_url, linkedin_data')
-    .eq('user_id', user.id)
-    .single();
+  // Latest evidence pack for this target
+  const packs = await scope
+    .collection<EvidencePackDoc>('evidence_packs')
+    .find({ targetId: target._id });
+  packs.sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0));
+  const latestPack = packs[0] ?? null;
 
-  const { data: latestPack } = await db
-    .from('evidence_packs')
-    .select('*')
-    .eq('target_id', target.id)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  const bullets = (latestPack?.bullets as Array<{ fact: string; source_title?: string; source_url?: string; recency?: string }>) ?? [];
+  const bullets = latestPack?.bullets ?? [];
   if (bullets.length === 0) {
     return res.status(409).json({ error: 'no_evidence_pack', message: 'Generate an evidence pack first.' });
   }
 
-  const run = await startRun(db, {
-    user_id: user.id,
-    agent_type: 'sequence',
-    mission_id: mission.id,
-    target_id: target.id,
-    contact_id,
+  const run = await startRun(scope, {
+    agentType: 'sequence',
+    missionId: mission._id,
+    targetId: target._id,
+    contactId: contact_id,
   });
 
-  const mode = mission.mode ?? 'sales';
+  const mode = (mission.mode as MissionMode | null) ?? 'sales';
   const evidenceText = bullets
-    .map((b, i) => `[${i}] ${b.fact} — ${b.source_title ?? ''} (${b.recency ?? ''})`)
+    .map((b, i) => `[${i}] ${b.fact} — ${b.sourceTitle ?? ''} (${b.recency ?? ''})`)
     .join('\n');
 
-  const linkedinSummary = profile?.linkedin_data
-    ? summarizeLinkedinData(profile.linkedin_data as Record<string, unknown>)
+  const linkedinSummary = profile?.linkedinData
+    ? summarizeLinkedinData(profile.linkedinData as Record<string, unknown>)
     : '';
 
   const senderBlock = profile
@@ -122,34 +123,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         profile.role ? `Role: ${profile.role}` : '',
         profile.organization ? `Org: ${profile.organization}` : '',
         profile.bio ? `Bio: ${profile.bio}` : '',
-        profile.proof_points ? `Proof points: ${profile.proof_points}` : '',
+        profile.proofPoints ? `Proof points: ${profile.proofPoints}` : '',
         profile.achievements ? `Achievements: ${profile.achievements}` : '',
         profile.metrics ? `Metrics: ${profile.metrics}` : '',
-        profile.writing_tone ? `Preferred tone: ${profile.writing_tone}` : '',
-        profile.linkedin_url ? `LinkedIn: ${profile.linkedin_url}` : '',
+        profile.writingTone ? `Preferred tone: ${profile.writingTone}` : '',
+        profile.linkedinUrl ? `LinkedIn: ${profile.linkedinUrl}` : '',
         linkedinSummary ? `LinkedIn signal:\n${linkedinSummary}` : '',
       ]
         .filter(Boolean)
         .join('\n')
     : 'No sender profile provided.';
 
+  // Retrieve top-3 past sequences (from THIS user) that got replies, as exemplars.
+  const exemplars = await fetchReplyExemplars(scope.uid, mission.goal);
+
   const userPrompt = [
     `RECIPIENT`,
     `Name: ${contact.name}`,
     `Role: ${contact.role}`,
-    `Company: ${target.company_name}`,
+    `Company: ${target.companyName}`,
     '',
     `MISSION`,
     `Goal / what's being offered: ${mission.goal}`,
-    `Audience description: ${mission.target_description}`,
-    target.why_now ? `Why now (target): ${target.why_now}` : '',
+    `Audience description: ${mission.targetDescription}`,
+    target.whyNow ? `Why now (target): ${target.whyNow}` : '',
     '',
     `EVIDENCE PACK (use indices in anchored_bullets)`,
     evidenceText,
     '',
     `SENDER PROFILE`,
     senderBlock,
-    profile?.example_emails ? `\nSENDER EXAMPLE EMAILS (style reference, do not copy)\n${profile.example_emails}` : '',
+    profile?.exampleEmails ? `\nSENDER EXAMPLE EMAILS (style reference, do not copy)\n${profile.exampleEmails}` : '',
+    exemplars
+      ? `\nPAST EMAILS THAT GOT REPLIES (from your own outbox, retrieved by semantic similarity — emulate the tone/structure, NOT the specifics):\n${exemplars}`
+      : '',
     '',
     'Output JSON only.',
   ]
@@ -166,51 +173,85 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const parsed = extractJson<SequenceOutput>(message);
     if (!parsed.ok || !parsed.data?.initial) {
-      await failRun(db, run.id, 'parse_failed');
+      await failRun(scope, run._id, 'parse_failed');
       return res.status(502).json({ error: 'parse_failed', raw: parsed.raw.slice(0, 500) });
     }
 
     const seq = parsed.data;
     const profileRefs = cleanProfileRefs(seq.profile_refs);
 
-    // Stamp the profile_version active at draft time so outcomes can attribute back.
-    const { data: latestVersion } = await db
-      .from('profile_versions')
-      .select('id')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const versions = await scope.collection<ProfileVersionDoc>('profile_versions').find();
+    versions.sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0));
+    const latestVersion = versions[0] ?? null;
 
-    const { data: row, error: insErr } = await db
-      .from('email_sequences')
-      .insert({
-        contact_id,
-        target_id: target.id,
-        mission_id: mission.id,
-        evidence_pack_id: latestPack?.id ?? null,
-        primary_angle: seq.primary_angle,
-        anchored_bullets: seq.anchored_bullets ?? [],
-        subject: seq.initial.subject,
-        body: seq.initial.body,
-        followups: seq.followups ?? [],
-        status: 'draft',
-        profile_version_id: latestVersion?.id ?? null,
-        profile_refs: profileRefs,
-      })
-      .select('*')
-      .single();
-    if (insErr) {
-      await failRun(db, run.id, insErr.message);
-      return res.status(500).json({ error: 'insert_failed', detail: insErr.message });
+    let embedding: number[] | undefined;
+    try {
+      embedding = await embedOne(`${seq.initial.subject}\n\n${seq.initial.body}`, 'document');
+    } catch (err) {
+      console.warn('embed_sequence_failed', err);
     }
 
-    await completeRun(db, run.id, { sequence_id: row.id });
-    return res.status(200).json({ run_id: run.id, sequence: row });
+    const followups = (seq.followups ?? []).map((f) => ({
+      waitDays: f.wait_days,
+      subject: f.subject,
+      body: f.body,
+    }));
+
+    const row = await scope.collection<EmailSequenceDoc>('email_sequences').insertOne({
+      _id: newId(),
+      contactId: contact_id,
+      targetId: target._id,
+      missionId: mission._id,
+      evidencePackId: latestPack?._id ?? null,
+      primaryAngle: seq.primary_angle,
+      anchoredBullets: seq.anchored_bullets ?? [],
+      subject: seq.initial.subject,
+      body: seq.initial.body,
+      followups,
+      status: 'draft',
+      scheduledSendAt: null,
+      sentAt: null,
+      profileVersionId: latestVersion?._id ?? null,
+      // profileRefs is not a schema field but kept on the doc so the send agent
+      // can attribute back to coached fields. Stored as an extra prop.
+      ...({ profileRefs } as unknown as object),
+      ...(embedding ? { embedding } : {}),
+    } as InsertDoc<EmailSequenceDoc>);
+
+    await completeRun(scope, run._id, { sequence_id: row._id });
+    return res.status(200).json({ run_id: run._id, sequence: row });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'unknown_error';
-    await failRun(db, run.id, msg);
+    await failRun(scope, run._id, msg);
     return res.status(500).json({ error: 'agent_failed', detail: msg });
+  }
+}
+
+async function fetchReplyExemplars(uid: string, missionGoal: string): Promise<string | null> {
+  try {
+    const queryEmbedding = await embedOne(missionGoal, 'query');
+    const db = await adminDb();
+    const cursor = db.collection('email_sequences').aggregate([
+      {
+        $vectorSearch: {
+          index: 'sequence_vector_idx',
+          path: 'embedding',
+          queryVector: queryEmbedding,
+          numCandidates: 50,
+          limit: 3,
+          filter: { userId: uid, status: 'replied' },
+        },
+      },
+      { $project: { subject: 1, body: 1, primaryAngle: 1, score: { $meta: 'vectorSearchScore' } } },
+    ]);
+    const docs = await cursor.toArray();
+    if (docs.length === 0) return null;
+    return docs
+      .map((d, i) => `--- Exemplar ${i + 1} (angle: ${d.primaryAngle ?? '?'}) ---\nSubject: ${d.subject}\n\n${d.body}`)
+      .join('\n\n');
+  } catch (err) {
+    // Vector index not provisioned yet, or query failed — that's fine, exemplars are optional.
+    return null;
   }
 }
 

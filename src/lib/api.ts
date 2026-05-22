@@ -1,4 +1,7 @@
-import { supabase } from '../supabaseClient';
+// API client for our /api/agents/* + /api/gmail/* endpoints.
+// Updated to attach a Firebase ID token instead of a Supabase access token.
+
+import { currentIdToken } from '../firebaseClient';
 import type {
   Target,
   Contact,
@@ -12,13 +15,13 @@ import type {
 } from '../types';
 
 async function authedFetch<T>(path: string, body: unknown, method: 'GET' | 'POST' = 'POST'): Promise<T> {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.access_token) throw new Error('Not signed in');
+  const token = await currentIdToken();
+  if (!token) throw new Error('Not signed in');
   const res = await fetch(path, {
     method,
     headers: {
       ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}),
-      Authorization: `Bearer ${session.access_token}`,
+      Authorization: `Bearer ${token}`,
     },
     body: method === 'POST' ? JSON.stringify(body ?? {}) : undefined,
   });

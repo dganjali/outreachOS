@@ -1,9 +1,14 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
+// Evidence pack agent. Now also embeds the bullets so they're retrievable
+// via Atlas Vector Search downstream.
+
+import type { Request, Response } from 'express';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
-import { adminClient } from '../_lib/supabase';
+import { forUser, newId, type InsertDoc } from '../_lib/db';
 import { createMessageWithRetry, MODEL, WEB_SEARCH_TOOL, extractJson } from '../_lib/anthropic';
 import { EVIDENCE_SYSTEM, type MissionMode } from '../_lib/prompts';
 import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
+import { embedOne } from '../_lib/embeddings';
+import type { EvidencePackDoc, MissionDoc, TargetDoc } from '../../shared/schemas';
 
 interface EvidenceBullet {
   fact: string;
@@ -13,39 +18,32 @@ interface EvidenceBullet {
   recency: string;
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: Request, res: Response) {
   if (req.method !== 'POST') return methodNotAllowed(res, ['POST']);
   const user = await requireUser(req, res);
   if (!user) return;
-
-  if (!await checkRateLimit(adminClient(), res, user.id)) return;
+  const scope = forUser(user.id);
+  if (!(await checkRateLimit(scope, res))) return;
 
   const { target_id } = (req.body ?? {}) as { target_id?: string };
   if (!target_id) return res.status(400).json({ error: 'missing_target_id' });
 
-  const db = adminClient();
-  const { data: target, error: tErr } = await db
-    .from('targets')
-    .select('*, missions!inner(*)')
-    .eq('id', target_id)
-    .eq('missions.user_id', user.id)
-    .single();
-  if (tErr || !target) return res.status(404).json({ error: 'target_not_found' });
+  const target = await scope.collection<TargetDoc>('targets').findById(target_id);
+  if (!target) return res.status(404).json({ error: 'target_not_found' });
+  const mission = await scope.collection<MissionDoc>('missions').findById(target.missionId);
+  if (!mission) return res.status(404).json({ error: 'mission_not_found' });
 
-  const mission = target.missions as { id: string; mode: MissionMode | null; goal: string };
-
-  const run = await startRun(db, {
-    user_id: user.id,
-    agent_type: 'evidence',
-    mission_id: mission.id,
-    target_id,
+  const run = await startRun(scope, {
+    agentType: 'evidence',
+    missionId: mission._id,
+    targetId: target_id,
   });
 
   const userPrompt = [
-    `Target: ${target.company_name}${target.domain ? ` (${target.domain})` : ''}`,
+    `Target: ${target.companyName}${target.domain ? ` (${target.domain})` : ''}`,
     `Mode: ${mission.mode ?? 'sales'}`,
     `Sender's offer: ${mission.goal}`,
-    target.why_now ? `Existing why-now hint: ${target.why_now}` : '',
+    target.whyNow ? `Existing why-now hint: ${target.whyNow}` : '',
     '',
     'Build a 4-6 bullet evidence pack with sources. Use web_search. JSON only.',
   ]
@@ -63,31 +61,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const parsed = extractJson<{ bullets: EvidenceBullet[] }>(message);
     if (!parsed.ok || !parsed.data?.bullets) {
-      await failRun(db, run.id, 'parse_failed');
+      await failRun(scope, run._id, 'parse_failed');
       return res.status(502).json({ error: 'parse_failed', raw: parsed.raw.slice(0, 500) });
     }
 
-    const bullets = parsed.data.bullets.slice(0, 8);
+    const bullets = parsed.data.bullets.slice(0, 8).map((b) => ({
+      fact: b.fact,
+      sourceUrl: b.source_url,
+      sourceTitle: b.source_title,
+      signalType: b.signal_type,
+      recency: b.recency,
+    }));
 
-    const { data: pack, error: insErr } = await db
-      .from('evidence_packs')
-      .insert({
-        target_id,
-        bullets,
-        citations: parsed.citations,
-      })
-      .select('*')
-      .single();
-    if (insErr) {
-      await failRun(db, run.id, insErr.message);
-      return res.status(500).json({ error: 'insert_failed', detail: insErr.message });
+    // Embed the concatenated bullets for vector search.
+    let embedding: number[] | undefined;
+    try {
+      const txt = bullets.map((b) => b.fact).join('\n');
+      embedding = await embedOne(txt, 'document');
+    } catch (err) {
+      console.warn('embed_evidence_failed', err);
     }
 
-    await completeRun(db, run.id, { evidence_pack_id: pack.id, count: bullets.length });
-    return res.status(200).json({ run_id: run.id, evidence_pack: pack });
+    const pack = await scope.collection<EvidencePackDoc>('evidence_packs').insertOne({
+      _id: newId(),
+      targetId: target_id,
+      missionId: mission._id,
+      bullets,
+      citations: parsed.citations,
+      ...(embedding ? { embedding } : {}),
+    } as InsertDoc<EvidencePackDoc>);
+
+    await completeRun(scope, run._id, { evidence_pack_id: pack._id, count: bullets.length });
+    return res.status(200).json({ run_id: run._id, evidence_pack: pack });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'unknown_error';
-    await failRun(db, run.id, msg);
+    await failRun(scope, run._id, msg);
     return res.status(500).json({ error: 'agent_failed', detail: msg });
   }
 }

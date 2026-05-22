@@ -1,18 +1,43 @@
+// Firebase Auth replacement for the old Supabase auth context.
+// API surface preserved: { session, user, profile, loading, signOut, refreshProfile }
+// so pages don't all need to change. The exposed `user` object mimics
+// Supabase's user shape — it has `id` and `email` (mapped from Firebase's
+// `uid`/`email`), and the underlying Firebase user is kept as `firebaseUser`
+// for anything that needs the SDK directly.
+
 import {
   createContext,
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useState,
   type ReactNode,
 } from 'react';
-import type { Session, User } from '@supabase/supabase-js';
-import { supabase } from '../supabaseClient';
+import { onAuthStateChanged, signOut as fbSignOut, type User as FirebaseUser } from 'firebase/auth';
+import { auth } from '../firebaseClient';
+import { db } from '../lib/db';
 import type { Profile } from '../types';
 
+/**
+ * Supabase-shaped user (frontend pages access `user.id`, `user.email`).
+ * Backed by the Firebase user.
+ */
+export interface CompatUser {
+  id: string;
+  email: string | null;
+  email_confirmed_at: string | null;
+  firebaseUser: FirebaseUser;
+}
+
+export interface SessionLike {
+  user: CompatUser;
+  access_token: string | null;
+}
+
 interface AuthContextValue {
-  session: Session | null;
-  user: User | null;
+  session: SessionLike | null;
+  user: CompatUser | null;
   profile: Profile | null;
   loading: boolean;
   signOut: () => Promise<void>;
@@ -21,54 +46,50 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+function compat(u: FirebaseUser): CompatUser {
+  return {
+    id: u.uid,
+    email: u.email,
+    email_confirmed_at: u.emailVerified ? new Date().toISOString() : null,
+    firebaseUser: u,
+  };
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<Session | null>(null);
-  const [user, setUser] = useState<User | null>(null);
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchProfile = useCallback(async (userId: string) => {
-    const { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('user_id', userId)
-      .single();
-    setProfile(data as Profile | null);
+  const fetchProfile = useCallback(async () => {
+    const { data } = await db.from('profiles').select('*').limit(1);
+    setProfile(((data?.[0] ?? null) as unknown) as Profile | null);
   }, []);
 
   const refreshProfile = useCallback(async () => {
-    if (user?.id) await fetchProfile(user.id);
-  }, [user?.id, fetchProfile]);
+    if (firebaseUser?.uid) await fetchProfile();
+  }, [firebaseUser?.uid, fetchProfile]);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session: s } }) => {
-      setSession(s ?? null);
-      setUser(s?.user ?? null);
-      if (s?.user?.id) fetchProfile(s.user.id).catch(() => setProfile(null));
-      setLoading(false);
-    });
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      setSession(newSession ?? null);
-      setUser(newSession?.user ?? null);
-      if (newSession?.user?.id) {
-        fetchProfile(newSession.user.id).catch(() => setProfile(null));
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setFirebaseUser(u ?? null);
+      if (u?.uid) {
+        fetchProfile().catch(() => setProfile(null));
       } else {
         setProfile(null);
       }
+      setLoading(false);
     });
-
-    return () => subscription.unsubscribe();
+    return () => unsub();
   }, [fetchProfile]);
 
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut();
+    await fbSignOut(auth);
   }, []);
 
+  const user = useMemo(() => (firebaseUser ? compat(firebaseUser) : null), [firebaseUser]);
+
   const value: AuthContextValue = {
-    session,
+    session: user ? { user, access_token: null } : null,
     user,
     profile,
     loading,

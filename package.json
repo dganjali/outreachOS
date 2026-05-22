@@ -2,24 +2,38 @@
   "name": "outreachos",
   "version": "0.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "server:dev": "tsx watch server/index.ts",
+    "server:start": "node dist-server/server/index.js",
+    "server:build": "tsc -p tsconfig.server.json",
+    "mongo:init": "tsx scripts/init-mongo.ts",
+    "migrate:from-supabase": "tsx scripts/migrate-from-supabase.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",
-    "@supabase/supabase-js": "^2.48.0",
-    "@vercel/node": "^5.7.15",
+    "@google-cloud/secret-manager": "^5.6.0",
+    "@google-cloud/storage": "^7.14.0",
+    "@google-cloud/tasks": "^5.5.2",
+    "express": "^4.21.2",
+    "firebase": "^11.1.0",
+    "firebase-admin": "^13.0.2",
+    "mongodb": "^6.12.0",
     "pdf-parse": "^1.1.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.22.0"
   },
   "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.5",
     "@types/react": "^18.2.37",
     "@types/react-dom": "^18.2.15",
     "@vitejs/plugin-react-swc": "^3.5.0",
+    "tsx": "^4.19.2",
     "typescript": "^5.3.0",
     "vite": "^4.5.0"
   }

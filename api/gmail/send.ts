@@ -1,19 +1,26 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
+import type { Request, Response } from 'express';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
-import { adminClient } from '../_lib/supabase';
+import { forUser, newId, type InsertDoc } from '../_lib/db';
 import { getActiveAccessToken, createDraft, sendNow } from '../_lib/gmail';
+import type {
+  ContactDoc,
+  EmailSequenceDoc,
+  ProfileDoc,
+  SentMessageDoc,
+} from '../../shared/schemas';
 
 interface SendBody {
   sequence_id?: string;
   touch_index?: number; // 0 = initial, 1+ = follow-ups
   mode?: 'draft' | 'send';
-  to_override?: string; // for cases where contact.email is empty
+  to_override?: string;
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: Request, res: Response) {
   if (req.method !== 'POST') return methodNotAllowed(res, ['POST']);
   const user = await requireUser(req, res);
   if (!user) return;
+  const scope = forUser(user.id);
 
   const body = (req.body ?? {}) as SendBody;
   const sequenceId = body.sequence_id;
@@ -21,19 +28,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const mode = body.mode ?? 'draft';
   if (!sequenceId) return res.status(400).json({ error: 'missing_sequence_id' });
 
-  const db = adminClient();
+  const seq = await scope
+    .collection<EmailSequenceDoc & { profileRefs?: Record<string, Array<{ field: string; snippet: string }>> }>('email_sequences')
+    .findById(sequenceId);
+  if (!seq) return res.status(404).json({ error: 'sequence_not_found' });
 
-  const { data: seq, error: sErr } = await db
-    .from('email_sequences')
-    .select('*, contacts!inner(*), missions!inner(user_id)')
-    .eq('id', sequenceId)
-    .eq('missions.user_id', user.id)
-    .single();
-  if (sErr || !seq) return res.status(404).json({ error: 'sequence_not_found' });
+  const contact = await scope.collection<ContactDoc>('contacts').findById(seq.contactId);
+  if (!contact) return res.status(404).json({ error: 'contact_not_found' });
 
-  const contact = seq.contacts as { id: string; email: string | null; name: string };
   const toEmail = body.to_override?.trim() || contact.email?.trim();
-  if (!toEmail) return res.status(400).json({ error: 'no_recipient_email', message: 'Contact has no email. Provide to_override.' });
+  if (!toEmail) {
+    return res.status(400).json({ error: 'no_recipient_email', message: 'Contact has no email. Provide to_override.' });
+  }
 
   // Pick the touch
   let subject: string;
@@ -45,67 +51,65 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     subject = seq.subject;
     bodyText = seq.body;
   } else {
-    const fu = (seq.followups as Array<{ subject: string; body: string }>)[touchIndex - 1];
+    const fu = seq.followups[touchIndex - 1];
     if (!fu) return res.status(400).json({ error: 'invalid_touch_index' });
     subject = fu.subject;
     bodyText = fu.body;
 
-    // Look up the prior touch in sent_messages so we can thread the reply
-    const { data: prior } = await db
-      .from('sent_messages')
-      .select('gmail_message_id, gmail_thread_id')
-      .eq('sequence_id', sequenceId)
-      .eq('touch_index', touchIndex - 1)
-      .maybeSingle();
-    if (prior?.gmail_message_id) priorMessageId = `<${prior.gmail_message_id}>`;
-    threadId = prior?.gmail_thread_id ?? null;
+    const prior = await scope
+      .collection<SentMessageDoc>('sent_messages')
+      .findOne({ sequenceId, touchIndex: touchIndex - 1 });
+    if (prior?.gmailMessageId) priorMessageId = `<${prior.gmailMessageId}>`;
+    threadId = prior?.gmailThreadId ?? null;
   }
 
   const tok = await getActiveAccessToken(user.id);
   if (!tok) return res.status(412).json({ error: 'gmail_not_connected', message: 'Connect Gmail in Settings first.' });
 
-  const { data: profile } = await db
-    .from('profiles')
-    .select('name')
-    .eq('user_id', user.id)
-    .single();
+  const profile = await scope.collection<ProfileDoc>('profiles').findOne();
 
-  // Insert sent_messages row first (idempotent on (sequence_id, touch_index))
-  const { data: existing } = await db
-    .from('sent_messages')
-    .select('id, status')
-    .eq('sequence_id', sequenceId)
-    .eq('touch_index', touchIndex)
-    .maybeSingle();
+  // Idempotency on (sequence_id, touch_index)
+  const existing = await scope
+    .collection<SentMessageDoc>('sent_messages')
+    .findOne({ sequenceId, touchIndex });
   if (existing && existing.status === 'sent') {
-    return res.status(409).json({ error: 'already_sent', sent_message_id: existing.id });
+    return res.status(409).json({ error: 'already_sent', sent_message_id: existing._id });
   }
 
-  // Carry the profile_version + per-touch refs from the source sequence so this
-  // sent_messages row can be attributed back in the Me > History outcomes view.
-  const refsByTouch = (seq.profile_refs ?? {}) as Record<string, Array<{ field: string; snippet: string }>>;
+  // Carry profile_version + per-touch refs from the source sequence.
+  const refsByTouch = seq.profileRefs ?? {};
   const touchKey = touchIndex === 0 ? 'initial' : `followup_${touchIndex - 1}`;
   const touchRefs = Array.isArray(refsByTouch[touchKey]) ? refsByTouch[touchKey] : [];
 
-  const insertPayload = {
-    user_id: user.id,
-    sequence_id: sequenceId,
-    contact_id: contact.id,
-    mission_id: seq.mission_id as string,
-    touch_index: touchIndex,
+  const sentRowBase: Omit<InsertDoc<SentMessageDoc>, '_id'> = {
+    sequenceId,
+    contactId: contact._id,
+    missionId: seq.missionId,
+    touchIndex,
     subject,
     body: bodyText,
-    to_email: toEmail,
-    status: 'queued' as const,
-    profile_version_id: (seq.profile_version_id as string | null) ?? null,
-    profile_refs: touchRefs,
+    toEmail,
+    gmailDraftId: null,
+    gmailMessageId: null,
+    gmailThreadId: null,
+    status: 'queued',
+    scheduledSendAt: null,
+    sentAt: null,
+    failedReason: null,
+    profileVersionId: seq.profileVersionId ?? null,
+    profileRefs: touchRefs,
   };
 
-  const upsertRes = existing
-    ? await db.from('sent_messages').update(insertPayload).eq('id', existing.id).select('*').single()
-    : await db.from('sent_messages').insert(insertPayload).select('*').single();
-  if (upsertRes.error) return res.status(500).json({ error: 'db_insert_failed', detail: upsertRes.error.message });
-  const sentRow = upsertRes.data;
+  let sentRowId: string;
+  if (existing) {
+    await scope.collection<SentMessageDoc>('sent_messages').updateById(existing._id, sentRowBase);
+    sentRowId = existing._id;
+  } else {
+    const created = await scope
+      .collection<SentMessageDoc>('sent_messages')
+      .insertOne({ ...sentRowBase, _id: newId() } as InsertDoc<SentMessageDoc>);
+    sentRowId = created._id;
+  }
 
   try {
     const sendArgs = {
@@ -121,43 +125,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     let result: { messageId: string; threadId: string; draftId?: string };
     if (mode === 'send') {
-      const r = await sendNow(sendArgs);
-      result = r;
+      result = await sendNow(sendArgs);
     } else {
-      const r = await createDraft(sendArgs);
-      result = r;
+      result = await createDraft(sendArgs);
     }
 
-    await db
-      .from('sent_messages')
-      .update({
-        gmail_draft_id: mode === 'draft' ? (result as { draftId?: string }).draftId : null,
-        gmail_message_id: result.messageId,
-        gmail_thread_id: result.threadId,
-        status: mode === 'send' ? 'sent' : 'draft',
-        sent_at: mode === 'send' ? new Date().toISOString() : null,
-      })
-      .eq('id', sentRow.id);
+    await scope.collection<SentMessageDoc>('sent_messages').updateById(sentRowId, {
+      gmailDraftId: mode === 'draft' ? result.draftId ?? null : null,
+      gmailMessageId: result.messageId,
+      gmailThreadId: result.threadId,
+      status: mode === 'send' ? 'sent' : 'draft',
+      sentAt: mode === 'send' ? new Date() : null,
+    });
 
     if (mode === 'send' && touchIndex === 0) {
-      // Mark sequence + contact as contacted
-      await db.from('email_sequences').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', sequenceId);
-      await db.from('contacts').update({ status: 'contacted' }).eq('id', contact.id);
+      await scope.collection<EmailSequenceDoc>('email_sequences').updateById(sequenceId, {
+        status: 'sent',
+        sentAt: new Date(),
+      });
+      await scope.collection<ContactDoc>('contacts').updateById(contact._id, { status: 'contacted' });
     }
 
     return res.status(200).json({
-      sent_message_id: sentRow.id,
+      sent_message_id: sentRowId,
       mode,
       gmail_message_id: result.messageId,
       gmail_thread_id: result.threadId,
-      gmail_draft_id: mode === 'draft' ? (result as { draftId?: string }).draftId : undefined,
+      gmail_draft_id: mode === 'draft' ? result.draftId : undefined,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'send_failed';
-    await db
-      .from('sent_messages')
-      .update({ status: 'failed', failed_reason: msg })
-      .eq('id', sentRow.id);
+    await scope.collection<SentMessageDoc>('sent_messages').updateById(sentRowId, {
+      status: 'failed',
+      failedReason: msg,
+    });
     return res.status(500).json({ error: 'send_failed', detail: msg });
   }
 }

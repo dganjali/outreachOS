@@ -1,9 +1,8 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { adminClient } from '../../_lib/supabase';
-import { exchangeCode, fetchGoogleUserEmail, GMAIL_SCOPES } from '../../_lib/gmail';
-import { encrypt, decrypt } from '../../_lib/crypto';
+import type { Request, Response } from 'express';
+import { exchangeCode, fetchGoogleUserEmail, GMAIL_SCOPES, upsertGmailIntegration } from '../../_lib/gmail';
+import { decrypt } from '../../_lib/crypto';
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: Request, res: Response) {
   if (req.method !== 'GET') {
     res.setHeader('Allow', 'GET');
     return res.status(405).end();
@@ -23,7 +22,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return redirectBack(res, 'error=invalid_state');
   }
 
-  // 10 minute window
+  // 10-minute window
   if (Date.now() - state.t > 10 * 60 * 1000) {
     return redirectBack(res, 'error=state_expired');
   }
@@ -39,26 +38,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const email = await fetchGoogleUserEmail(tokens.access_token);
-    const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
 
-    const db = adminClient();
-    const { error } = await db.from('user_integrations').upsert(
-      {
-        user_id: state.uid,
-        provider: 'gmail',
-        provider_account_email: email,
-        refresh_token_encrypted: encrypt(tokens.refresh_token),
-        access_token_encrypted: encrypt(tokens.access_token),
-        access_token_expires_at: expiresAt,
-        scopes: tokens.scope,
-        status: 'active',
-        last_error: null,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'user_id,provider' }
-    );
+    await upsertGmailIntegration({
+      uid: state.uid,
+      email,
+      refreshToken: tokens.refresh_token,
+      accessToken: tokens.access_token,
+      expiresInSec: tokens.expires_in,
+      scopes: tokens.scope,
+    });
 
-    if (error) return redirectBack(res, `error=${encodeURIComponent(error.message)}`);
     return redirectBack(res, 'connected=gmail');
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'callback_failed';
@@ -66,7 +55,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 }
 
-function redirectBack(res: VercelResponse, qs: string) {
+function redirectBack(res: Response, qs: string) {
   res.setHeader('Location', `/settings?${qs}`);
   res.status(302).end();
 }

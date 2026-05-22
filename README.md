@@ -1,138 +1,121 @@
 # OutreachOS
 
-Agent-powered cold outreach. Vendor-neutral by default — just an LLM API key + Supabase + Gmail. Optional **Apollo.io** integration upgrades target hunting, contact discovery, and sender personalization when you add a single env var.
+Agent-powered cold outreach. Runs on **MongoDB Atlas + Firebase Auth + Google Cloud Run**, with Atlas Vector Search for retrieval-grounded email generation. Optional **Apollo.io** integration upgrades target hunting, contact discovery, and sender personalization.
 
 ## What it does
 
 End-to-end agent pipeline per mission:
 
-1. **Targeting Agent** — pulls high-fit organizations. With `APOLLO_API_KEY`, it derives Apollo filters from the mission, fetches a candidate pool, and re-ranks with web_search "why now" signals. Without Apollo, it runs pure web_search.
-2. **Contact Graph Agent** — finds 2–4 decision-makers per target. With Apollo, contacts come back with verified emails + LinkedIn URLs + seniority. Without Apollo, it falls back to web_search and likely-email patterns.
-3. **Evidence Agent** — builds a 4–6 bullet sourced evidence pack per target.
-4. **Sequence Agent** — drafts a mode-aware initial email + 2 follow-ups, anchored in evidence and the sender's enriched profile.
-5. **Profile Enrichment Agent** — reads the sender's LinkedIn URL during onboarding (or on demand from the Profile page) and auto-fills bio, proof points, achievements, metrics, and tone for personalization.
+1. **Targeting Agent** — pulls high-fit organizations. With `APOLLO_API_KEY`, derives Apollo filters and re-ranks with web_search "why now" signals. Without Apollo, pure web_search.
+2. **Contact Graph Agent** — 2–4 decision-makers per target with verified emails (Apollo) or likely-email patterns (web_search fallback).
+3. **Evidence Agent** — 4–6 sourced bullets per target. Embedded with Voyage AI for downstream vector retrieval.
+4. **Sequence Agent** — mode-aware initial email + 2 follow-ups, anchored in evidence. Retrieves your own past sequences-that-got-replies via Atlas Vector Search and feeds them in as exemplars.
+5. **Profile Enrichment Agent** — reads sender LinkedIn URL → auto-fills bio, proof points, metrics, tone.
 
-Click **Run full pipeline** on a mission to fire steps 1–4 sequentially for the top 5 targets.
-
-Modes: `sponsorship`, `bd`, `internship`, `recruiting`, `sales` — each shifts the system prompt to surface the right angles.
+Modes: `sponsorship`, `bd`, `internship`, `recruiting`, `sales`.
 
 ## Stack
 
-- **Frontend**: React 18 + TypeScript + Vite, Supabase auth + Postgres (RLS).
-- **Backend**: Vercel serverless functions (`api/`), Anthropic SDK, Supabase service-role client.
-- **Research**: Claude's built-in `web_search_20250305` server tool. No third-party scrapers.
+| Layer | Choice |
+|---|---|
+| Frontend | React 18 + TS + Vite, hosted on Vercel |
+| Backend | Node + Express, packaged in a Docker container, deployed to **Cloud Run** |
+| Auth | **Firebase Auth** (Identity Platform) — Google sign-in + email/password |
+| Database | **MongoDB Atlas** on GCP (same region as Cloud Run) |
+| Vector retrieval | **Atlas Vector Search** with **Voyage AI** embeddings (voyage-3, 1024d) |
+| Object storage | **Google Cloud Storage** (resumes, portfolio PDFs) |
+| Job queue | **Cloud Tasks** + Cloud Scheduler |
+| Secrets | **Google Secret Manager** |
+| LLM | Anthropic Claude (Sonnet 4.5) with `web_search_20250305` |
+| Email | Gmail OAuth (per-user) |
 
-## Local dev
+## Quick start
+
+Full setup playbook: see **[daniel-todo.md](./daniel-todo.md)** — every command, in order.
 
 ```bash
 npm install
-cp .env.example .env.local   # fill in keys
-npm run dev                   # frontend on :5173
-vercel dev                    # frontend + /api/* serverless on :3000
+cp .env.example .env       # fill in keys
+
+# Provision Mongo schema (after you've got an Atlas cluster + MONGODB_URI):
+npm run mongo:init
+
+# Local API server:
+npm run server:dev   # http://localhost:8080
+
+# Local frontend:
+npm run dev          # http://localhost:5173 — proxies /api/* to :8080 via Vite
 ```
 
-`vercel dev` is required to run the agent endpoints locally.
-
-## Required env vars
-
-| Var | Where | Purpose |
-|---|---|---|
-| `VITE_SUPABASE_URL` | frontend | Supabase project URL |
-| `VITE_SUPABASE_ANON_KEY` | frontend | Supabase anon key |
-| `SUPABASE_URL` | server | same URL, server-side |
-| `SUPABASE_SERVICE_ROLE_KEY` | server | bypasses RLS — never expose |
-| `ANTHROPIC_API_KEY` | server | Claude API key |
-| `ANTHROPIC_MODEL` | server (optional) | defaults to `claude-sonnet-4-5` |
-| `ENCRYPTION_KEY` | server | random string; encrypts OAuth refresh tokens at rest |
-| `GOOGLE_CLIENT_ID` | server | Gmail OAuth client ID |
-| `GOOGLE_CLIENT_SECRET` | server | Gmail OAuth client secret |
-| `CRON_SECRET` | server | shared secret Vercel Cron sends as Bearer; protects `/api/cron/*` |
-| `APOLLO_API_KEY` | server (optional) | Apollo.io API key. When set, target search and contact discovery use Apollo first (verified emails, firmographics) and fall back to web search if Apollo returns nothing. |
-
-## Database
-
-Run in the Supabase SQL editor in this order:
-
-1. `supabase/schema.sql` — base tables + RLS
-2. `supabase/migrations/002_agent_layer.sql` — mode, scoring, evidence_packs, email_sequences, agent_runs
-3. `supabase/migrations/003_gmail_integration.sql` — user_integrations, sent_messages, replies extensions
-4. `supabase/migrations/004_cleanup.sql` — drops dead `emails` table, tightens replies RLS, adds `missions.archived_at`
-5. `supabase/migrations/004_apollo_personalization.sql` — Apollo IDs on targets/contacts, LinkedIn enrichment fields on profiles (only needed if you set `APOLLO_API_KEY`)
-6. `supabase/migrations/005_profile_versions.sql` — `profile_versions` table for the Me section's History tab
-7. `supabase/migrations/006_coach_agent.sql` — allows `'coach'` agent_type in `agent_runs` (Me section Coach drawer)
-8. `supabase/migrations/007_profile_assets.sql` — `profile_assets` table + private `profile-assets` Storage bucket with per-user folder policies (Me section uploads)
-9. `supabase/migrations/008_profile_outcomes.sql` — adds `profile_refs` + `profile_version_id` to `email_sequences` and `sent_messages` + `profile_version_outcomes` view (Me section outcome attribution)
-
-## Google Cloud setup (Gmail OAuth)
-
-1. Create a project at https://console.cloud.google.com/
-2. **APIs & Services → Library** → enable **Gmail API**.
-3. **OAuth consent screen** → External, add your email as a test user. Scopes (added on the consent screen):
-   - `.../auth/gmail.send`
-   - `.../auth/gmail.modify`
-   - `.../auth/gmail.readonly`
-   - `.../auth/userinfo.email`
-4. **Credentials → Create credentials → OAuth client ID** → Web application.
-   - Authorized redirect URIs:
-     - `http://localhost:3000/api/integrations/gmail/callback` (for `vercel dev`)
-     - `https://your-domain.vercel.app/api/integrations/gmail/callback`
-5. Copy the Client ID + Secret into `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` env vars.
-6. While the app is in "Testing" mode, only listed test users can connect. Submit for verification before public launch (only required if you scale past ~100 users).
-
-## Deploy (Vercel)
-
-- Framework Preset: **Other** (so the `api/` functions deploy alongside the SPA).
-- Build Command: `npm run build`
-- Output Directory: `dist`
-- Set all env vars above in Project Settings → Environment Variables.
-- `vercel.json` already configures SPA routing + `maxDuration: 60` for agent endpoints.
-
-## Architecture
+## Layout
 
 ```
 api/
   _lib/
-    anthropic.ts      Anthropic client + JSON extraction
-    apollo.ts         Optional Apollo.io client (active when APOLLO_API_KEY is set)
-    supabase.ts       Service-role client
-    auth.ts           JWT verification
-    prompts.ts        Mode-aware system prompts + angles
-    runs.ts           agent_runs lifecycle helpers
-    env.ts            Lazy env var access
-  agents/
-    target.ts         POST /api/agents/target          (Apollo + web_search hybrid)
-    contacts.ts      POST /api/agents/contacts        (Apollo + web_search hybrid)
-    evidence.ts      POST /api/agents/evidence
-    sequence.ts      POST /api/agents/sequence
-    enrich-profile.ts POST /api/agents/enrich-profile  (LinkedIn → sender bio/proof/tone)
+    anthropic.ts     Claude client + JSON extraction + retry
+    apollo.ts        Optional Apollo.io client
+    auth.ts          Firebase JWT verification
+    crypto.ts        AES-GCM for OAuth tokens at rest
+    db.ts            MongoDB client + forUser(uid) wrapper (replaces RLS)
+    embeddings.ts    Voyage AI client
+    env.ts           Lazy env var access
+    gmail.ts         Gmail API + OAuth lifecycle
+    prompts.ts       Mode-aware system prompts
+    queue.ts         Cloud Tasks enqueue
+    runs.ts          agent_runs lifecycle + rate limiting
+    storage.ts       Google Cloud Storage helpers
+  agents/            POST handlers — target, contacts, evidence, sequence,
+                     reply, coach, parse-resume, enrich-profile
+  data/router.ts     Generic CRUD for the frontend
+  gmail/send.ts      Per-touch Gmail send/draft
+  integrations/gmail/{start,callback,status,disconnect}.ts
+  cron/poll-gmail.ts Cloud Scheduler → poll Gmail for replies
+  tasks/worker.ts    Cloud Tasks worker (queued sends, scheduled touches)
+
+server/
+  index.ts           Express app — Cloud Run entry point
+
+shared/
+  schemas.ts         Mongo collection types + INDEX_SPEC + VECTOR_INDEX_SPEC
+  types.ts           Shared TS types (frontend + backend)
+
+scripts/
+  init-mongo.ts                Creates collections + indexes + vector indexes
+  migrate-from-supabase.ts     (Stub) data migration template
 
 src/
-  lib/api.ts          Frontend client (auto-attaches Supabase JWT)
-  pages/              Dashboard, Missions, MissionPage, Profile, etc.
-  components/
-    CsvImport.tsx     Bring-your-own-list (Apollo CSV escape hatch)
+  firebaseClient.ts  Firebase Auth SDK init
+  context/AuthContext.tsx   Firebase-backed auth context
+  lib/api.ts         Frontend client (attaches Firebase ID token)
+  lib/db.ts          Supabase-shaped shim over /api/data — gradually delete
+  pages/, components/
 ```
 
-## M1 — Send & Track (shipped)
+## Required env vars
 
-- Gmail OAuth (`Settings → Connect Gmail`).
-- Per-touch send buttons on every drafted sequence: "Save as Gmail draft" or "Send now."
-- `sent_messages` records each touch with Gmail message + thread IDs.
-- Vercel Cron (`*/10 * * * *`) polls connected mailboxes for replies → writes to `replies`.
-- Reply Router agent classifies replies (interested / not_now / wrong_person / etc.) and drafts a suggested response.
-- `Inbox` page lists replies, classifications, and lets you re-classify on demand.
+See `.env.example`. Headline secrets:
 
-## Apollo + LinkedIn personalization (shipped)
+- `MONGODB_URI` — Atlas connection string
+- `VITE_FIREBASE_*` + `FIREBASE_PROJECT_ID` + `FIREBASE_SERVICE_ACCOUNT_JSON`
+- `VOYAGE_API_KEY`
+- `GCP_PROJECT_ID` + `GCS_BUCKET` + `CLOUD_TASKS_*`
+- `ANTHROPIC_API_KEY`, `ENCRYPTION_KEY`, `CRON_SECRET`, `GOOGLE_CLIENT_ID/SECRET`
 
-- `APOLLO_API_KEY` toggles Apollo for both targeting (`/mixed_companies/search`) and contact discovery (`/mixed_people/search`). Falls back to web_search when unset, when Apollo errors, or when filters return nothing.
-- Onboarding step 4 captures a LinkedIn URL; on finish the **Profile Enrichment Agent** auto-fills bio, proof points, achievements, metrics, and tone — used by the Sequence Agent for personalization. The Profile page exposes a manual **Enrich from LinkedIn** button.
-- **Run full pipeline** button on each mission orchestrates target → evidence → contacts → sequence client-side for the top 5 targets, so a fresh mission goes from blank to ready-to-review drafts in one click.
-- UI surfaces an `apollo` pill on Apollo-sourced rows, an `email-status` badge (`verified` / `likely` / `guessed`) on contacts, and firmographic chips (industry, employee count) on targets.
+In prod these all come from Secret Manager (see `cloudbuild.yaml`).
 
-## What's not in MVP yet
+## Why Atlas Vector Search?
 
-- No background job queue (long agent batches still timeout-prone past 60s).
-- No follow-up scheduler (sequences exist; cron to auto-send touches 1+2 is M2).
-- No suppression list / per-day send caps (M2).
-- No inline draft editing or regenerate-with-feedback (M3).
-- No Outlook (Gmail-only for v1).
+The sequence agent does an `$vectorSearch` over your own `email_sequences` collection filtered to `status: 'replied'` — the top-3 semantic matches for the current mission's goal get fed in as exemplars. Means the LLM gets to learn from emails *you* sent that *actually got replies*, not generic best-practices.
+
+Same vector index on `evidence_packs` and `profile_assets` is wired but not yet used at query time — see daniel-todo.md.
+
+## What's shipped vs deferred
+
+**Shipped:** Targeting, contacts, evidence, sequence, reply classification, profile enrichment, Gmail send/poll, resume parsing, coach agent, full pipeline orchestration, Apollo personalization.
+
+**Deferred (now unblocked by the new stack):**
+- Auto-send scheduler — Cloud Tasks + scheduled-send API endpoint
+- Background job queue for long-running batches — Cloud Tasks worker
+- Suppression list + per-day send caps
+- Inline draft editing / regenerate-with-feedback
+- Outlook (Gmail-only for v1)

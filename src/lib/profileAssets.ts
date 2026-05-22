@@ -97,6 +97,6 @@ export async function signedAssetUrl(asset: ProfileAsset, expiresInSec = 600): P
   const { data, error } = await supabase.storage
     .from(BUCKET)
     .createSignedUrl(asset.storage_path, expiresInSec);
-  if (error) return null;
+  if (error || !data) return null;
   return data.signedUrl;
 }

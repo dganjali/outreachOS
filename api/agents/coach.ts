@@ -1,9 +1,10 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
+import type { Request, Response } from 'express';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
-import { adminClient } from '../_lib/supabase';
+import { forUser } from '../_lib/db';
 import { MODEL, createMessageWithRetry, extractJson } from '../_lib/anthropic';
 import { COACH_SYSTEM } from '../_lib/prompts';
 import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
+import type { ProfileDoc, ReplyDoc, SentMessageDoc } from '../../shared/schemas';
 
 type CoachField =
   | 'bio'
@@ -14,12 +15,7 @@ type CoachField =
   | 'example_emails';
 
 const COACHABLE_FIELDS: ReadonlySet<CoachField> = new Set([
-  'bio',
-  'proof_points',
-  'achievements',
-  'metrics',
-  'writing_tone',
-  'example_emails',
+  'bio', 'proof_points', 'achievements', 'metrics', 'writing_tone', 'example_emails',
 ]);
 
 const FIELD_LABEL: Record<CoachField, string> = {
@@ -36,60 +32,41 @@ interface CoachOutput {
   gaps: string[];
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: Request, res: Response) {
   if (req.method !== 'POST') return methodNotAllowed(res, ['POST']);
   const user = await requireUser(req, res);
   if (!user) return;
+  const scope = forUser(user.id);
 
-  const { field, current_value } = (req.body ?? {}) as {
-    field?: string;
-    current_value?: string;
-  };
-
+  const { field, current_value } = (req.body ?? {}) as { field?: string; current_value?: string };
   if (!field || !COACHABLE_FIELDS.has(field as CoachField)) {
     return res.status(400).json({ error: 'invalid_field' });
   }
   const f = field as CoachField;
 
-  const db = adminClient();
-  if (!(await checkRateLimit(db, res, user.id))) return;
+  if (!(await checkRateLimit(scope, res))) return;
 
-  const { data: profile, error: pErr } = await db
-    .from('profiles')
-    .select(
-      'name, role, organization, bio, proof_points, achievements, metrics, writing_tone, example_emails, linkedin_url, website, portfolio_links'
-    )
-    .eq('user_id', user.id)
-    .single();
-  if (pErr || !profile) return res.status(404).json({ error: 'profile_not_found' });
+  const profile = await scope.collection<ProfileDoc>('profiles').findOne();
+  if (!profile) return res.status(404).json({ error: 'profile_not_found' });
 
   const currentValue = (current_value ?? '').toString().slice(0, 4000);
 
-  // Outcome stats for THIS field across all of this user's sent messages.
-  // Used both to inform the prompt and to surface in the drawer UI.
-  const { data: sentRows } = await db
-    .from('sent_messages')
-    .select('id, profile_refs')
-    .eq('user_id', user.id)
-    .limit(1000);
-
+  // Outcome stats for THIS field
+  const sentRows = await scope.collection<SentMessageDoc & { profileRefs?: Array<{ field?: string }> }>('sent_messages').find();
   let fieldSentCount = 0;
   const sentIdsForField = new Set<string>();
-  for (const row of (sentRows ?? []) as Array<{ id: string; profile_refs: Array<{ field?: string }> | null }>) {
-    if (!Array.isArray(row.profile_refs)) continue;
-    if (row.profile_refs.some((r) => r?.field === f)) {
+  for (const row of sentRows) {
+    if (!Array.isArray(row.profileRefs)) continue;
+    if (row.profileRefs.some((r) => r?.field === f)) {
       fieldSentCount += 1;
-      sentIdsForField.add(row.id);
+      sentIdsForField.add(row._id);
     }
   }
   let fieldReplyCount = 0;
   if (sentIdsForField.size > 0) {
-    const { data: replyRows } = await db
-      .from('replies')
-      .select('id, sent_message_id, classification')
-      .in('sent_message_id', Array.from(sentIdsForField));
-    fieldReplyCount = (replyRows ?? []).filter(
-      (r: { classification: string | null }) => r.classification !== 'oof' && r.classification !== 'unsubscribe'
+    const replyRows = await scope.collection<ReplyDoc>('replies').find();
+    fieldReplyCount = replyRows.filter(
+      (r) => r.sentMessageId && sentIdsForField.has(r.sentMessageId) && r.classification !== 'oof' && r.classification !== 'unsubscribe'
     ).length;
   }
   const outcomes = {
@@ -98,9 +75,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     reply_rate: fieldSentCount > 0 ? Math.round((fieldReplyCount / fieldSentCount) * 1000) / 10 : 0,
   };
 
-  const run = await startRun(db, {
-    user_id: user.id,
-    agent_type: 'coach',
+  const run = await startRun(scope, {
+    agentType: 'coach',
     input: { field: f, length: currentValue.length, ...outcomes },
   });
 
@@ -115,7 +91,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const parsed = extractJson<CoachOutput>(message);
     if (!parsed.ok || !parsed.data) {
-      await failRun(db, run.id, 'parse_failed');
+      await failRun(scope, run._id, 'parse_failed');
       return res.status(502).json({ error: 'parse_failed' });
     }
 
@@ -134,15 +110,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .map((g) => g.slice(0, 200)),
     };
 
-    await completeRun(db, run.id, {
+    await completeRun(scope, run._id, {
       field: f,
       suggestion_count: cleaned.suggestions.length,
       gap_count: cleaned.gaps.length,
     });
-    return res.status(200).json({ run_id: run.id, field: f, ...cleaned, outcomes });
+    return res.status(200).json({ run_id: run._id, field: f, ...cleaned, outcomes });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'unknown_error';
-    await failRun(db, run.id, msg);
+    await failRun(scope, run._id, msg);
     return res.status(500).json({ error: 'agent_failed', detail: msg });
   }
 }
@@ -150,20 +126,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 function buildPrompt(
   field: CoachField,
   currentValue: string,
-  profile: {
-    name: string | null;
-    role: string | null;
-    organization: string | null;
-    bio: string | null;
-    proof_points: string | null;
-    achievements: string | null;
-    metrics: string | null;
-    writing_tone: string | null;
-    example_emails: string | null;
-    linkedin_url: string | null;
-    website: string | null;
-    portfolio_links: string[] | null;
-  },
+  profile: ProfileDoc,
   outcomes: { sent_count: number; reply_count: number; reply_rate: number }
 ): string {
   const ctxLines = [
@@ -171,14 +134,14 @@ function buildPrompt(
     profile.name ? `Name: ${profile.name}` : '',
     profile.role ? `Role: ${profile.role}` : '',
     profile.organization ? `Org: ${profile.organization}` : '',
-    profile.linkedin_url ? `LinkedIn: ${profile.linkedin_url}` : '',
+    profile.linkedinUrl ? `LinkedIn: ${profile.linkedinUrl}` : '',
     profile.website ? `Website: ${profile.website}` : '',
-    profile.portfolio_links?.length ? `Portfolio: ${profile.portfolio_links.join(', ')}` : '',
+    profile.portfolioLinks?.length ? `Portfolio: ${profile.portfolioLinks.join(', ')}` : '',
     field !== 'bio' && profile.bio ? `Bio: ${profile.bio}` : '',
-    field !== 'proof_points' && profile.proof_points ? `Proof points: ${profile.proof_points}` : '',
+    field !== 'proof_points' && profile.proofPoints ? `Proof points: ${profile.proofPoints}` : '',
     field !== 'achievements' && profile.achievements ? `Achievements: ${profile.achievements}` : '',
     field !== 'metrics' && profile.metrics ? `Metrics: ${profile.metrics}` : '',
-    field !== 'writing_tone' && profile.writing_tone ? `Tone: ${profile.writing_tone}` : '',
+    field !== 'writing_tone' && profile.writingTone ? `Tone: ${profile.writingTone}` : '',
   ].filter(Boolean);
 
   const outcomesBlock =

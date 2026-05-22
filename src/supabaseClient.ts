@@ -1,11 +1,9 @@
-import { createClient } from '@supabase/supabase-js';
+// LEGACY SHIM — kept for import-path stability after the Supabase → Mongo +
+// Firebase Auth migration. New code should import { db } from './lib/db' and
+// the firebase/auth SDK directly.
+//
+// `supabase.from(...)`, `supabase.auth.*`, and `supabase.storage.*` all work
+// through the same `db` object, which routes to `/api/data/*` REST endpoints
+// (using a Firebase ID token) and the Firebase auth SDK.
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
-
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Missing Supabase environment variables');
-}
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
+export { db as supabase, db } from './lib/db';

@@ -1,0 +1,50 @@
+# Cloud Build pipeline — builds the API image and deploys to Cloud Run.
+# Trigger this from a push to main (set up via gcloud builds triggers create).
+#
+# Substitutions (set in the trigger or pass via --substitutions):
+#   _SERVICE       — Cloud Run service name (default: outreachos-api)
+#   _REGION        — GCP region (default: us-central1)
+#   _AR_REPO       — Artifact Registry repo for images (default: outreachos)
+
+steps:
+  # 1. Build the image.
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$COMMIT_SHA
+      - .
+
+  # 2. Push it.
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$COMMIT_SHA
+
+  # 3. Deploy to Cloud Run.
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$COMMIT_SHA
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --memory=1Gi
+      - --cpu=1
+      - --timeout=3600
+      - --concurrency=40
+      # Pull all secrets from Secret Manager. Each secret name should match
+      # the env var; create them with `gcloud secrets create <name>`.
+      - --set-secrets=ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest,MONGODB_URI=MONGODB_URI:latest,VOYAGE_API_KEY=VOYAGE_API_KEY:latest,ENCRYPTION_KEY=ENCRYPTION_KEY:latest,CRON_SECRET=CRON_SECRET:latest,GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest,GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest,APOLLO_API_KEY=APOLLO_API_KEY:latest,FIREBASE_SERVICE_ACCOUNT_JSON=FIREBASE_SERVICE_ACCOUNT_JSON:latest
+      - --set-env-vars=ANTHROPIC_MODEL=claude-sonnet-4-5,MONGODB_DB=outreachos,FIREBASE_PROJECT_ID=$PROJECT_ID,GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=${_REGION},GCS_BUCKET=$PROJECT_ID-assets,CLOUD_TASKS_QUEUE=outreach-jobs
+
+substitutions:
+  _SERVICE: outreachos-api
+  _REGION: us-central1
+  _AR_REPO: outreachos
+
+options:
+  logging: CLOUD_LOGGING_ONLY

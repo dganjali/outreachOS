@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "outDir": "dist-server",
+    "rootDir": ".",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": false,
+    "declaration": false,
+    "noEmit": false
+  },
+  "include": ["api/**/*.ts", "server/**/*.ts", "shared/**/*.ts"],
+  "exclude": ["node_modules", "src", "dist", "dist-server"]
+}

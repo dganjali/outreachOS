@@ -1,6 +1,12 @@
-import { adminClient } from './supabase';
+// Google Gmail API helpers + OAuth token lifecycle (Mongo edition).
+// Token storage moved from Supabase user_integrations table to the Mongo
+// `user_integrations` collection. AES-GCM encryption of refresh/access tokens
+// is unchanged.
+
+import { adminDb, forUser, newId } from './db';
 import { encrypt, decrypt } from './crypto';
 import { env } from './env';
+import type { UserIntegrationDoc } from '../../shared/schemas';
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1';
@@ -15,9 +21,8 @@ export const GMAIL_SCOPES = [
 ];
 
 export function authUrl(state: string, redirectUri: string): string {
-  const clientId = env.GOOGLE_CLIENT_ID();
   const params = new URLSearchParams({
-    client_id: clientId,
+    client_id: env.GOOGLE_CLIENT_ID(),
     redirect_uri: redirectUri,
     response_type: 'code',
     scope: GMAIL_SCOPES.join(' '),
@@ -33,38 +38,34 @@ export async function exchangeCode(
   code: string,
   redirectUri: string
 ): Promise<{ access_token: string; refresh_token: string; expires_in: number; scope: string }> {
-  const clientId = env.GOOGLE_CLIENT_ID();
-  const clientSecret = env.GOOGLE_CLIENT_SECRET();
   const r = await fetch(TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       code,
-      client_id: clientId,
-      client_secret: clientSecret,
+      client_id: env.GOOGLE_CLIENT_ID(),
+      client_secret: env.GOOGLE_CLIENT_SECRET(),
       redirect_uri: redirectUri,
       grant_type: 'authorization_code',
     }),
   });
   if (!r.ok) throw new Error(`token_exchange_failed: ${await r.text()}`);
-  return (await r.json()) as { access_token: string; refresh_token: string; expires_in: number; scope: string };
+  return await r.json();
 }
 
 export async function refreshAccessToken(refreshToken: string): Promise<{ access_token: string; expires_in: number }> {
-  const clientId = env.GOOGLE_CLIENT_ID();
-  const clientSecret = env.GOOGLE_CLIENT_SECRET();
   const r = await fetch(TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       refresh_token: refreshToken,
-      client_id: clientId,
-      client_secret: clientSecret,
+      client_id: env.GOOGLE_CLIENT_ID(),
+      client_secret: env.GOOGLE_CLIENT_SECRET(),
       grant_type: 'refresh_token',
     }),
   });
   if (!r.ok) throw new Error(`token_refresh_failed: ${await r.text()}`);
-  return (await r.json()) as { access_token: string; expires_in: number };
+  return await r.json();
 }
 
 export async function revokeToken(token: string) {
@@ -80,79 +81,84 @@ export async function fetchGoogleUserEmail(accessToken: string): Promise<string 
   return j.email ?? null;
 }
 
-interface IntegrationRow {
-  id: string;
-  user_id: string;
-  provider: string;
-  provider_account_email: string | null;
-  refresh_token_encrypted: string;
-  access_token_encrypted: string | null;
-  access_token_expires_at: string | null;
-  status: string;
+/**
+ * Upsert the Gmail integration row for a user after a successful OAuth flow.
+ * Uses the admin db client (caller has already verified state).
+ */
+export async function upsertGmailIntegration(args: {
+  uid: string;
+  email: string | null;
+  refreshToken: string;
+  accessToken: string;
+  expiresInSec: number;
+  scopes: string;
+}): Promise<void> {
+  const db = await adminDb();
+  const expiresAt = new Date(Date.now() + args.expiresInSec * 1000);
+  const now = new Date();
+  await db.collection<UserIntegrationDoc>('user_integrations').updateOne(
+    { userId: args.uid, provider: 'gmail' },
+    {
+      $set: {
+        providerAccountEmail: args.email,
+        refreshTokenEncrypted: encrypt(args.refreshToken),
+        accessTokenEncrypted: encrypt(args.accessToken),
+        accessTokenExpiresAt: expiresAt,
+        scopes: args.scopes,
+        status: 'active',
+        lastError: null,
+        updatedAt: now,
+      },
+      $setOnInsert: {
+        _id: newId(),
+        userId: args.uid,
+        provider: 'gmail',
+        createdAt: now,
+      },
+    },
+    { upsert: true }
+  );
 }
 
-export async function getActiveAccessToken(userId: string): Promise<{ accessToken: string; email: string | null } | null> {
-  const db = adminClient();
-  const { data, error } = await db
-    .from('user_integrations')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('provider', 'gmail')
-    .eq('status', 'active')
-    .maybeSingle();
-  if (error || !data) return null;
-  const row = data as IntegrationRow;
+/**
+ * Get a fresh access token, refreshing if needed. Returns null if not
+ * connected or refresh fails.
+ */
+export async function getActiveAccessToken(uid: string): Promise<{ accessToken: string; email: string | null } | null> {
+  const scope = forUser(uid);
+  const row = await scope
+    .collection<UserIntegrationDoc>('user_integrations')
+    .findOne({ provider: 'gmail', status: 'active' });
+  if (!row) return null;
 
-  // Reuse existing access token if it's not expired in the next 60s
-  if (row.access_token_encrypted && row.access_token_expires_at) {
-    const expiresMs = new Date(row.access_token_expires_at).getTime();
+  if (row.accessTokenEncrypted && row.accessTokenExpiresAt) {
+    const expiresMs = new Date(row.accessTokenExpiresAt).getTime();
     if (expiresMs - Date.now() > 60_000) {
-      return {
-        accessToken: decrypt(row.access_token_encrypted),
-        email: row.provider_account_email,
-      };
+      return { accessToken: decrypt(row.accessTokenEncrypted), email: row.providerAccountEmail };
     }
   }
 
-  // Refresh
   try {
-    const refresh = decrypt(row.refresh_token_encrypted);
-    const fresh = await refreshAccessToken(refresh);
-    const expiresAt = new Date(Date.now() + fresh.expires_in * 1000).toISOString();
-    await db
-      .from('user_integrations')
-      .update({
-        access_token_encrypted: encrypt(fresh.access_token),
-        access_token_expires_at: expiresAt,
-        updated_at: new Date().toISOString(),
-        last_error: null,
-      })
-      .eq('id', row.id);
-    return { accessToken: fresh.access_token, email: row.provider_account_email };
+    const fresh = await refreshAccessToken(decrypt(row.refreshTokenEncrypted));
+    const expiresAt = new Date(Date.now() + fresh.expires_in * 1000);
+    await scope.collection<UserIntegrationDoc>('user_integrations').updateById(row._id, {
+      accessTokenEncrypted: encrypt(fresh.access_token),
+      accessTokenExpiresAt: expiresAt,
+      lastError: null,
+    });
+    return { accessToken: fresh.access_token, email: row.providerAccountEmail };
   } catch (err) {
-    await db
-      .from('user_integrations')
-      .update({
-        status: 'error',
-        last_error: err instanceof Error ? err.message : 'refresh_failed',
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', row.id);
+    await scope.collection<UserIntegrationDoc>('user_integrations').updateById(row._id, {
+      status: 'error',
+      lastError: err instanceof Error ? err.message : 'refresh_failed',
+    });
     return null;
   }
 }
 
-// === Gmail API operations ===
+// === Gmail API operations === (unchanged from old implementation)
 
-function buildRfc2822({
-  fromEmail,
-  fromName,
-  toEmail,
-  subject,
-  body,
-  inReplyTo,
-  references,
-}: {
+function buildRfc2822(args: {
   fromEmail: string;
   fromName?: string;
   toEmail: string;
@@ -161,19 +167,19 @@ function buildRfc2822({
   inReplyTo?: string;
   references?: string;
 }): string {
-  const fromHeader = fromName ? `${quoteIfNeeded(fromName)} <${fromEmail}>` : fromEmail;
+  const fromHeader = args.fromName ? `${quoteIfNeeded(args.fromName)} <${args.fromEmail}>` : args.fromEmail;
   const headers: string[] = [
     `From: ${fromHeader}`,
-    `To: ${toEmail}`,
-    `Subject: ${encodeRfc2047(subject)}`,
+    `To: ${args.toEmail}`,
+    `Subject: ${encodeRfc2047(args.subject)}`,
     'MIME-Version: 1.0',
     'Content-Type: text/plain; charset="UTF-8"',
     'Content-Transfer-Encoding: 7bit',
   ];
-  if (inReplyTo) headers.push(`In-Reply-To: ${inReplyTo}`);
-  if (references) headers.push(`References: ${references}`);
+  if (args.inReplyTo) headers.push(`In-Reply-To: ${args.inReplyTo}`);
+  if (args.references) headers.push(`References: ${args.references}`);
   const footer = '\r\n\r\n--\r\nTo stop receiving these emails, reply with "UNSUBSCRIBE" in the subject line.';
-  return `${headers.join('\r\n')}\r\n\r\n${body.replace(/\r?\n/g, '\r\n')}${footer}`;
+  return `${headers.join('\r\n')}\r\n\r\n${args.body.replace(/\r?\n/g, '\r\n')}${footer}`;
 }
 
 function quoteIfNeeded(s: string): string {
@@ -206,9 +212,7 @@ export async function createDraft(args: SendArgs): Promise<{ draftId: string; me
   const r = await fetch(`${GMAIL_API}/users/me/drafts`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${args.accessToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      message: { raw, threadId: args.threadId },
-    }),
+    body: JSON.stringify({ message: { raw, threadId: args.threadId } }),
   });
   if (!r.ok) throw new Error(`create_draft_failed: ${await r.text()}`);
   const j = (await r.json()) as { id: string; message: { id: string; threadId: string | null } };
@@ -231,35 +235,34 @@ export interface GmailMessageMeta {
   id: string;
   threadId: string;
   internalDate: string;
-  payload?: {
-    headers: Array<{ name: string; value: string }>;
-  };
+  payload?: { headers: Array<{ name: string; value: string }> };
   snippet?: string;
 }
 
 export async function getThread(accessToken: string, threadId: string): Promise<{ messages: GmailMessageMeta[] }> {
-  const r = await fetch(`${GMAIL_API}/users/me/threads/${threadId}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date&metadataHeaders=Message-Id`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
+  const r = await fetch(
+    `${GMAIL_API}/users/me/threads/${threadId}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date&metadataHeaders=Message-Id`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
   if (!r.ok) throw new Error(`get_thread_failed: ${await r.text()}`);
-  return (await r.json()) as { messages: GmailMessageMeta[] };
+  return await r.json();
 }
 
-export async function getMessageFull(accessToken: string, messageId: string): Promise<{
-  id: string;
-  threadId: string;
-  snippet: string;
-  payload: {
-    headers: Array<{ name: string; value: string }>;
-    body?: { data?: string; size: number };
-    parts?: Array<{ mimeType: string; body?: { data?: string }; parts?: unknown[] }>;
-  };
-}> {
+export async function getMessageFull(accessToken: string, messageId: string) {
   const r = await fetch(`${GMAIL_API}/users/me/messages/${messageId}?format=full`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!r.ok) throw new Error(`get_message_failed: ${await r.text()}`);
-  return await r.json();
+  return (await r.json()) as {
+    id: string;
+    threadId: string;
+    snippet: string;
+    payload: {
+      headers: Array<{ name: string; value: string }>;
+      body?: { data?: string; size: number };
+      parts?: Array<{ mimeType: string; body?: { data?: string }; parts?: unknown[] }>;
+    };
+  };
 }
 
 export function extractPlainText(payload: {
@@ -275,7 +278,6 @@ export function extractPlainText(payload: {
         return Buffer.from(p.body.data, 'base64').toString('utf8');
       }
     }
-    // fall back to nested
     for (const p of payload.parts) {
       const nested = extractPlainText(p as { body?: { data?: string }; parts?: Array<{ mimeType: string; body?: { data?: string }; parts?: unknown[] }> });
       if (nested) return nested;
