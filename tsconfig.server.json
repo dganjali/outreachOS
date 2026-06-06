@@ -16,5 +16,5 @@
     "noEmit": false
   },
   "include": ["api/**/*.ts", "server/**/*.ts", "shared/**/*.ts"],
-  "exclude": ["node_modules", "src", "dist", "dist-server"]
+  "exclude": ["node_modules", "src", "dist", "dist-server", "**/*.test.ts"]
 }

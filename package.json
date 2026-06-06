@@ -10,6 +10,7 @@
     "server:dev": "tsx watch server/index.ts",
     "server:start": "node dist-server/server/index.js",
     "server:build": "tsc -p tsconfig.server.json",
+    "test": "tsx --test api/**/*.test.ts",
     "mongo:init": "tsx scripts/init-mongo.ts",
     "migrate:from-supabase": "tsx scripts/migrate-from-supabase.ts"
   },
