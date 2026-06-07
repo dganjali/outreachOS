@@ -16,10 +16,10 @@
     "migrate:from-supabase": "tsx scripts/migrate-from-supabase.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.92.0",
     "@google-cloud/secret-manager": "^5.6.0",
     "@google-cloud/storage": "^7.14.0",
     "@google-cloud/tasks": "^5.5.2",
+    "@google/genai": "^2.8.0",
     "express": "^4.21.2",
     "firebase": "^11.1.0",
     "firebase-admin": "^13.0.2",

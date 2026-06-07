@@ -9,8 +9,14 @@ function optional(name: string, fallback = ''): string {
 }
 
 export const env = {
-  // Anthropic
-  ANTHROPIC_API_KEY: () => required('ANTHROPIC_API_KEY'),
+  // Gemini (Vertex AI) — the agent LLM. Auth is via Application Default
+  // Credentials (the Cloud Run runtime service account), so no API key here.
+  GEMINI_MODEL: () => optional('GEMINI_MODEL', 'gemini-2.5-flash'),
+  // Vertex AI region for generateContent. gemini-2.5-* live in us-central1.
+  VERTEX_LOCATION: () => optional('VERTEX_LOCATION', 'us-central1'),
+
+  // Anthropic (legacy — optional, kept so old config doesn't crash boot)
+  ANTHROPIC_API_KEY: () => optional('ANTHROPIC_API_KEY'),
   ANTHROPIC_MODEL: () => optional('ANTHROPIC_MODEL', 'claude-sonnet-4-5'),
 
   // MongoDB
