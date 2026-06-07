@@ -11,6 +11,7 @@ interface Stats {
   contacted: number;
   replied: number;
   repliesToHandle: number;
+  runsToday: number;
 }
 
 interface MissionWithStats extends Mission {
@@ -51,6 +52,7 @@ export function Dashboard() {
     contacted: 0,
     replied: 0,
     repliesToHandle: 0,
+    runsToday: 0,
   });
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [gmailConnected, setGmailConnected] = useState<boolean | null>(null);
@@ -77,12 +79,14 @@ export function Dashboard() {
     setError(null);
 
     async function load() {
+      const dayAgo = new Date(Date.now() - 86_400_000).toISOString();
       const [
         { data: msData },
         { count: draftCount },
         { count: contactedCount },
         { count: repliedCount },
         { count: repliesToHandle },
+        { count: runsToday24h },
         { data: runsData },
       ] = await Promise.all([
         supabase
@@ -95,6 +99,7 @@ export function Dashboard() {
         supabase.from('contacts').select('id', { count: 'exact', head: true }).eq('status', 'contacted'),
         supabase.from('contacts').select('id', { count: 'exact', head: true }).eq('status', 'replied'),
         supabase.from('replies').select('id', { count: 'exact', head: true }).eq('handled', false),
+        supabase.from('agent_runs').select('id', { count: 'exact', head: true }).gte('started_at', dayAgo),
         supabase.from('agent_runs').select('*').eq('user_id', user!.id).order('started_at', { ascending: false }).limit(8),
       ]);
 
@@ -132,6 +137,7 @@ export function Dashboard() {
         contacted: contactedCount ?? 0,
         replied: repliedCount ?? 0,
         repliesToHandle: repliesToHandle ?? 0,
+        runsToday: runsToday24h ?? 0,
       });
       setRuns((runsData ?? []) as AgentRun[]);
       setLoading(false);
@@ -241,6 +247,7 @@ export function Dashboard() {
         <KPI label="Replies to handle" value={stats.repliesToHandle} to={stats.repliesToHandle > 0 ? '/inbox' : undefined} highlight={stats.repliesToHandle > 0} />
         <KPI label="Contacted" value={stats.contacted} />
         <KPI label="Reply rate" value={responseRate === null ? '—' : `${responseRate}%`} />
+        <KPI label="Runs today" value={`${stats.runsToday}/50`} highlight={stats.runsToday >= 40} />
       </div>
 
       <div className="dashboard-columns">
