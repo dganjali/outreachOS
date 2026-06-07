@@ -5,8 +5,8 @@ import { useAuth } from '../context/AuthContext';
 import { agents } from '../lib/api';
 import type { Profile } from '../types';
 
-const TOTAL_STEPS = 5;
-const STEP_NAMES = ['name', 'email', 'occupation', 'resume', 'templates'] as const;
+const TOTAL_STEPS = 4;
+const STEP_NAMES = ['name', 'email', 'occupation', 'resume'] as const;
 
 export function Onboarding() {
   const { user, profile, refreshProfile } = useAuth();
@@ -20,7 +20,6 @@ export function Onboarding() {
   const [occupation, setOccupation] = useState(profile?.role ?? '');
   const [resumeUrl, setResumeUrl] = useState(profile?.resume_url ?? '');
   const [linkedinUrl, setLinkedinUrl] = useState(profile?.linkedin_url ?? '');
-  const [emailTemplates, setEmailTemplates] = useState(profile?.example_emails ?? '');
 
   const navigate = useNavigate();
   const isInitialMount = useRef(true);
@@ -31,7 +30,6 @@ export function Onboarding() {
     setOccupation(profile.role ?? '');
     setResumeUrl(profile.resume_url ?? '');
     setLinkedinUrl(profile.linkedin_url ?? '');
-    setEmailTemplates(profile.example_emails ?? '');
   }, [profile?.id]);
 
   async function upsertProfile(updates: Partial<Profile>) {
@@ -78,12 +76,12 @@ export function Onboarding() {
     setStep((s) => s - 1);
   }
 
-  async function handleFinish() {
+  async function handleFinish(updates: Partial<Profile>) {
     setError(null);
     setSaving(true);
     try {
       await upsertProfile({
-        example_emails: emailTemplates.trim() || null,
+        ...updates,
         onboarding_step: TOTAL_STEPS,
         onboarding_completed_at: new Date().toISOString(),
       });
@@ -92,8 +90,10 @@ export function Onboarding() {
       // If the user gave us a LinkedIn URL (or a LinkedIn link in the resume slot),
       // enrich their profile in the background so the first mission they create has
       // proof points + tone ready. Failures are non-blocking — they can also retry
-      // from the Profile page.
-      const hasLinkedin = /linkedin\.com/i.test(linkedinUrl) || /linkedin\.com/i.test(resumeUrl);
+      // from the Me page.
+      const linkedin = (updates.linkedin_url as string | null) ?? '';
+      const resume = (updates.resume_url as string | null) ?? '';
+      const hasLinkedin = /linkedin\.com/i.test(linkedin) || /linkedin\.com/i.test(resume);
       if (hasLinkedin) {
         try {
           setEnrichmentStatus('Enriching your profile from LinkedIn…');
@@ -106,7 +106,6 @@ export function Onboarding() {
         }
       }
 
-      navigate('/dashboard', { replace: true });
       navigate('/missions/new?welcome=1', { replace: true });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
@@ -126,7 +125,6 @@ export function Onboarding() {
     2: "Here's the email we have on file.",
     3: "What's your occupation?",
     4: 'Drop your LinkedIn (and résumé, if you have one) so we can personalize outreach.',
-    5: 'Templates of successful emails you’ve drafted (if any)',
   };
 
   return (
@@ -241,29 +239,11 @@ export function Onboarding() {
                 <div className="get-to-know-you-skip">
                   <button
                     type="button"
-                    onClick={() => saveAndNext({ linkedin_url: null, resume_url: null }, 5)}
+                    onClick={() => handleFinish({ linkedin_url: null, resume_url: null })}
                     disabled={saving}
                   >
                     Skip for now
                   </button>
-                </div>
-              </>
-            )}
-
-            {step === 5 && (
-              <>
-                <p className="get-to-know-you-title" style={{ marginBottom: '1.25rem' }}>
-                  {stepQuestions[5]}
-                </p>
-                <div className="field">
-                  <label htmlFor="onboarding-templates">Paste examples (optional)</label>
-                  <textarea
-                    id="onboarding-templates"
-                    value={emailTemplates}
-                    onChange={(e) => setEmailTemplates(e.target.value)}
-                    placeholder="Subject: ...&#10;Body: ..."
-                    autoFocus
-                  />
                 </div>
               </>
             )}
@@ -321,24 +301,11 @@ export function Onboarding() {
                 type="button"
                 className="btn-primary"
                 onClick={() =>
-                  saveAndNext(
-                    {
-                      linkedin_url: linkedinUrl.trim() || null,
-                      resume_url: resumeUrl.trim() || null,
-                    },
-                    5
-                  )
+                  handleFinish({
+                    linkedin_url: linkedinUrl.trim() || null,
+                    resume_url: resumeUrl.trim() || null,
+                  })
                 }
-                disabled={saving}
-              >
-                Next
-              </button>
-            )}
-            {step === 5 && (
-              <button
-                type="button"
-                className="btn-primary"
-                onClick={handleFinish}
                 disabled={saving}
               >
                 {saving ? 'Saving…' : 'Done'}

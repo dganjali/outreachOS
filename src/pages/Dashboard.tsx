@@ -1,16 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
+import { gmail } from '../lib/api';
 import type { Mission, AgentRun } from '../types';
 
 interface Stats {
   missions: number;
-  targets: number;
-  contacts: number;
   drafts: number;
   contacted: number;
   replied: number;
+  repliesToHandle: number;
 }
 
 interface MissionWithStats extends Mission {
@@ -20,27 +20,55 @@ interface MissionWithStats extends Mission {
 }
 
 const RUN_LABEL: Record<string, string> = {
-  targeting: 'Targeting',
-  contacts: 'Contact graph',
-  evidence: 'Evidence',
-  sequence: 'Sequence',
+  targeting: 'Researched targets',
+  contacts: 'Found contacts',
+  evidence: 'Built an evidence pack',
+  sequence: 'Drafted a sequence',
+  reply: 'Classified a reply',
+  enrich_profile: 'Enriched your profile',
+  coach: 'Coached a profile field',
+  parse_resume: 'Parsed a résumé',
 };
+
+// Fields that make a profile "sharp enough" for good drafts.
+const PROFILE_FIELDS = ['name', 'role', 'bio', 'proof_points', 'achievements', 'metrics', 'linkedin_url', 'writing_tone'] as const;
+
+function profileCompleteness(profile: Record<string, unknown> | null | undefined): number {
+  if (!profile) return 0;
+  const filled = PROFILE_FIELDS.filter((f) => {
+    const v = profile[f];
+    return typeof v === 'string' && v.trim().length > 0;
+  }).length;
+  return Math.round((filled / PROFILE_FIELDS.length) * 100);
+}
 
 export function Dashboard() {
   const { user, profile } = useAuth();
   const [missions, setMissions] = useState<MissionWithStats[]>([]);
   const [stats, setStats] = useState<Stats>({
     missions: 0,
-    targets: 0,
-    contacts: 0,
     drafts: 0,
     contacted: 0,
     replied: 0,
+    repliesToHandle: 0,
   });
   const [runs, setRuns] = useState<AgentRun[]>([]);
+  const [gmailConnected, setGmailConnected] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const refetchRuns = useCallback(async () => {
+    if (!user?.id) return;
+    const { data } = await supabase
+      .from('agent_runs')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('started_at', { ascending: false })
+      .limit(8);
+    setRuns((data ?? []) as AgentRun[]);
+  }, [user?.id]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -51,11 +79,10 @@ export function Dashboard() {
     async function load() {
       const [
         { data: msData },
-        { count: targetCount },
-        { count: contactCount },
         { count: draftCount },
         { count: contactedCount },
         { count: repliedCount },
+        { count: repliesToHandle },
         { data: runsData },
       ] = await Promise.all([
         supabase
@@ -64,17 +91,11 @@ export function Dashboard() {
           .eq('user_id', user!.id)
           .is('archived_at', null)
           .order('created_at', { ascending: false }),
-        supabase.from('targets').select('id', { count: 'exact', head: true }),
-        supabase.from('contacts').select('id', { count: 'exact', head: true }),
         supabase.from('email_sequences').select('id', { count: 'exact', head: true }).eq('status', 'draft'),
         supabase.from('contacts').select('id', { count: 'exact', head: true }).eq('status', 'contacted'),
         supabase.from('contacts').select('id', { count: 'exact', head: true }).eq('status', 'replied'),
-        supabase
-          .from('agent_runs')
-          .select('*')
-          .eq('user_id', user!.id)
-          .order('started_at', { ascending: false })
-          .limit(10),
+        supabase.from('replies').select('id', { count: 'exact', head: true }).eq('handled', false),
+        supabase.from('agent_runs').select('*').eq('user_id', user!.id).order('started_at', { ascending: false }).limit(8),
       ]);
 
       if (cancelled) return;
@@ -107,14 +128,21 @@ export function Dashboard() {
       setMissions(missionsWithStats);
       setStats({
         missions: missionsList.length,
-        targets: targetCount ?? 0,
-        contacts: contactCount ?? 0,
         drafts: draftCount ?? 0,
         contacted: contactedCount ?? 0,
         replied: repliedCount ?? 0,
+        repliesToHandle: repliesToHandle ?? 0,
       });
       setRuns((runsData ?? []) as AgentRun[]);
       setLoading(false);
+
+      // First-run only needs Gmail status (for the setup nudge).
+      if (missionsList.length === 0) {
+        gmail
+          .status()
+          .then((r) => !cancelled && setGmailConnected(r.connected))
+          .catch(() => !cancelled && setGmailConnected(null));
+      }
     }
 
     load().catch((err) => {
@@ -127,22 +155,74 @@ export function Dashboard() {
     };
   }, [user?.id, reloadKey]);
 
-  const responseRate =
-    stats.contacted > 0 ? Math.round((stats.replied / stats.contacted) * 100) : null;
+  // Keep the activity feed honest: while any run is in flight, re-poll until it
+  // reaches a terminal state (fixes phantom "RUNNING" rows that never resolve).
+  useEffect(() => {
+    if (pollRef.current) clearTimeout(pollRef.current);
+    const anyRunning = runs.some((r) => r.status === 'running');
+    if (!anyRunning) return;
+    pollRef.current = setTimeout(() => {
+      void refetchRuns();
+    }, 4000);
+    return () => {
+      if (pollRef.current) clearTimeout(pollRef.current);
+    };
+  }, [runs, refetchRuns]);
 
+  const responseRate = stats.contacted > 0 ? Math.round((stats.replied / stats.contacted) * 100) : null;
+  const firstName = profile?.name ? profile.name.split(' ')[0] : null;
+  const percent = profileCompleteness(profile as unknown as Record<string, unknown>);
+
+  // ---- First-run launchpad ----
+  if (!loading && missions.length === 0) {
+    return (
+      <div className="launchpad">
+        <section className="launchpad-card">
+          <p className="launchpad-eyebrow">Welcome{firstName ? `, ${firstName}` : ''} 👋</p>
+          <h1 className="launchpad-title">Let's land your first reply.</h1>
+          <p className="launchpad-sub">
+            Tell us who you want to reach. The agent finds the companies, the right people, the angle,
+            and writes the emails — you just review and send.
+          </p>
+          <Link to="/missions/new" className="launchpad-cta">
+            Start your first mission →
+          </Link>
+
+          <div className="launchpad-nudges">
+            {gmailConnected === false && (
+              <Link to="/settings" className="launchpad-nudge">
+                <span className="launchpad-nudge-dot" aria-hidden />
+                Connect Gmail <em>so you can send</em>
+              </Link>
+            )}
+            <Link to="/me" className="launchpad-nudge">
+              <span className="launchpad-nudge-dot" aria-hidden />
+              Sharpen your profile <em>{percent}% complete</em>
+            </Link>
+          </div>
+        </section>
+
+        <div className="launchpad-steps" aria-hidden>
+          <LaunchStep n={1} title="Find targets" body="High-fit companies with a real reason to reach out now." />
+          <LaunchStep n={2} title="Research & contacts" body="Sourced evidence + the decision-makers to email." />
+          <LaunchStep n={3} title="Drafts ready" body="A personalized sequence per contact, ready to send." />
+        </div>
+      </div>
+    );
+  }
+
+  // ---- Active dashboard ----
   return (
     <div>
       <header className="dashboard-header">
         <div>
-          <h1 style={{ margin: 0 }}>
-            {profile?.name ? `Welcome back, ${profile.name.split(' ')[0]}` : 'Dashboard'}
-          </h1>
+          <h1 style={{ margin: 0 }}>{firstName ? `Welcome back, ${firstName}` : 'Dashboard'}</h1>
           <p style={{ margin: '0.25rem 0 0', color: 'var(--text-muted)', fontSize: '0.9375rem' }}>
             Your outreach pipeline at a glance.
           </p>
         </div>
         <Link to="/missions/new" className="dashboard-create">
-          + Create Mission
+          + New mission
         </Link>
       </header>
 
@@ -157,9 +237,8 @@ export function Dashboard() {
 
       <div className="kpi-grid">
         <KPI label="Missions" value={stats.missions} />
-        <KPI label="Targets" value={stats.targets} />
-        <KPI label="Contacts" value={stats.contacts} />
-        <KPI label="Drafts" value={stats.drafts} />
+        <KPI label="Drafts to review" value={stats.drafts} to={stats.drafts > 0 ? '/missions' : undefined} highlight={stats.drafts > 0} />
+        <KPI label="Replies to handle" value={stats.repliesToHandle} to={stats.repliesToHandle > 0 ? '/inbox' : undefined} highlight={stats.repliesToHandle > 0} />
         <KPI label="Contacted" value={stats.contacted} />
         <KPI label="Reply rate" value={responseRate === null ? '—' : `${responseRate}%`} />
       </div>
@@ -168,35 +247,34 @@ export function Dashboard() {
         <section className="dashboard-section">
           <h2>Active missions</h2>
           {loading ? (
-            <p style={{ color: 'var(--text-muted)' }}>Loading…</p>
-          ) : missions.length === 0 ? (
-            <div className="empty-illo">
-              <div className="empty-illo-graphic" aria-hidden>✨</div>
-              <h3>Your first mission is one click away</h3>
-              <p>
-                Define what you're sending and who you want to reach. Targeting, evidence, contacts, and drafts run from there.
-              </p>
-              <Link to="/missions/new" className="dashboard-create" style={{ marginTop: '1.25rem' }}>
-                Create your first mission
-              </Link>
+            <div className="skeleton-list">
+              <div className="skeleton-row" />
+              <div className="skeleton-row" />
+              <div className="skeleton-row" />
             </div>
           ) : (
             <ul className="mission-row-list">
-              {missions.map((m) => (
-                <li key={m.id}>
-                  <Link to={`/missions/${m.id}`} className="mission-row">
-                    <div className="mission-row-main">
-                      <strong>{m.name}</strong>
-                      <span className="mode-pill subtle">{m.mode}</span>
-                    </div>
-                    <div className="mission-row-stats">
-                      <span>{m.target_count} targets</span>
-                      <span>{m.contact_count} contacts</span>
-                      <span>{m.draft_count} drafts</span>
-                    </div>
-                  </Link>
-                </li>
-              ))}
+              {missions.map((m) => {
+                const pct = m.target_count > 0 ? Math.round((m.draft_count / m.target_count) * 100) : 0;
+                return (
+                  <li key={m.id}>
+                    <Link to={`/missions/${m.id}`} className="mission-row">
+                      <div className="mission-row-main">
+                        <strong>{m.name}</strong>
+                        <span className="mode-pill subtle">{m.mode}</span>
+                      </div>
+                      <div className="mission-progress" aria-hidden>
+                        <div className="mission-progress-bar" style={{ width: `${Math.min(pct, 100)}%` }} />
+                      </div>
+                      <div className="mission-row-stats">
+                        <span>{m.target_count} targets</span>
+                        <span>{m.contact_count} contacts</span>
+                        <span>{m.draft_count} drafts</span>
+                      </div>
+                    </Link>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>
@@ -205,14 +283,16 @@ export function Dashboard() {
           <h2>Recent activity</h2>
           {runs.length === 0 ? (
             <p style={{ color: 'var(--text-muted)', fontSize: '0.9375rem' }}>
-              Nothing yet. Run an agent on a mission to see activity here.
+              Nothing yet. Run a mission to see activity here.
             </p>
           ) : (
             <ul className="run-list">
               {runs.map((r) => (
                 <li key={r.id} className={`run-item run-${r.status}`}>
                   <span className="run-type">{RUN_LABEL[r.agent_type] ?? r.agent_type}</span>
-                  <span className={`run-status status-${r.status}`}>{r.status}</span>
+                  <span className={`run-status status-${r.status}`}>
+                    {r.status === 'running' ? 'running…' : r.status}
+                  </span>
                   <span className="run-time">{timeAgo(r.started_at)}</span>
                 </li>
               ))}
@@ -224,11 +304,31 @@ export function Dashboard() {
   );
 }
 
-function KPI({ label, value }: { label: string; value: number | string }) {
-  return (
-    <div className="kpi-card">
+function KPI({ label, value, to, highlight }: { label: string; value: number | string; to?: string; highlight?: boolean }) {
+  const inner = (
+    <>
       <div className="kpi-value">{value}</div>
       <div className="kpi-label">{label}</div>
+    </>
+  );
+  if (to) {
+    return (
+      <Link to={to} className={`kpi-card kpi-link ${highlight ? 'kpi-highlight' : ''}`}>
+        {inner}
+      </Link>
+    );
+  }
+  return <div className={`kpi-card ${highlight ? 'kpi-highlight' : ''}`}>{inner}</div>;
+}
+
+function LaunchStep({ n, title, body }: { n: number; title: string; body: string }) {
+  return (
+    <div className="launch-step">
+      <div className="launch-step-num">{n}</div>
+      <div>
+        <div className="launch-step-title">{title}</div>
+        <div className="launch-step-body">{body}</div>
+      </div>
     </div>
   );
 }
