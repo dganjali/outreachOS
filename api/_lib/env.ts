@@ -12,6 +12,9 @@ export const env = {
   // Gemini (Vertex AI) — the agent LLM. Auth is via Application Default
   // Credentials (the Cloud Run runtime service account), so no API key here.
   GEMINI_MODEL: () => optional('GEMINI_MODEL', 'gemini-2.5-flash'),
+  // Embeddings model (Vertex AI). Pinned to 1024 dims in embeddings.ts to
+  // match the existing Atlas vector indexes.
+  GEMINI_EMBED_MODEL: () => optional('GEMINI_EMBED_MODEL', 'gemini-embedding-001'),
   // Vertex AI region for generateContent. gemini-2.5-* live in us-central1.
   VERTEX_LOCATION: () => optional('VERTEX_LOCATION', 'us-central1'),
 
@@ -27,8 +30,8 @@ export const env = {
   FIREBASE_PROJECT_ID: () => required('FIREBASE_PROJECT_ID'),
   FIREBASE_SERVICE_ACCOUNT_JSON: () => optional('FIREBASE_SERVICE_ACCOUNT_JSON'),
 
-  // Voyage AI
-  VOYAGE_API_KEY: () => required('VOYAGE_API_KEY'),
+  // Voyage AI (legacy — embeddings moved to Vertex; optional so boot won't fail)
+  VOYAGE_API_KEY: () => optional('VOYAGE_API_KEY'),
 
   // Google Cloud
   GCP_PROJECT_ID: () => required('GCP_PROJECT_ID'),
