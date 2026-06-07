@@ -89,7 +89,7 @@ export function Onboarding() {
 
       // If the user gave us a LinkedIn URL (or a LinkedIn link in the resume slot),
       // enrich their profile in the background so the first mission they create has
-      // proof points + tone ready. Failures are non-blocking — they can also retry
+      // proof points + tone ready. Failures are non-blocking, they can also retry
       // from the Me page.
       const linkedin = (updates.linkedin_url as string | null) ?? '';
       const resume = (updates.resume_url as string | null) ?? '';
@@ -223,7 +223,7 @@ export function Onboarding() {
                     autoFocus
                   />
                   <p className="section-hint">
-                    We use this to auto-fill your bio, proof points, and tone — so the first mission's emails sound like you.
+                    We use this to auto-fill your bio, proof points, and tone, so the first mission's emails sound like you.
                   </p>
                 </div>
                 <div className="field">

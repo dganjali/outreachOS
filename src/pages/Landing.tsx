@@ -29,7 +29,7 @@ const MODES = [
   {
     key: 'sales',
     title: 'Cold Sales',
-    blurb: 'Book meetings off real intent signals — funding, hiring, launches.',
+    blurb: 'Book meetings off real intent signals, funding, hiring, launches.',
     icon: '⚡',
   },
 ];
@@ -57,7 +57,7 @@ const HOW = [
   {
     step: '03',
     title: 'Review, send, track',
-    body: 'Approve drafts in your voice, send via Gmail, and watch the inbox classify replies — interested, not now, wrong person — with suggested responses.',
+    body: 'Approve drafts in your voice, send via Gmail, and watch the inbox classify replies (interested, not now, wrong person) with suggested responses.',
   },
 ];
 
@@ -92,7 +92,7 @@ export function Landing() {
             Cold outreach that <span className="ldg-grad-text">writes itself</span>.
           </h1>
           <p className="ldg-hero-sub">
-            One mission in. Ranked targets, verified contacts, sourced evidence, and personalized drafts out — sent from your Gmail with replies routed back to you.
+            One mission in. Ranked targets, verified contacts, sourced evidence, and personalized drafts out, sent from your Gmail with replies routed back to you.
           </p>
           <div className="ldg-hero-cta">
             <Link to="/sign-up" className="ldg-btn ldg-btn-primary ldg-btn-lg">
@@ -103,7 +103,7 @@ export function Landing() {
             </a>
           </div>
           <p className="ldg-hero-fineprint">
-            Bring your own LLM key + Supabase + Gmail. Apollo is optional.
+            Runs on Google Gemini. Connect Gmail to send. Apollo is optional.
           </p>
 
           <div className="ldg-hero-glass" aria-hidden>
@@ -132,7 +132,7 @@ export function Landing() {
             <span className="ldg-eyebrow">The pipeline</span>
             <h2>Five agents, one click.</h2>
             <p className="ldg-section-sub">
-              Click <strong>Run full pipeline</strong> on a mission and watch each stage fire in sequence — targeting, contacts, evidence, drafts. Every output is reviewable before it leaves your inbox.
+              Click <strong>Run full pipeline</strong> on a mission and watch each stage fire in sequence, targeting, contacts, evidence, drafts. Every output is reviewable before it leaves your inbox.
             </p>
           </div>
           <div className="ldg-pipeline-strip">
@@ -151,7 +151,7 @@ export function Landing() {
             <span className="ldg-eyebrow">Built for any mission</span>
             <h2>Five modes. Same pipeline. Different angles.</h2>
             <p className="ldg-section-sub">
-              The system prompt shifts so the agent surfaces sponsorship history, partnership surface area, hiring signals, candidate pitches, or pain points — depending on what you’re actually trying to do.
+              The system prompt shifts so the agent surfaces sponsorship history, partnership surface area, hiring signals, candidate pitches, or pain points, depending on what you’re actually trying to do.
             </p>
           </div>
           <div className="ldg-modes-grid">
@@ -173,7 +173,7 @@ export function Landing() {
           <div className="ldg-feature-grid">
             <FeatureCard
               title="Evidence-first personalization"
-              body="Every line in every draft is anchored to a sourced bullet — funding round, recent launch, hiring signal — so personalization isn’t a Mad Lib."
+              body="Every line in every draft is anchored to a sourced bullet (funding round, recent launch, hiring signal), so personalization isn’t a Mad Lib."
             />
             <FeatureCard
               title="Apollo when you want it"
@@ -181,11 +181,11 @@ export function Landing() {
             />
             <FeatureCard
               title="Gmail send + reply routing"
-              body="Send through your own Gmail and the inbox cron classifies replies — interested, not now, wrong person — with a suggested response queued up."
+              body="Send through your own Gmail and the inbox cron classifies replies (interested, not now, wrong person) with a suggested response queued up."
             />
             <FeatureCard
               title="Your voice, every time"
-              body="LinkedIn enrichment auto-fills your bio, proof points, and tone so drafts sound like you on day one — no copy-paste from old emails."
+              body="LinkedIn enrichment auto-fills your bio, proof points, and tone so drafts sound like you on day one, no copy-paste from old emails."
             />
           </div>
         </section>
@@ -282,7 +282,7 @@ function PipelineVisual() {
               <strong>Subject:</strong> Sponsoring Hack the North 2026?
             </div>
             <p>
-              Hey — saw you sponsored React Conf. We hosted 1.4k attendees last year (60% senior CS) and have a tier that maps to your dev-marketing motion. Worth 15 min next week?
+              Hey, saw you sponsored React Conf. We hosted 1.4k attendees last year (60% senior CS) and have a tier that maps to your dev-marketing motion. Worth 15 min next week?
             </p>
           </div>
         </div>

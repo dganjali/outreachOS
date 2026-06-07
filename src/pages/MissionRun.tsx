@@ -32,14 +32,14 @@ export function MissionRun() {
     setTargets((ts) => ts.map((t) => (t.id === tid ? { ...t, [key]: status } : t)));
   }, []);
 
-  // Elapsed clock — runs only during a live run.
+  // Elapsed clock, runs only during a live run.
   useEffect(() => {
     if (phase !== 'targeting' && phase !== 'running') return;
     const h = setInterval(() => setElapsed((e) => e + 1), 1000);
     return () => clearInterval(h);
   }, [phase]);
 
-  // Load the mission (does NOT auto-run — the user launches deliberately).
+  // Load the mission (does NOT auto-run, the user launches deliberately).
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
@@ -164,7 +164,7 @@ export function MissionRun() {
             }
           }
         }
-        // Stream closed without an explicit terminal event — treat live as done.
+        // Stream closed without an explicit terminal event, treat live as done.
         setPhase((p) => (p === 'targeting' || p === 'running' ? 'done' : p));
         setNote('');
       } catch (err) {
@@ -201,7 +201,7 @@ export function MissionRun() {
           <h1 className="run-title">{mission ? `Launch ${mission.name}?` : 'Launch pipeline?'}</h1>
           <p className="run-ready-body">
             The agent will find the top {TOP_N} companies, research each, surface the right contacts,
-            and draft a personalized email per target — live, below. You review and send after.
+            and draft a personalized email per target, live, below. You review and send after.
           </p>
           <p className="run-ready-fineprint">
             Runs on the server, so it keeps going even if you close the tab. Uses up to ~{1 + TOP_N * 3} of your daily agent runs.
@@ -233,9 +233,9 @@ export function MissionRun() {
             {phase === 'done'
               ? 'Pipeline complete.'
               : phase === 'paused'
-                ? 'Paused — daily limit reached.'
+                ? 'Paused, daily limit reached.'
                 : phase === 'canceled'
-                  ? 'Stopped watching — the run finishes on the server.'
+                  ? 'Stopped watching, the run finishes on the server.'
                   : phase === 'error'
                     ? 'Something went wrong.'
                     : 'Researching your pipeline…'}

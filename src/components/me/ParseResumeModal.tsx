@@ -133,14 +133,14 @@ export function ParseResumeModal({
         <div className="parse-modal-body">
           {proposals.length === 0 ? (
             <p className="parse-modal-empty">
-              Nothing new to merge — the parser didn't find fields that differ from your current
+              Nothing new to merge. The parser didn't find fields that differ from your current
               profile. You can still keep the resume on file.
             </p>
           ) : (
             <>
               <p className="parse-modal-hint">
                 Check the fields you want to merge. Conflicts (where you already have a value) are
-                unchecked by default — review before overwriting.
+                unchecked by default; review before overwriting.
               </p>
               <ul className="parse-modal-list">
                 {proposals.map((p) => (

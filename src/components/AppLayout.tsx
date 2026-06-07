@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, Outlet, useLocation } from 'react-router-dom';
+import { Link, NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Logo } from './Logo';
 
@@ -12,10 +12,10 @@ const NAV = [
 ];
 
 export function AppLayout() {
-  const [search, setSearch] = useState('');
   const [userOpen, setUserOpen] = useState(false);
   const { user, profile, signOut } = useAuth();
-  const location = useLocation();
+  const displayName = profile?.name || user?.email || 'User';
+  const initial = displayName.trim().charAt(0).toUpperCase();
 
   return (
     <div className="app-root">
@@ -25,34 +25,29 @@ export function AppLayout() {
         </div>
         <nav>
           {NAV.map(({ to, label }) => (
-            <Link
-              key={to}
-              to={to}
-              className={location.pathname === to ? 'active' : ''}
-            >
+            <NavLink key={to} to={to} className={({ isActive }) => (isActive ? 'active' : '')}>
               {label}
-            </Link>
+            </NavLink>
           ))}
         </nav>
       </aside>
 
       <div className="app-main">
         <header className="app-topbar">
-          <input
-            type="search"
-            placeholder="Search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            aria-label="Search"
-          />
+          <Link to="/missions/new" className="topbar-new">
+            <span aria-hidden>+</span> New mission
+          </Link>
+
           <div className="app-user-menu">
             <button
               type="button"
+              className="app-user-trigger"
               onClick={() => setUserOpen((o) => !o)}
               aria-expanded={userOpen}
               aria-haspopup="true"
             >
-              {profile?.name || user?.email || 'User'}
+              <span className="app-user-avatar" aria-hidden>{initial}</span>
+              <span className="app-user-name">{displayName}</span>
             </button>
             {userOpen && (
               <>

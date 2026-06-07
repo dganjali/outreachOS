@@ -23,7 +23,7 @@ const KIND_LABEL: Record<Extract<ProfileAssetKind, 'resume' | 'portfolio_pdf'>, 
 
 const KIND_HINT: Record<Extract<ProfileAssetKind, 'resume' | 'portfolio_pdf'>, string> = {
   resume: 'PDF, up to 2MB. Triggers an agent that suggests profile updates.',
-  portfolio_pdf: 'PDF, up to 2MB. Stored for later reference — not parsed.',
+  portfolio_pdf: 'PDF, up to 2MB. Stored for later reference, not parsed.',
 };
 
 function formatBytes(n: number): string {

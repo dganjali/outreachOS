@@ -192,7 +192,7 @@ export function MissionPage() {
             type="button"
             className="btn-primary"
             onClick={() => navigate(`/missions/${mission.id}/run`)}
-            title="Find targets, build evidence packs, find contacts, and draft initial emails — live."
+            title="Find targets, build evidence packs, find contacts, and draft initial emails, live."
           >
             Run pipeline
           </button>
@@ -223,7 +223,7 @@ export function MissionPage() {
             <div className="empty-illo-graphic" aria-hidden>🎯</div>
             <h3>No targets yet</h3>
             <p>
-              Click <strong>Run pipeline</strong> to find targets, build evidence packs, find contacts, and draft initial emails — live, in one go. Or use <strong>Find targets</strong> if you want to drive each step manually.
+              Click <strong>Run pipeline</strong> to find targets, build evidence packs, find contacts, and draft initial emails, live, in one go. Or use <strong>Find targets</strong> if you want to drive each step manually.
             </p>
           </div>
         ) : (

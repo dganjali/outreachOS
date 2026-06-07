@@ -188,7 +188,7 @@ export function Dashboard() {
           <h1 className="launchpad-title">Let's land your first reply.</h1>
           <p className="launchpad-sub">
             Tell us who you want to reach. The agent finds the companies, the right people, the angle,
-            and writes the emails — you just review and send.
+            and writes the emails. You just review and send.
           </p>
           <Link to="/missions/new" className="launchpad-cta">
             Start your first mission →
@@ -218,18 +218,41 @@ export function Dashboard() {
   }
 
   // ---- Active dashboard ----
+  const focusItems = [
+    stats.drafts > 0
+      ? {
+          key: 'drafts',
+          count: stats.drafts,
+          noun: stats.drafts === 1 ? 'draft to review' : 'drafts to review',
+          sub: 'Agent-written emails waiting for your eyes.',
+          to: '/missions',
+          cta: 'Review drafts',
+          tone: 'accent' as const,
+        }
+      : null,
+    stats.repliesToHandle > 0
+      ? {
+          key: 'replies',
+          count: stats.repliesToHandle,
+          noun: stats.repliesToHandle === 1 ? 'reply to handle' : 'replies to handle',
+          sub: 'Prospects wrote back. Keep the thread warm.',
+          to: '/inbox',
+          cta: 'Open inbox',
+          tone: 'positive' as const,
+        }
+      : null,
+  ].filter(Boolean) as Array<{
+    key: string; count: number; noun: string; sub: string; to: string; cta: string; tone: 'accent' | 'positive';
+  }>;
+
   return (
-    <div>
-      <header className="dashboard-header">
+    <div className="dash">
+      <header className="dash-head">
         <div>
-          <h1 style={{ margin: 0 }}>{firstName ? `Welcome back, ${firstName}` : 'Dashboard'}</h1>
-          <p style={{ margin: '0.25rem 0 0', color: 'var(--text-muted)', fontSize: '0.9375rem' }}>
-            Your outreach pipeline at a glance.
-          </p>
+          <h1>{firstName ? `Welcome back, ${firstName}` : 'Dashboard'}</h1>
+          <p className="dash-sub">Your outreach pipeline at a glance.</p>
         </div>
-        <Link to="/missions/new" className="dashboard-create">
-          + New mission
-        </Link>
+        <Link to="/missions/new" className="btn-primary btn-lg dash-new">New mission</Link>
       </header>
 
       {error && (
@@ -241,18 +264,33 @@ export function Dashboard() {
         </div>
       )}
 
-      <div className="kpi-grid">
-        <KPI label="Missions" value={stats.missions} />
-        <KPI label="Drafts to review" value={stats.drafts} to={stats.drafts > 0 ? '/missions' : undefined} highlight={stats.drafts > 0} />
-        <KPI label="Replies to handle" value={stats.repliesToHandle} to={stats.repliesToHandle > 0 ? '/inbox' : undefined} highlight={stats.repliesToHandle > 0} />
-        <KPI label="Contacted" value={stats.contacted} />
-        <KPI label="Reply rate" value={responseRate === null ? '—' : `${responseRate}%`} />
-        <KPI label="Runs today" value={`${stats.runsToday}/50`} highlight={stats.runsToday >= 40} />
-      </div>
+      {focusItems.length > 0 ? (
+        <section className="focus-band" aria-label="Needs your attention">
+          {focusItems.map((f) => (
+            <Link key={f.key} to={f.to} className={`focus-card tone-${f.tone}`}>
+              <span className="focus-count">{f.count}</span>
+              <span className="focus-body">
+                <span className="focus-noun">{f.noun}</span>
+                <span className="focus-sub">{f.sub}</span>
+              </span>
+              <span className="focus-cta">{f.cta} →</span>
+            </Link>
+          ))}
+        </section>
+      ) : (
+        !loading && (
+          <p className="dash-allclear">
+            You're all caught up. <Link to="/missions/new">Start a mission</Link> to fill your pipeline.
+          </p>
+        )
+      )}
 
-      <div className="dashboard-columns">
-        <section className="dashboard-section">
-          <h2>Active missions</h2>
+      <div className="dash-grid">
+        <section className="dash-main">
+          <div className="dash-section-head">
+            <h2>Active missions</h2>
+            <Link to="/missions" className="dash-section-link">All missions →</Link>
+          </div>
           {loading ? (
             <div className="skeleton-list">
               <div className="skeleton-row" />
@@ -286,46 +324,47 @@ export function Dashboard() {
           )}
         </section>
 
-        <section className="dashboard-section">
-          <h2>Recent activity</h2>
-          {runs.length === 0 ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9375rem' }}>
-              Nothing yet. Run a mission to see activity here.
-            </p>
-          ) : (
-            <ul className="run-list">
-              {runs.map((r) => (
-                <li key={r.id} className={`run-item run-${r.status}`}>
-                  <span className="run-type">{RUN_LABEL[r.agent_type] ?? r.agent_type}</span>
-                  <span className={`run-status status-${r.status}`}>
-                    {r.status === 'running' ? 'running…' : r.status}
-                  </span>
-                  <span className="run-time">{timeAgo(r.started_at)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+        <aside className="dash-rail">
+          <section className="dash-rail-block">
+            <h2>Recent activity</h2>
+            {runs.length === 0 ? (
+              <p className="dash-muted">Nothing yet. Run a mission to see activity here.</p>
+            ) : (
+              <ul className="run-list">
+                {runs.map((r) => (
+                  <li key={r.id} className={`run-item run-${r.status}`}>
+                    <span className="run-type">{RUN_LABEL[r.agent_type] ?? r.agent_type}</span>
+                    <span className={`run-status status-${r.status}`}>
+                      {r.status === 'running' ? 'running…' : r.status}
+                    </span>
+                    <span className="run-time">{timeAgo(r.started_at)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="dash-rail-block">
+            <h2>This week</h2>
+            <dl className="stat-strip">
+              <div>
+                <dt>Contacted</dt>
+                <dd>{stats.contacted}</dd>
+              </div>
+              <div>
+                <dt>Reply rate</dt>
+                <dd>{responseRate === null ? '—' : `${responseRate}%`}</dd>
+              </div>
+              <div className={stats.runsToday >= 40 ? 'is-warn' : ''}>
+                <dt>Runs today</dt>
+                <dd>{stats.runsToday}<span className="stat-max">/50</span></dd>
+              </div>
+            </dl>
+          </section>
+        </aside>
       </div>
     </div>
   );
-}
-
-function KPI({ label, value, to, highlight }: { label: string; value: number | string; to?: string; highlight?: boolean }) {
-  const inner = (
-    <>
-      <div className="kpi-value">{value}</div>
-      <div className="kpi-label">{label}</div>
-    </>
-  );
-  if (to) {
-    return (
-      <Link to={to} className={`kpi-card kpi-link ${highlight ? 'kpi-highlight' : ''}`}>
-        {inner}
-      </Link>
-    );
-  }
-  return <div className={`kpi-card ${highlight ? 'kpi-highlight' : ''}`}>{inner}</div>;
 }
 
 function LaunchStep({ n, title, body }: { n: number; title: string; body: string }) {

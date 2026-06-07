@@ -111,7 +111,7 @@ export function Missions() {
           <div className="empty-illo-graphic" aria-hidden>🚀</div>
           <h3>No missions yet</h3>
           <p>
-            A mission is one outreach campaign — a mode (sponsorship, BD, sales…), an offer, and an audience. Create one and the agents take it from there.
+            A mission is one outreach campaign, a mode (sponsorship, BD, sales…), an offer, and an audience. Create one and the agents take it from there.
           </p>
           <Link to="/missions/new" className="dashboard-create" style={{ marginTop: '1.25rem' }}>
             Create your first mission
