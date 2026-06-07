@@ -15,6 +15,7 @@ import agentCoach from '../api/agents/coach';
 import agentParseResume from '../api/agents/parse-resume';
 
 import gmailSend from '../api/gmail/send';
+import gmailReply from '../api/gmail/reply';
 import gmailStart from '../api/integrations/gmail/start';
 import gmailCallback from '../api/integrations/gmail/callback';
 import gmailStatus from '../api/integrations/gmail/status';
@@ -41,6 +42,7 @@ app.post('/api/agents/parse-resume', wrap(agentParseResume));
 
 // gmail
 app.post('/api/gmail/send', wrap(gmailSend));
+app.post('/api/gmail/reply', wrap(gmailReply));
 app.post('/api/integrations/gmail/start', wrap(gmailStart));
 app.get('/api/integrations/gmail/callback', wrap(gmailCallback));
 app.get('/api/integrations/gmail/status', wrap(gmailStatus));

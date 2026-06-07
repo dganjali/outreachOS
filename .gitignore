@@ -27,3 +27,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Build output (compiled server bundle) + Firebase CLI cache
+dist-server/
+.firebase/

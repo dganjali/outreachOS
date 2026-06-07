@@ -13,7 +13,7 @@ COPY tsconfig.json tsconfig.server.json ./
 COPY shared ./shared
 COPY api ./api
 COPY server ./server
-RUN npx tsc -p tsconfig.server.json
+RUN npm run server:build
 
 FROM node:22-slim AS runtime
 WORKDIR /app
@@ -25,4 +25,4 @@ COPY --from=build /app/shared ./shared
 
 # Cloud Run sets $PORT.
 EXPOSE 8080
-CMD ["node", "dist-server/server/index.js"]
+CMD ["node", "dist-server/server.cjs"]
