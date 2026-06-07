@@ -214,7 +214,7 @@ export function Inbox() {
           <h3>No replies yet</h3>
           <p>
             We check Gmail every 15 minutes for replies on threads you've sent. When one lands, it shows
-            up here — already classified, with a suggested response ready to go.
+            up here, already classified, with a suggested response ready to go.
           </p>
         </div>
       ) : (
@@ -327,7 +327,7 @@ function SuggestedReply({ reply, onSent }: { reply: Reply; onSent: () => void })
 
   return (
     <div className="reply-suggested">
-      <div className="reply-suggested-label">Suggested reply — edit &amp; send</div>
+      <div className="reply-suggested-label">Suggested reply, edit &amp; send</div>
       <input
         className="reply-subject-input"
         value={subject}

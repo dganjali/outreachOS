@@ -56,7 +56,7 @@ export function MissionNew() {
       <h1>{isWelcome ? 'Create your first mission' : 'Create Mission'}</h1>
       <p style={{ margin: '0 0 1.5rem', fontSize: '0.9375rem', color: 'var(--text-muted)' }}>
         {isWelcome
-          ? "You're all set. A mission tells the agent who you're trying to reach and what you're offering — fill it in and we'll find targets, contacts, and draft emails for you."
+          ? "You're all set. A mission tells the agent who you're trying to reach and what you're offering, fill it in and we'll find targets, contacts, and draft emails for you."
           : "Pick a mode, define what you're sending, and describe who you want to reach. The agent will do the rest."}
       </p>
 
