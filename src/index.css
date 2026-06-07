@@ -3998,3 +3998,7 @@ a:hover {
 .reply-body-input:focus { outline: none; border-color: var(--accent); }
 .reply-suggested-actions { display: flex; align-items: center; gap: 0.75rem; }
 .reply-suggested.sent { color: var(--accent); font-weight: 600; }
+
+/* Mission workspace: inline draft editing */
+.sequence-edit { margin-top: 0.5rem; }
+.sequence-edit-actions { display: flex; align-items: center; gap: 0.75rem; margin-top: 0.25rem; }

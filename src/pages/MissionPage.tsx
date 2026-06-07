@@ -404,6 +404,24 @@ function SequenceCard({ sequence, contact }: { sequence: EmailSequence; contact:
   const [sentMessages, setSentMessages] = useState<Record<number, SentMessage | undefined>>({});
   const [overrideEmail, setOverrideEmail] = useState('');
   const [needsEmail, setNeedsEmail] = useState(false);
+  const [draft, setDraft] = useState({
+    subject: sequence.subject,
+    body: sequence.body,
+    followups: sequence.followups,
+  });
+
+  async function saveTouch(touchIndex: number, subject: string, body: string) {
+    if (touchIndex === 0) {
+      await supabase.from('email_sequences').update({ subject, body }).eq('id', sequence.id);
+      setDraft((d) => ({ ...d, subject, body }));
+    } else {
+      const followups = draft.followups.map((f, i) =>
+        i === touchIndex - 1 ? { ...f, subject, body } : f
+      );
+      await supabase.from('email_sequences').update({ followups }).eq('id', sequence.id);
+      setDraft((d) => ({ ...d, followups }));
+    }
+  }
 
   useEffect(() => {
     supabase
@@ -478,16 +496,17 @@ function SequenceCard({ sequence, contact }: { sequence: EmailSequence; contact:
           <Touch
             label="Initial"
             touchIndex={0}
-            subject={sequence.subject}
-            body={sequence.body}
+            subject={draft.subject}
+            body={draft.body}
             sent={sentMessages[0]}
             sending={sending}
             onCopy={(t) => copy('initial', t)}
             copied={copied === 'initial'}
             onSend={doSend}
+            onSave={saveTouch}
             disabled={!contact.email && !overrideEmail}
           />
-          {sequence.followups.map((f, i) => {
+          {draft.followups.map((f, i) => {
             const idx = i + 1;
             return (
               <Touch
@@ -501,6 +520,7 @@ function SequenceCard({ sequence, contact }: { sequence: EmailSequence; contact:
                 onCopy={(t) => copy(`fu${i}`, t)}
                 copied={copied === `fu${i}`}
                 onSend={doSend}
+                onSave={saveTouch}
                 disabled={!sentMessages[0]}
                 disabledReason={!sentMessages[0] ? 'Send the initial email first' : undefined}
               />
@@ -533,6 +553,7 @@ function Touch({
   onCopy,
   copied,
   onSend,
+  onSave,
   disabled,
   disabledReason,
 }: {
@@ -545,11 +566,34 @@ function Touch({
   onCopy: (text: string) => void;
   copied: boolean;
   onSend: (touchIndex: number, mode: 'draft' | 'send') => Promise<void>;
+  onSave: (touchIndex: number, subject: string, body: string) => Promise<void>;
   disabled?: boolean;
   disabledReason?: string;
 }) {
   const isSent = sent?.status === 'sent';
   const isDraft = sent?.status === 'draft';
+  const [editing, setEditing] = useState(false);
+  const [s, setS] = useState(subject);
+  const [b, setB] = useState(body);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!editing) {
+      setS(subject);
+      setB(body);
+    }
+  }, [subject, body, editing]);
+
+  async function save() {
+    setSaving(true);
+    try {
+      await onSave(touchIndex, s, b);
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div className="sequence-touch">
       <div className="sequence-touch-head">
@@ -559,10 +603,15 @@ function Touch({
           {isDraft && <span className="sent-badge draft">draft created</span>}
         </span>
         <div className="touch-actions">
+          {!isSent && !editing && (
+            <button type="button" className="link-button" onClick={() => setEditing(true)}>
+              Edit
+            </button>
+          )}
           <button type="button" className="link-button" onClick={() => onCopy(`Subject: ${subject}\n\n${body}`)}>
             {copied ? 'Copied' : 'Copy'}
           </button>
-          {!isSent && (
+          {!isSent && !editing && (
             <>
               <button
                 type="button"
@@ -588,8 +637,43 @@ function Touch({
           )}
         </div>
       </div>
-      <div className="sequence-subject">{subject}</div>
-      <pre className="sequence-text">{body}</pre>
+      {editing ? (
+        <div className="sequence-edit">
+          <input
+            className="reply-subject-input"
+            value={s}
+            onChange={(e) => setS(e.target.value)}
+            placeholder="Subject"
+          />
+          <textarea
+            className="reply-body-input"
+            value={b}
+            onChange={(e) => setB(e.target.value)}
+            rows={7}
+          />
+          <div className="sequence-edit-actions">
+            <button type="button" className="btn-primary tiny" onClick={save} disabled={saving || !b.trim()}>
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+            <button
+              type="button"
+              className="link-button"
+              onClick={() => {
+                setEditing(false);
+                setS(subject);
+                setB(body);
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="sequence-subject">{subject}</div>
+          <pre className="sequence-text">{body}</pre>
+        </>
+      )}
     </div>
   );
 }
