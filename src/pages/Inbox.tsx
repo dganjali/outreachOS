@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
-import { agents } from '../lib/api';
+import { agents, gmail } from '../lib/api';
 import type { Reply, ReplyClassification, SentMessage } from '../types';
 
 const CLASS_LABEL: Record<ReplyClassification, string> = {
@@ -255,20 +256,10 @@ export function Inbox() {
                 )}
 
                 {r.suggested_response && (
-                  <div className="reply-suggested">
-                    <div className="reply-suggested-label">Suggested reply</div>
-                    <div className="reply-subject">{r.suggested_response.subject}</div>
-                    <pre className="sequence-text">{r.suggested_response.body}</pre>
-                    <button
-                      type="button"
-                      className="link-button"
-                      onClick={() =>
-                        navigator.clipboard.writeText(`Subject: ${r.suggested_response!.subject}\n\n${r.suggested_response!.body}`)
-                      }
-                    >
-                      Copy
-                    </button>
-                  </div>
+                  <SuggestedReply
+                    reply={r}
+                    onSent={() => setReplies((rs) => rs.map((x) => (x.id === r.id ? { ...x, handled: true } : x)))}
+                  />
                 )}
 
                 <div className="reply-actions">
@@ -295,6 +286,77 @@ export function Inbox() {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+function SuggestedReply({ reply, onSent }: { reply: Reply; onSent: () => void }) {
+  const [subject, setSubject] = useState(reply.suggested_response?.subject ?? '');
+  const [body, setBody] = useState(reply.suggested_response?.body ?? '');
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function send() {
+    setSending(true);
+    setErr(null);
+    try {
+      await gmail.reply(reply.id, subject, body);
+      setSent(true);
+      onSent();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Send failed');
+    } finally {
+      setSending(false);
+    }
+  }
+
+  function copy() {
+    navigator.clipboard.writeText(`Subject: ${subject}\n\n${body}`).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
+
+  if (sent) {
+    return <div className="reply-suggested sent">✓ Reply sent.</div>;
+  }
+
+  const notConnected = err && /gmail_not_connected/i.test(err);
+
+  return (
+    <div className="reply-suggested">
+      <div className="reply-suggested-label">Suggested reply — edit &amp; send</div>
+      <input
+        className="reply-subject-input"
+        value={subject}
+        onChange={(e) => setSubject(e.target.value)}
+        placeholder="Subject"
+      />
+      <textarea
+        className="reply-body-input"
+        value={body}
+        onChange={(e) => setBody(e.target.value)}
+        rows={5}
+      />
+      {err && (
+        <div className="banner-error">
+          {notConnected ? (
+            <>Connect Gmail in <Link to="/settings">Settings</Link> to send replies.</>
+          ) : (
+            err
+          )}
+        </div>
+      )}
+      <div className="reply-suggested-actions">
+        <button type="button" className="btn-primary tiny" onClick={send} disabled={sending || !body.trim()}>
+          {sending ? 'Sending…' : 'Send reply'}
+        </button>
+        <button type="button" className="link-button" onClick={copy}>
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
     </div>
   );
 }
