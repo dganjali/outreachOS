@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
-import { currentIdToken } from '../firebaseClient';
-import type { Mission } from '../types';
+import { agents } from '../lib/api';
+import type { Mission, Contact } from '../types';
 
 type StepStatus = 'queued' | 'running' | 'done' | 'failed';
 type Phase = 'ready' | 'targeting' | 'running' | 'done' | 'paused' | 'error' | 'canceled';
@@ -17,6 +17,7 @@ interface RunTarget {
 }
 
 const TOP_N = 5;
+const TARGET_COUNT = 8;
 
 export function MissionRun() {
   const { id } = useParams<{ id: string }>();
@@ -57,125 +58,104 @@ export function MissionRun() {
     };
   }, [id]);
 
-  // Apply a single SSE event from the server-side pipeline.
-  const handleEvent = useCallback(
-    (event: string, payload: Record<string, unknown>) => {
-      switch (event) {
-        case 'phase':
-          if (payload.phase === 'targeting') {
-            setPhase('targeting');
-            setNote('Finding high-fit companies with a reason to reach out now…');
-          }
-          break;
-        case 'targets': {
-          const list = (payload.targets ?? []) as Array<{ id: string; name: string; score: number | null }>;
-          setTargets(
-            list.map((t) => ({
-              id: t.id,
-              name: t.name,
-              score: t.score ?? null,
-              evidence: 'queued',
-              contacts: 'queued',
-              sequence: 'queued',
-            }))
-          );
-          setPhase('running');
-          break;
-        }
-        case 'step':
-          if (typeof payload.note === 'string') setNote(payload.note);
-          if (payload.targetId && payload.step && payload.status) {
-            setStep(
-              payload.targetId as string,
-              payload.step as 'evidence' | 'contacts' | 'sequence',
-              payload.status as StepStatus
-            );
-          }
-          break;
-        case 'paused':
-          setPhase('paused');
-          break;
-        case 'error':
-          setError((payload.message as string) ?? 'Pipeline failed');
-          setPhase('error');
-          break;
-        case 'done':
-          setNote('');
-          setPhase('done');
-          break;
-      }
-    },
-    [setStep]
-  );
-
+  // Client-driven orchestration. Each agent call is its own short request
+  // (~4-7s on Gemini), so nothing trips Firebase Hosting's 60s proxy cap the
+  // way a single long-lived /pipeline stream did. "Stop" sets the abort flag,
+  // which we check between steps so an in-flight call finishes cleanly.
   const runPipeline = useCallback(
     async (m: Mission) => {
       setError(null);
       setElapsed(0);
       setTargets([]);
       setPhase('targeting');
-      setNote('Starting…');
+      setNote('Finding high-fit companies with a reason to reach out now…');
 
       const ctrl = new AbortController();
       abortRef.current = ctrl;
+      const stopped = () => ctrl.signal.aborted;
+      const isRateLimit = (e: unknown) =>
+        /rate.?limit|\b429\b|daily .*limit/i.test(e instanceof Error ? e.message : String(e));
+
       try {
-        const token = await currentIdToken();
-        const resp = await fetch('/api/agents/pipeline', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token ?? ''}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mission_id: m.id }),
-          signal: ctrl.signal,
-        });
+        // 1) Targets.
+        const { targets: found } = await agents.target(m.id, TARGET_COUNT);
+        if (stopped()) return;
+        const top = [...found]
+          .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+          .slice(0, TOP_N);
+        if (top.length === 0) {
+          setNote('');
+          return setPhase('done');
+        }
+        setTargets(
+          top.map((t) => ({
+            id: t.id,
+            name: t.company_name,
+            score: t.score ?? null,
+            evidence: 'queued',
+            contacts: 'queued',
+            sequence: 'queued',
+          }))
+        );
+        setPhase('running');
 
-        if (!resp.ok || !resp.body) {
-          let msg = `HTTP ${resp.status}`;
+        // 2) Per target: evidence -> contacts -> best contact -> sequence.
+        for (const t of top) {
+          if (stopped()) return;
+
+          setStep(t.id, 'evidence', 'running');
+          setNote(`Researching ${t.company_name}, reading recent sources…`);
           try {
-            const j = (await resp.json()) as { error?: string };
-            msg = j.error || msg;
-          } catch {
-            /* non-JSON */
+            await agents.evidence(t.id);
+            setStep(t.id, 'evidence', 'done');
+          } catch (e) {
+            if (isRateLimit(e)) return setPhase('paused');
+            setStep(t.id, 'evidence', 'failed');
+            continue;
           }
-          if (/rate_limit/i.test(msg)) return setPhase('paused');
-          setError(msg);
-          return setPhase('error');
+          if (stopped()) return;
+
+          setStep(t.id, 'contacts', 'running');
+          setNote(`Finding the right decision-makers at ${t.company_name}…`);
+          let contacts: Contact[] = [];
+          try {
+            const r = await agents.contacts(t.id);
+            contacts = r.contacts ?? [];
+            setStep(t.id, 'contacts', 'done');
+          } catch (e) {
+            if (isRateLimit(e)) return setPhase('paused');
+            setStep(t.id, 'contacts', 'failed');
+            continue;
+          }
+          const best = [...contacts].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))[0];
+          if (!best) {
+            setStep(t.id, 'sequence', 'failed');
+            continue;
+          }
+          if (stopped()) return;
+
+          setStep(t.id, 'sequence', 'running');
+          setNote(`Drafting a personalized email for ${t.company_name}…`);
+          try {
+            await agents.sequence(best.id);
+            setStep(t.id, 'sequence', 'done');
+          } catch (e) {
+            if (isRateLimit(e)) return setPhase('paused');
+            setStep(t.id, 'sequence', 'failed');
+          }
         }
 
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder();
-        let buf = '';
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
-          const chunks = buf.split('\n\n');
-          buf = chunks.pop() ?? '';
-          for (const chunk of chunks) {
-            let event = 'message';
-            let dataStr = '';
-            for (const line of chunk.split('\n')) {
-              if (line.startsWith('event:')) event = line.slice(6).trim();
-              else if (line.startsWith('data:')) dataStr += line.slice(5).trim();
-            }
-            if (!dataStr) continue;
-            try {
-              handleEvent(event, JSON.parse(dataStr));
-            } catch {
-              /* skip malformed */
-            }
-          }
-        }
-        // Stream closed without an explicit terminal event, treat live as done.
-        setPhase((p) => (p === 'targeting' || p === 'running' ? 'done' : p));
+        if (stopped()) return;
         setNote('');
+        setPhase('done');
       } catch (err) {
-        if (ctrl.signal.aborted) return; // user stopped watching / navigated away
-        const msg = err instanceof Error ? err.message : 'Pipeline failed';
-        if (/rate_limit/i.test(msg)) return setPhase('paused');
-        setError(msg);
+        if (stopped()) return;
+        if (isRateLimit(err)) return setPhase('paused');
+        setError(err instanceof Error ? err.message : 'Pipeline failed');
         setPhase('error');
       }
     },
-    [handleEvent]
+    [setStep]
   );
 
   const totalSteps = targets.length > 0 ? 1 + targets.length * 3 : 1;
@@ -204,7 +184,7 @@ export function MissionRun() {
             and draft a personalized email per target, live, below. You review and send after.
           </p>
           <p className="run-ready-fineprint">
-            Runs on the server, so it keeps going even if you close the tab. Uses up to ~{1 + TOP_N * 3} of your daily agent runs.
+            Runs live in this tab; keep it open until it finishes (about a minute). Finished targets are saved as you go. Uses up to ~{1 + TOP_N * 3} of your daily agent runs.
           </p>
           <button
             type="button"
@@ -235,7 +215,7 @@ export function MissionRun() {
               : phase === 'paused'
                 ? 'Paused, daily limit reached.'
                 : phase === 'canceled'
-                  ? 'Stopped watching, the run finishes on the server.'
+                  ? 'Stopped. Finished targets are saved.'
                   : phase === 'error'
                     ? 'Something went wrong.'
                     : 'Researching your pipeline…'}
