@@ -45,7 +45,7 @@ export function MissionNew() {
       setError(err.message);
       return;
     }
-    navigate(data ? `/missions/${data.id}` : '/missions', { replace: true });
+    navigate(data ? `/missions/${data.id}/run` : '/missions', { replace: true });
   }
 
   return (

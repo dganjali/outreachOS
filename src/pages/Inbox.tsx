@@ -131,7 +131,7 @@ export function Inbox() {
         <p style={{ color: 'var(--text-muted)' }}>Loading…</p>
       ) : replies.length === 0 ? (
         <div className="empty-card">
-          <p>No replies yet. The polling worker checks Gmail every ~10 minutes for new replies on threads you've sent.</p>
+          <p>No replies yet. We check Gmail every 15 minutes for new replies on threads you've sent.</p>
         </div>
       ) : (
         <div className="reply-list">

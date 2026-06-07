@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { agents, gmail } from '../lib/api';
@@ -24,6 +24,7 @@ const MODE_LABEL: Record<string, string> = {
 export function MissionPage() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [mission, setMission] = useState<Mission | null>(null);
   const [targets, setTargets] = useState<Target[]>([]);
   const [contactsByTarget, setContactsByTarget] = useState<Record<string, Contact[]>>({});
@@ -145,51 +146,6 @@ export function MissionPage() {
     if (r) await loadSequencesForContact(contact.id);
   }
 
-  async function runFullPipeline() {
-    if (!mission) return;
-    setError(null);
-    setBusy('pipeline');
-    try {
-      // Step 1: targets, if we don't have any yet
-      let workingTargets = targets;
-      if (workingTargets.length === 0) {
-        const r = await agents.target(mission.id, 8);
-        workingTargets = (r.targets ?? []) as Target[];
-        await loadTargets();
-      }
-
-      // Step 2: for each of the top 5 by score, build evidence + contacts
-      const top = workingTargets
-        .slice()
-        .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
-        .slice(0, 5);
-
-      for (const t of top) {
-        try {
-          await agents.evidence(t.id);
-          await loadEvidenceForTarget(t.id);
-          const cr = await agents.contacts(t.id);
-          await loadContactsForTarget(t.id);
-          // Step 3: draft a sequence for the top contact at this target
-          const topContact = (cr.contacts ?? [])
-            .slice()
-            .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))[0];
-          if (topContact) {
-            await agents.sequence(topContact.id);
-            await loadSequencesForContact(topContact.id);
-          }
-        } catch (err) {
-          console.error('pipeline_step_failed', t.id, err);
-          // Continue with next target rather than aborting the whole run.
-        }
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Pipeline failed');
-    } finally {
-      setBusy(null);
-    }
-  }
-
   async function setTargetStatus(target: Target, status: Target['status']) {
     await supabase.from('targets').update({ status }).eq('id', target.id);
     setTargets((ts) => ts.map((t) => (t.id === target.id ? { ...t, status } : t)));
@@ -227,7 +183,7 @@ export function MissionPage() {
           <button
             type="button"
             className="btn-secondary"
-            disabled={busy === 'targeting' || busy === 'pipeline'}
+            disabled={busy === 'targeting'}
             onClick={findTargets}
           >
             {busy === 'targeting' ? 'Researching…' : targets.length === 0 ? 'Find targets' : 'Find more targets'}
@@ -235,11 +191,10 @@ export function MissionPage() {
           <button
             type="button"
             className="btn-primary"
-            disabled={busy === 'pipeline'}
-            onClick={runFullPipeline}
-            title="Find targets, build evidence packs, find contacts, and draft initial emails — all in one click."
+            onClick={() => navigate(`/missions/${mission.id}/run`)}
+            title="Find targets, build evidence packs, find contacts, and draft initial emails — live."
           >
-            {busy === 'pipeline' ? 'Running pipeline…' : 'Run full pipeline'}
+            Run pipeline
           </button>
         </div>
       </header>
@@ -268,7 +223,7 @@ export function MissionPage() {
             <div className="empty-illo-graphic" aria-hidden>🎯</div>
             <h3>No targets yet</h3>
             <p>
-              Click <strong>Run full pipeline</strong> to find targets, build evidence packs, find contacts, and draft initial emails — all in one go. Or use <strong>Find targets</strong> if you want to drive each step manually.
+              Click <strong>Run pipeline</strong> to find targets, build evidence packs, find contacts, and draft initial emails — live, in one go. Or use <strong>Find targets</strong> if you want to drive each step manually.
             </p>
           </div>
         ) : (
