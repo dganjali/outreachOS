@@ -4,6 +4,7 @@ import { forUser } from '../_lib/db';
 import { createMessageWithRetry, MODEL, extractJson } from '../_lib/anthropic';
 import { REPLY_ROUTER_SYSTEM } from '../_lib/prompts';
 import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
+import { cancelQueuedForContact, addSuppression, scheduleRetouch } from '../_lib/sequencing';
 import type {
   ContactDoc,
   EmailSequenceDoc,
@@ -12,6 +13,8 @@ import type {
   ReplyDoc,
   SentMessageDoc,
 } from '../../shared/schemas';
+
+const RETOUCH_DAYS = 21;
 
 interface ReplyClassification {
   classification: string;
@@ -101,19 +104,15 @@ export default async function handler(req: Request, res: Response) {
       recommendedAction: cls.recommended_action,
     });
 
-    if (contact && (cls.classification === 'unsubscribe' || cls.classification === 'not_now')) {
-      // Stop the sequence — no more follow-ups
-      const sentMessages = await scope
-        .collection<SentMessageDoc>('sent_messages')
-        .find({ contactId: contact._id, status: 'queued' });
-      for (const sm of sentMessages) {
-        await scope.collection<SentMessageDoc>('sent_messages').updateById(sm._id, {
-          status: 'failed',
-          failedReason: `suppressed_${cls.classification}`,
-        });
-      }
-    }
     if (contact) {
+      if (cls.classification === 'unsubscribe') {
+        // Hard stop + never contact this address again.
+        await cancelQueuedForContact(scope, contact._id, 'suppressed_unsubscribe');
+        if (reply.fromEmail) await addSuppression(scope, reply.fromEmail, 'unsubscribe', 'classified from reply');
+      } else if (cls.classification === 'not_now') {
+        // Soft stop + one timed re-touch a few weeks out.
+        await scheduleRetouch(scope, contact._id, RETOUCH_DAYS);
+      }
       await scope.collection<ContactDoc>('contacts').updateById(contact._id, { status: 'replied' });
     }
 

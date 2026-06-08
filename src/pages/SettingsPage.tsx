@@ -15,6 +15,47 @@ export function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // Follow-ups + suppression
+  const [paused, setPaused] = useState(false);
+  const [pauseBusy, setPauseBusy] = useState(false);
+  const [suppressions, setSuppressions] = useState<Array<{ id: string; email: string; reason: string }>>([]);
+  const [newEmail, setNewEmail] = useState('');
+
+  async function loadSuppressions() {
+    const { data } = await supabase.from('suppressions').select('*');
+    setSuppressions((data ?? []) as Array<{ id: string; email: string; reason: string }>);
+  }
+
+  async function togglePause() {
+    if (!user?.id) return;
+    const next = !paused;
+    setPaused(next);
+    setPauseBusy(true);
+    try {
+      await supabase.from('profiles').update({ pause_followups: next }).eq('user_id', user.id);
+    } finally {
+      setPauseBusy(false);
+    }
+  }
+
+  async function addSuppression(e: React.FormEvent) {
+    e.preventDefault();
+    const email = newEmail.trim().toLowerCase();
+    if (!email) return;
+    try {
+      await supabase.from('suppressions').insert({ email, reason: 'manual', note: null });
+      setNewEmail('');
+      await loadSuppressions();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not add to suppression list');
+    }
+  }
+
+  async function removeSuppression(id: string) {
+    await supabase.from('suppressions').delete().eq('id', id);
+    setSuppressions((s) => s.filter((x) => x.id !== id));
+  }
+
   // Gmail
   const [integration, setIntegration] = useState<Integration | null>(null);
   const [gmailLoading, setGmailLoading] = useState(true);
@@ -44,6 +85,19 @@ export function SettingsPage() {
   useEffect(() => {
     loadGmailStatus();
   }, []);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase
+      .from('profiles')
+      .select('*')
+      .eq('user_id', user.id)
+      .single()
+      .then(({ data }) => {
+        if (data) setPaused(!!(data as { pause_followups?: boolean }).pause_followups);
+      });
+    void loadSuppressions();
+  }, [user?.id]);
 
   async function connectGmail() {
     setGmailBusy(true);
@@ -161,6 +215,56 @@ export function SettingsPage() {
             <p className={gmailFlash.startsWith('Gmail connected') || gmailFlash === 'Gmail disconnected.' ? 'flash success' : 'flash error'}>
               {gmailFlash}
             </p>
+          )}
+        </section>
+
+        <section className="profile-section">
+          <h2>Follow-ups &amp; sending</h2>
+          <p className="section-hint">
+            When you send an initial email, OutreachOS schedules its follow-ups and sends them on
+            their cadence. They stop automatically the moment a contact replies or unsubscribes.
+          </p>
+          <div className="settings-toggle">
+            <button
+              type="button"
+              className={paused ? 'btn-secondary' : 'btn-primary'}
+              onClick={togglePause}
+              disabled={pauseBusy}
+            >
+              {paused ? 'Resume auto follow-ups' : 'Pause all follow-ups'}
+            </button>
+            <span style={{ color: 'var(--fg-muted)', fontSize: 'var(--text-sm)' }}>
+              {paused ? 'Paused. Scheduled follow-ups will not send.' : 'Active. Follow-ups send on schedule.'}
+            </span>
+          </div>
+
+          <h4 style={{ marginTop: 'var(--space-5)' }}>Suppression list</h4>
+          <p className="section-hint">Addresses here are never emailed. Unsubscribes are added automatically.</p>
+          <form className="suppress-add" onSubmit={addSuppression}>
+            <input
+              type="email"
+              placeholder="name@company.com"
+              value={newEmail}
+              onChange={(e) => setNewEmail(e.target.value)}
+            />
+            <button type="submit" className="btn-secondary" disabled={!newEmail.trim()}>
+              Suppress
+            </button>
+          </form>
+          {suppressions.length > 0 && (
+            <ul className="suppress-list">
+              {suppressions.map((s) => (
+                <li key={s.id}>
+                  <span>
+                    <span className="suppress-email">{s.email}</span>{' '}
+                    <span className="suppress-reason">{s.reason}</span>
+                  </span>
+                  <button type="button" className="link-button" onClick={() => removeSuppression(s.id)}>
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
           )}
         </section>
 

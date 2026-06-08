@@ -50,6 +50,7 @@ export const COL = {
   replies: 'replies',
   agentRuns: 'agent_runs',
   userIntegrations: 'user_integrations',
+  suppressions: 'suppressions',
 } as const;
 
 export type CollectionName = (typeof COL)[keyof typeof COL];
@@ -77,6 +78,7 @@ const OWNERSHIP: Record<CollectionName, OwnershipMode> = {
   replies: 'userId',
   agent_runs: 'userId',
   user_integrations: 'userId',
+  suppressions: 'userId',
 };
 
 // ---------------------------------------------------------------------------

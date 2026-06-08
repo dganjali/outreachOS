@@ -1,4 +1,5 @@
 import type { SentMessage } from '../types';
+import { checkDeliverability } from '../lib/deliverability';
 
 interface TouchProps {
   label: string;
@@ -29,6 +30,7 @@ export function SequenceTouch({
 }: TouchProps) {
   const isSent = sent?.status === 'sent';
   const isDraft = sent?.status === 'draft';
+  const deliver = isSent ? null : checkDeliverability(subject, body);
   return (
     <div className="sequence-touch">
       <div className="sequence-touch-head">
@@ -67,6 +69,18 @@ export function SequenceTouch({
           )}
         </div>
       </div>
+      {deliver && deliver.level !== 'good' && (
+        <div className={`deliver-note deliver-${deliver.level}`}>
+          <span className="deliver-head">
+            {deliver.level === 'risk' ? 'Deliverability risk' : 'Heads up'} · {deliver.score}/100
+          </span>
+          <ul>
+            {deliver.warnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div className="sequence-subject">{subject}</div>
       <pre className="sequence-text">{body}</pre>
     </div>

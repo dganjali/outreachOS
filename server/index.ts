@@ -23,6 +23,8 @@ import gmailStatus from '../api/integrations/gmail/status';
 import gmailDisconnect from '../api/integrations/gmail/disconnect';
 
 import cronPollGmail from '../api/cron/poll-gmail';
+import cronSendDueTouches from '../api/cron/send-due-touches';
+import cronWeeklyDigest from '../api/cron/weekly-digest';
 import tasksWorker from '../api/tasks/worker';
 import dataRouter from '../api/data/router';
 
@@ -52,6 +54,8 @@ app.post('/api/integrations/gmail/disconnect', wrap(gmailDisconnect));
 
 // cron + tasks
 app.post('/api/cron/poll-gmail', wrap(cronPollGmail));
+app.post('/api/cron/send-due-touches', wrap(cronSendDueTouches));
+app.post('/api/cron/weekly-digest', wrap(cronWeeklyDigest));
 app.post('/api/tasks/worker', wrap(tasksWorker));
 
 // generic CRUD for the frontend (replaces direct Supabase queries)

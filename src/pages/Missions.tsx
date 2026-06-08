@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
+import { exportPipelineCsv } from '../lib/exportPipeline';
 import type { Mission } from '../types';
 
 function truncate(str: string, max: number) {
@@ -28,6 +29,18 @@ export function Missions() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  async function handleExport() {
+    setExporting(true);
+    try {
+      await exportPipelineCsv();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Export failed');
+    } finally {
+      setExporting(false);
+    }
+  }
 
   async function load(uid: string, includeArchived: boolean) {
     setLoading(true);
@@ -90,6 +103,9 @@ export function Missions() {
             onClick={() => setShowArchived((v) => !v)}
           >
             {showArchived ? 'Hide archived' : 'Show archived'}
+          </button>
+          <button type="button" className="btn-secondary" disabled={exporting} onClick={handleExport}>
+            {exporting ? 'Exporting…' : 'Export CSV'}
           </button>
           <Link to="/missions/new" className="dashboard-create">
             + Create Mission
