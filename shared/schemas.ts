@@ -50,6 +50,15 @@ export interface ProfileDoc extends BaseDoc {
   linkedinSource: 'apollo' | 'web_search' | null;
   onboardingStep: number;
   onboardingCompletedAt: Date | null;
+  // When true, the follow-up sweeper skips this user's scheduled touches.
+  pauseFollowups?: boolean;
+}
+
+// Email addresses that must never be contacted (unsubscribe, bounce, manual).
+export interface SuppressionDoc extends BaseDoc {
+  email: string; // lowercased
+  reason: 'unsubscribe' | 'bounce' | 'manual' | 'complaint';
+  note: string | null;
 }
 
 export interface ProfileVersionDoc extends BaseDoc {
@@ -287,6 +296,9 @@ export const INDEX_SPEC: Record<string, Array<{ keys: Record<string, 1 | -1>; op
   ],
   user_integrations: [
     { keys: { userId: 1, provider: 1 }, options: { unique: true } },
+  ],
+  suppressions: [
+    { keys: { userId: 1, email: 1 }, options: { unique: true } },
   ],
 };
 

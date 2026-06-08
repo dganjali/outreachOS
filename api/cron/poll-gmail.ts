@@ -3,7 +3,7 @@
 // Auth: Cloud Scheduler sends `Authorization: Bearer ${CRON_SECRET}`.
 
 import type { Request, Response } from 'express';
-import { adminDb, newId } from '../_lib/db';
+import { adminDb, forUser, newId } from '../_lib/db';
 import {
   getActiveAccessToken,
   getThread,
@@ -12,9 +12,12 @@ import {
   headerValue,
 } from '../_lib/gmail';
 import { requireCronSecret } from '../_lib/auth';
+import { cancelQueuedForContact } from '../_lib/sequencing';
 import type {
   ReplyDoc,
   SentMessageDoc,
+  ContactDoc,
+  EmailSequenceDoc,
   UserIntegrationDoc,
 } from '../../shared/schemas';
 
@@ -112,6 +115,20 @@ export default async function handler(req: Request, res: Response) {
               updatedAt: now,
             } as ReplyDoc);
             inserted++;
+
+            // Reply-stop: a human replied, so halt the cold cadence immediately
+            // (don't wait for the user to classify it in the inbox).
+            const us = forUser(userId);
+            await cancelQueuedForContact(us, ctx.contact_id, 'replied');
+            await us.collection<ContactDoc>('contacts').updateById(ctx.contact_id, { status: 'replied' });
+            const priorSent = await us
+              .collection<SentMessageDoc>('sent_messages')
+              .findById(ctx.sent_message_id);
+            if (priorSent) {
+              await us
+                .collection<EmailSequenceDoc>('email_sequences')
+                .updateById(priorSent.sequenceId, { status: 'replied' });
+            }
           }
         } catch (err) {
           errors.push({ user_id: userId, error: err instanceof Error ? err.message : 'thread_failed' });

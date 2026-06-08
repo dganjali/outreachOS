@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { forUser, newId, type InsertDoc } from '../_lib/db';
 import { getActiveAccessToken, createDraft, sendNow } from '../_lib/gmail';
+import { scheduleFollowups, isSuppressed } from '../_lib/sequencing';
 import type {
   ContactDoc,
   EmailSequenceDoc,
@@ -39,6 +40,11 @@ export default async function handler(req: Request, res: Response) {
   const toEmail = body.to_override?.trim() || contact.email?.trim();
   if (!toEmail) {
     return res.status(400).json({ error: 'no_recipient_email', message: 'Contact has no email. Provide to_override.' });
+  }
+
+  // Suppression guard — never send (or draft) to a suppressed address.
+  if (mode === 'send' && (await isSuppressed(scope, toEmail))) {
+    return res.status(409).json({ error: 'suppressed', message: 'This address is on your suppression list.' });
   }
 
   // Pick the touch
@@ -139,11 +145,18 @@ export default async function handler(req: Request, res: Response) {
     });
 
     if (mode === 'send' && touchIndex === 0) {
+      const sentAt = new Date();
       await scope.collection<EmailSequenceDoc>('email_sequences').updateById(sequenceId, {
         status: 'sent',
-        sentAt: new Date(),
+        sentAt,
       });
       await scope.collection<ContactDoc>('contacts').updateById(contact._id, { status: 'contacted' });
+
+      // Auto-schedule the follow-up cadence unless the user paused it globally.
+      const paused = (profile as ProfileDoc | null)?.pauseFollowups === true;
+      if (!paused) {
+        await scheduleFollowups({ scope, seq, toEmail, sentAt });
+      }
     }
 
     return res.status(200).json({
