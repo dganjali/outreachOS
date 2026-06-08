@@ -55,6 +55,13 @@ const FEATURES = [
   },
 ];
 
+const TRACE = [
+  { stage: 'TARGET', ok: 'ok', detail: 'Vercel · Resend · Linear · Supabase · Clerk · 3 more', meta: '8 ranked · 4.1s' },
+  { stage: 'EVIDENCE', ok: 'ok', detail: 'Apollo firmographics + 12 sourced bullets per company', meta: 'grounded · 6.4s' },
+  { stage: 'CONTACTS', ok: 'ok', detail: 'Head of DevRel · Director of Community · 91% avg confidence', meta: '14 verified · 3.8s' },
+  { stage: 'SEQUENCE', ok: 'ok', detail: 'Subject + 3-touch body, threaded follow-ups scheduled', meta: '5 drafts · 5.7s' },
+];
+
 export function Landing() {
   return (
     <div className="ldg-page">
@@ -63,7 +70,8 @@ export function Landing() {
           <Logo size={26} />
           <nav className="ldg-nav-links">
             <a href="#how">How it works</a>
-            <a href="#pipeline">Pipeline</a>
+            <a href="#trace">Live trace</a>
+            <a href="#specimen">A real draft</a>
             <a href="#modes">Modes</a>
           </nav>
           <div className="ldg-nav-cta">
@@ -75,22 +83,68 @@ export function Landing() {
 
       <main>
         <section className="ldg-hero">
-          <p className="ldg-hero-kicker">Cold outreach, end to end</p>
-          <h1 className="ldg-hero-title">
-            One mission in.<br />
-            <span className="ldg-hero-italic">Pipeline out.</span>
-          </h1>
-          <p className="ldg-hero-sub">
-            Ranked targets, verified contacts, sourced evidence, and personalized drafts,
-            sent from your Gmail with replies routed back to you. Reviewable at every step.
-          </p>
-          <div className="ldg-hero-cta">
-            <Link to="/sign-up" className="ldg-btn ldg-btn-primary ldg-btn-lg">Start free</Link>
-            <a href="#how" className="ldg-btn ldg-btn-ghost ldg-btn-lg">See how it works</a>
+          <div className="ldg-hero-grid">
+            <p className="ldg-hero-meta">
+              <span>Vol. 01</span>
+              <span className="ldg-hero-meta-sep" aria-hidden />
+              <span>Agentic cold outreach</span>
+              <span className="ldg-hero-meta-sep" aria-hidden />
+              <span>Apollo / LinkedIn / Gmail</span>
+              <span className="ldg-hero-meta-sep" aria-hidden />
+              <span className="ldg-hero-meta-tag">v1.0 — shipping</span>
+            </p>
+            <h1 className="ldg-hero-title">
+              One mission in.<br />
+              <span className="ldg-hero-italic">Pipeline out.</span>
+            </h1>
+            <p className="ldg-hero-sub">
+              Ranked targets, verified contacts, sourced evidence, and personalized drafts,
+              sent from your Gmail with replies routed back to you. Reviewable at every step,
+              autonomous once you trust it.
+            </p>
+            <div className="ldg-hero-cta">
+              <Link to="/sign-up" className="ldg-btn ldg-btn-primary ldg-btn-lg">Start free</Link>
+              <a href="#trace" className="ldg-btn ldg-btn-ghost ldg-btn-lg">Watch a real run</a>
+            </div>
+            <p className="ldg-hero-fineprint">
+              Runs on Google Gemini. Connect Gmail to send. Apollo is optional.
+            </p>
           </div>
-          <p className="ldg-hero-fineprint">
-            Runs on Google Gemini. Connect Gmail to send. Apollo is optional.
-          </p>
+        </section>
+
+        <section id="trace" className="ldg-section ldg-trace-section">
+          <div className="ldg-section-head">
+            <span className="ldg-eyebrow">A real run</span>
+            <h2>What you actually see, not a screenshot.</h2>
+            <p className="ldg-section-sub">
+              Each stage logs its inputs, citations, and latency. No glass mockups, no
+              made-up dashboard chrome, this is the agent output your missions emit.
+            </p>
+          </div>
+          <div className="ldg-trace">
+            <div className="ldg-trace-head">
+              <span className="ldg-trace-title">mission · q1-sponsorship</span>
+              <span className="ldg-trace-status">RUNNING</span>
+            </div>
+            <ol className="ldg-trace-log">
+              {TRACE.map((t, i) => (
+                <li key={t.stage} className="ldg-trace-line" style={{ animationDelay: `${i * 0.12}s` }}>
+                  <span className="ldg-trace-num">{String(i + 1).padStart(2, '0')}</span>
+                  <span className="ldg-trace-stage">{t.stage}</span>
+                  <span className="ldg-trace-ok" aria-label="ok">{t.ok}</span>
+                  <span className="ldg-trace-detail">{t.detail}</span>
+                  <span className="ldg-trace-meta">{t.meta}</span>
+                </li>
+              ))}
+              <li className="ldg-trace-line ldg-trace-line-final" style={{ animationDelay: `${TRACE.length * 0.12}s` }}>
+                <span className="ldg-trace-num">{String(TRACE.length + 1).padStart(2, '0')}</span>
+                <span className="ldg-trace-stage">REVIEW</span>
+                <span className="ldg-trace-ok ldg-trace-ok-wait">queued</span>
+                <span className="ldg-trace-detail">Awaiting your approval before send.</span>
+                <span className="ldg-trace-meta">you</span>
+              </li>
+            </ol>
+          </div>
         </section>
 
         <section id="how" className="ldg-section">
@@ -111,13 +165,72 @@ export function Landing() {
           </ol>
         </section>
 
-        <section id="pipeline" className="ldg-section ldg-section-soft">
+        <section id="specimen" className="ldg-section ldg-section-soft">
+          <div className="ldg-section-head">
+            <span className="ldg-eyebrow">A specimen draft</span>
+            <h2>Personalization with receipts.</h2>
+            <p className="ldg-section-sub">
+              Every claim in the email is anchored to a sourced bullet. The model cannot
+              flatter what it has not read. Hover the highlights to see the citation.
+            </p>
+          </div>
+          <article className="ldg-specimen">
+            <header className="ldg-specimen-head">
+              <div>
+                <span className="ldg-specimen-from">to_</span>
+                <span className="ldg-specimen-addr">jess@resend.com</span>
+              </div>
+              <div className="ldg-specimen-subject">
+                <span className="ldg-specimen-from">re_</span>
+                Sponsoring Hack the North 2026?
+              </div>
+            </header>
+            <div className="ldg-specimen-body">
+              <p>Hey Jess,</p>
+              <p>
+                Saw Resend{' '}
+                <mark className="ldg-cite" data-cite="Funding announcement · 2025-03">
+                  closed Series B this March
+                </mark>{' '}
+                and{' '}
+                <mark className="ldg-cite" data-cite="Job board · open as of 2026-05">
+                  is hiring its first developer-marketing lead
+                </mark>
+                . That same week, the team{' '}
+                <mark className="ldg-cite" data-cite="Twitter @resend · 2026-05-14">
+                  shipped Vue support
+                </mark>{' '}
+                — the framework crowd we host most.
+              </p>
+              <p>
+                We hosted{' '}
+                <mark className="ldg-cite" data-cite="Hack the North recap deck · pg.12">
+                  1,418 attendees last year (60% senior CS)
+                </mark>
+                , and have a tier that maps to the dev-marketing motion you are
+                building. Worth 15 min next week?
+              </p>
+              <p className="ldg-specimen-sign">— Daniel</p>
+            </div>
+            <aside className="ldg-specimen-margin" aria-label="Sourced citations">
+              <p className="ldg-specimen-margin-head">Sources</p>
+              <ol>
+                <li><span>01</span> Series B announcement · TechCrunch · 2025-03</li>
+                <li><span>02</span> Public job board · Resend careers · open</li>
+                <li><span>03</span> @resend tweet · Vue support shipped</li>
+                <li><span>04</span> HtN 2025 recap deck · pg.12</li>
+              </ol>
+            </aside>
+          </article>
+        </section>
+
+        <section id="pipeline" className="ldg-section">
           <div className="ldg-section-head">
             <span className="ldg-eyebrow">The pipeline</span>
             <h2>Five agents, one click.</h2>
             <p className="ldg-section-sub">
-              Click <strong>Run full pipeline</strong> on a mission and watch each stage fire
-              in sequence. Every output is reviewable before it leaves your inbox.
+              Click <strong>Run full pipeline</strong> on a mission and watch each stage
+              fire in sequence. Every output is reviewable before it leaves your inbox.
             </p>
           </div>
           <ol className="ldg-pipeline-flow">
@@ -128,12 +241,15 @@ export function Landing() {
                   <div className="ldg-pipeline-label">{s.label}</div>
                   <div className="ldg-pipeline-detail">{s.detail}</div>
                 </div>
+                {i < PIPELINE.length - 1 && (
+                  <span className="ldg-pipeline-arrow" aria-hidden>↓</span>
+                )}
               </li>
             ))}
           </ol>
         </section>
 
-        <section id="modes" className="ldg-section">
+        <section id="modes" className="ldg-section ldg-section-soft">
           <div className="ldg-section-head">
             <span className="ldg-eyebrow">Built for any mission</span>
             <h2>Five modes. Same pipeline. Different angles.</h2>
@@ -144,23 +260,27 @@ export function Landing() {
             </p>
           </div>
           <dl className="ldg-modes-table">
-            {MODES.map((m) => (
+            {MODES.map((m, i) => (
               <div key={m.key} className="ldg-mode-row">
-                <dt>{m.title}</dt>
+                <dt>
+                  <span className="ldg-mode-num">{String(i + 1).padStart(2, '0')}</span>
+                  {m.title}
+                </dt>
                 <dd>{m.blurb}</dd>
               </div>
             ))}
           </dl>
         </section>
 
-        <section className="ldg-section ldg-section-soft">
+        <section className="ldg-section">
           <div className="ldg-section-head">
             <span className="ldg-eyebrow">Why it is different</span>
             <h2>Vendor-neutral by default. Power-user when you want it.</h2>
           </div>
           <div className="ldg-feature-grid">
-            {FEATURES.map((f) => (
+            {FEATURES.map((f, i) => (
               <div key={f.title} className="ldg-feature-row">
+                <span className="ldg-feature-num">{String(i + 1).padStart(2, '0')}</span>
                 <h3>{f.title}</h3>
                 <p>{f.body}</p>
               </div>
@@ -170,12 +290,16 @@ export function Landing() {
 
         <section className="ldg-cta-section">
           <div className="ldg-cta-card">
-            <h2>Stop tab-hopping. Start sending.</h2>
+            <span className="ldg-cta-eyebrow">Start sending</span>
+            <h2>
+              Stop tab-hopping.<br />
+              <span className="ldg-hero-italic">Start sending.</span>
+            </h2>
             <p>
               Replace the Apollo, RocketReach, LinkedIn, ChatGPT, Sheets, Gmail dance with
               one mission, one click, one inbox.
             </p>
-            <Link to="/sign-up" className="ldg-btn ldg-btn-primary ldg-btn-lg">
+            <Link to="/sign-up" className="ldg-btn ldg-btn-cta ldg-btn-lg">
               Create your account
             </Link>
           </div>
@@ -192,6 +316,7 @@ export function Landing() {
             <div>
               <h4>Product</h4>
               <a href="#how">How it works</a>
+              <a href="#trace">Live trace</a>
               <a href="#pipeline">Pipeline</a>
               <a href="#modes">Modes</a>
             </div>
