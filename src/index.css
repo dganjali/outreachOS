@@ -4989,3 +4989,95 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
   .ldg-trace-line { opacity: 1 !important; animation: none !important; }
   .ldg-trace-status::before { animation: none !important; }
 }
+
+/* ============================================================
+   LANDING REHAUL v4 (2026-06) — DRENCHED hero + mountain scene.
+   The page now opens in deep forest green with a layered ridge
+   range behind cream text. Committed/drenched color strategy
+   (brand register). Bookended by the green CTA band at the foot.
+   ============================================================ */
+
+.ldg-page { position: relative; }
+
+/* --- Nav: float over the green hero, light text, non-sticky --- */
+.ldg-nav {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 30;
+  background: transparent; border-bottom: 0; backdrop-filter: none;
+}
+.ldg-nav-links a, .ldg-link { color: oklch(0.86 0.03 145); }
+.ldg-nav-links a:hover, .ldg-link:hover { color: oklch(0.98 0.012 130); }
+.ldg-nav .ldg-btn-primary {
+  background: oklch(0.96 0.020 120); color: oklch(0.28 0.07 157);
+  border-color: oklch(0.96 0.020 120);
+}
+.ldg-nav .ldg-btn-primary:hover { background: oklch(0.99 0.010 120); border-color: oklch(0.99 0.010 120); color: oklch(0.24 0.07 157); }
+
+/* --- Hero: drenched, full-bleed scene --- */
+.ldg-hero {
+  position: relative; overflow: hidden;
+  min-height: min(880px, 94vh);
+  display: flex; align-items: center;
+  max-width: none;
+  padding: clamp(7rem, 16vh, 11rem) var(--space-6) clamp(5rem, 12vh, 8rem);
+  background: oklch(0.18 0.045 162);
+  text-align: left;
+}
+.ldg-hero::before { display: none; }
+.ldg-scene { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; display: block; }
+/* fade the scene's base into the first light section for a soft seam */
+.ldg-hero-fade {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 160px; z-index: 1;
+  background: linear-gradient(180deg, transparent 0%, oklch(0.155 0.05 159 / 0.0) 40%, var(--surface) 100%);
+  pointer-events: none;
+}
+.ldg-hero-grid { position: relative; z-index: 2; max-width: 1040px; margin: 0 auto; width: 100%; }
+
+/* hero text → cream on green */
+.ldg-hero-meta { color: oklch(0.82 0.035 145); }
+.ldg-hero-meta-sep { background: oklch(0.82 0.035 145 / 0.45); }
+.ldg-hero-meta-tag {
+  border-color: oklch(0.80 0.06 150 / 0.5); background: oklch(0.90 0.05 150 / 0.12);
+  color: oklch(0.92 0.04 140);
+}
+.ldg-hero-title { color: oklch(0.97 0.018 105); }
+.ldg-hero-italic { color: oklch(0.84 0.105 150); }
+.ldg-hero-sub { color: oklch(0.89 0.025 140); }
+.ldg-hero-fineprint { color: oklch(0.78 0.025 145); }
+
+/* hero buttons: cream primary, light-outline ghost */
+.ldg-hero .ldg-btn-primary {
+  background: oklch(0.96 0.020 120); color: oklch(0.27 0.07 157);
+  border-color: oklch(0.96 0.020 120);
+}
+.ldg-hero .ldg-btn-primary:hover { background: oklch(0.99 0.010 120); border-color: oklch(0.99 0.010 120); color: oklch(0.22 0.07 157); }
+.ldg-hero .ldg-btn-ghost {
+  background: oklch(1 0 0 / 0.06); color: oklch(0.95 0.02 130);
+  border-color: oklch(0.85 0.04 150 / 0.4);
+}
+.ldg-hero .ldg-btn-ghost:hover { background: oklch(1 0 0 / 0.14); border-color: oklch(0.9 0.04 150 / 0.6); color: oklch(0.98 0.01 120); }
+
+/* --- Scene motion --- */
+.ms-star { animation: ms-twinkle 3.4s ease-in-out infinite; transform-origin: center; }
+@keyframes ms-twinkle { 0%, 100% { opacity: 0.22; } 50% { opacity: 0.92; } }
+.ms-mist { animation: ms-drift 22s ease-in-out infinite alternate; }
+.ms-mist-2 { animation: ms-drift-2 28s ease-in-out infinite alternate; }
+@keyframes ms-drift { from { transform: translateX(-26px); } to { transform: translateX(26px); } }
+@keyframes ms-drift-2 { from { transform: translateX(24px); } to { transform: translateX(-24px); } }
+.ms-orb { animation: ms-orb-breathe 7s ease-in-out infinite; transform-origin: 1090px 250px; }
+@keyframes ms-orb-breathe { 0%, 100% { opacity: 0.92; } 50% { opacity: 1; } }
+
+/* --- CTA band: add ridge silhouette echo at the foot --- */
+.ldg-cta-card { padding-bottom: clamp(5rem, 12vh, 9rem); }
+.ldg-cta-ridge {
+  position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: clamp(90px, 14vh, 160px);
+  z-index: 0; display: block; pointer-events: none;
+}
+.ldg-cta-card > *:not(.ldg-cta-ridge) { position: relative; z-index: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ms-star, .ms-mist, .ms-mist-2, .ms-orb { animation: none !important; }
+}
+
+@media (max-width: 640px) {
+  .ldg-hero { min-height: 82vh; }
+}

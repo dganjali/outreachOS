@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Logo } from '../components/Logo';
+import { MountainScene, RidgeSilhouette } from '../components/MountainScene';
 
 const MODES = [
   { key: 'sponsorship', title: 'Sponsorship', blurb: 'Get devtools, brands, and platforms to sponsor your event or community.' },
@@ -67,7 +68,7 @@ export function Landing() {
     <div className="ldg-page">
       <header className="ldg-nav">
         <div className="ldg-nav-inner">
-          <Logo size={26} />
+          <Logo size={26} variant="mono-light" />
           <nav className="ldg-nav-links">
             <a href="#how">How it works</a>
             <a href="#trace">Live trace</a>
@@ -83,15 +84,15 @@ export function Landing() {
 
       <main>
         <section className="ldg-hero">
+          <MountainScene className="ldg-scene" />
+          <div className="ldg-hero-fade" aria-hidden />
           <div className="ldg-hero-grid">
             <p className="ldg-hero-meta">
-              <span>Vol. 01</span>
-              <span className="ldg-hero-meta-sep" aria-hidden />
               <span>Agentic cold outreach</span>
               <span className="ldg-hero-meta-sep" aria-hidden />
-              <span>Apollo / LinkedIn / Gmail</span>
+              <span>Apollo · LinkedIn · Gmail</span>
               <span className="ldg-hero-meta-sep" aria-hidden />
-              <span className="ldg-hero-meta-tag">v1.0 — shipping</span>
+              <span className="ldg-hero-meta-tag">v1.0 shipping</span>
             </p>
             <h1 className="ldg-hero-title">
               One mission in.<br />
@@ -290,6 +291,7 @@ export function Landing() {
 
         <section className="ldg-cta-section">
           <div className="ldg-cta-card">
+            <RidgeSilhouette className="ldg-cta-ridge" />
             <span className="ldg-cta-eyebrow">Start sending</span>
             <h2>
               Stop tab-hopping.<br />
