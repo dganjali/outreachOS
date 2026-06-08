@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Logo } from '../components/Logo';
-import { MountainScene, RidgeSilhouette } from '../components/MountainScene';
+import { MountainScene, RidgeSilhouette, ContourField } from '../components/MountainScene';
 
 const MODES = [
   { key: 'sponsorship', title: 'Sponsorship', blurb: 'Get devtools, brands, and platforms to sponsor your event or community.' },
@@ -167,6 +167,7 @@ export function Landing() {
         </section>
 
         <section id="specimen" className="ldg-section ldg-section-soft">
+          <ContourField className="ldg-contour ldg-contour-soft" />
           <div className="ldg-section-head">
             <span className="ldg-eyebrow">A specimen draft</span>
             <h2>Personalization with receipts.</h2>
@@ -225,7 +226,8 @@ export function Landing() {
           </article>
         </section>
 
-        <section id="pipeline" className="ldg-section">
+        <section id="pipeline" className="ldg-section ldg-band-dark">
+          <ContourField className="ldg-contour ldg-contour-dark" />
           <div className="ldg-section-head">
             <span className="ldg-eyebrow">The pipeline</span>
             <h2>Five agents, one click.</h2>
@@ -251,6 +253,7 @@ export function Landing() {
         </section>
 
         <section id="modes" className="ldg-section ldg-section-soft">
+          <ContourField className="ldg-contour ldg-contour-soft" />
           <div className="ldg-section-head">
             <span className="ldg-eyebrow">Built for any mission</span>
             <h2>Five modes. Same pipeline. Different angles.</h2>

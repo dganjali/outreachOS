@@ -129,6 +129,40 @@ export function MountainScene({ className }: { className?: string }) {
   );
 }
 
+// Topographic contour texture. Stacked wavy elevation lines, like a topo map.
+// Uses currentColor + opacity so callers tone it via CSS (dark band vs. soft).
+export function ContourField({ className }: { className?: string }) {
+  const W = 1440;
+  const H = 700;
+  const count = 13;
+  const amp = 15;
+  const step = 80;
+  const lines: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const base = (i / (count - 1)) * H;
+    const phase = i * 0.7;
+    let d = `M0,${(base + amp * Math.sin(phase)).toFixed(1)}`;
+    for (let x = step; x <= W; x += step) {
+      const y = base + amp * Math.sin(x * 0.011 + phase) + amp * 0.35 * Math.sin(x * 0.026 + phase * 1.6);
+      d += ` L${x},${y.toFixed(1)}`;
+    }
+    lines.push(d);
+  }
+  return (
+    <svg
+      className={className}
+      viewBox={`0 0 ${W} ${H}`}
+      preserveAspectRatio="none"
+      aria-hidden="true"
+      role="presentation"
+    >
+      {lines.map((d, i) => (
+        <path key={i} d={d} fill="none" stroke="currentColor" strokeWidth="1" />
+      ))}
+    </svg>
+  );
+}
+
 // Smaller silhouette echo for the bottom CTA band.
 export function RidgeSilhouette({ className }: { className?: string }) {
   return (

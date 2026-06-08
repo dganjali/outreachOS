@@ -5081,3 +5081,51 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
 @media (max-width: 640px) {
   .ldg-hero { min-height: 82vh; }
 }
+
+/* ============================================================
+   LANDING REHAUL v5 (2026-06) — carry the mountain motif through.
+   Pipeline becomes a dark-green intermission band (a mid-page
+   peak echoing the hero); topographic contour texture sits behind
+   the dark band and faintly behind the soft sections. Page now
+   reads peak / valley / peak / valley / peak.
+   ============================================================ */
+
+/* --- Contour texture, toned by context --- */
+.ldg-contour {
+  position: absolute; inset: 0; z-index: 0;
+  width: 100% !important; height: 100%;
+  max-width: none !important; margin: 0 !important;
+  display: block; pointer-events: none;
+}
+.ldg-contour-dark { color: oklch(0.62 0.06 152); opacity: 0.14; }
+.ldg-contour-soft { color: oklch(0.45 0.05 158); opacity: 0.05; }
+
+/* soft sections: let contour sit behind centered content */
+.ldg-section-soft { position: relative; overflow: hidden; }
+.ldg-section-soft > *:not(.ldg-contour) { position: relative; z-index: 1; }
+
+/* --- Dark intermission band (Pipeline) --- */
+.ldg-band-dark {
+  position: relative; overflow: hidden;
+  max-width: none;
+  background: oklch(0.195 0.050 161);
+}
+.ldg-band-dark > *:not(.ldg-contour) { position: relative; z-index: 1; }
+.ldg-band-dark .ldg-eyebrow { color: oklch(0.84 0.10 150); }
+.ldg-band-dark .ldg-section-head h2 { color: oklch(0.97 0.018 105); }
+.ldg-band-dark .ldg-section-sub { color: oklch(0.87 0.025 142); }
+.ldg-band-dark .ldg-section-sub strong { color: oklch(0.97 0.02 120); }
+
+/* pipeline flow recolored for dark */
+.ldg-band-dark .ldg-pipeline-flow {
+  background: oklch(1 0 0 / 0.04);
+  border-color: oklch(0.85 0.05 150 / 0.18);
+}
+.ldg-band-dark .ldg-pipeline-step { background: transparent; }
+.ldg-band-dark .ldg-pipeline-step + .ldg-pipeline-step { border-top-color: oklch(0.85 0.05 150 / 0.12); }
+.ldg-band-dark .ldg-pipeline-step:hover { background: oklch(1 0 0 / 0.05); }
+.ldg-band-dark .ldg-pipeline-label { color: oklch(0.96 0.02 120); }
+.ldg-band-dark .ldg-pipeline-detail { color: oklch(0.82 0.03 145); }
+.ldg-band-dark .ldg-pipeline-num { color: oklch(0.84 0.10 150); }
+.ldg-band-dark .ldg-pipeline-arrow { color: oklch(0.72 0.06 150 / 0.5); }
+.ldg-band-dark .ldg-pipeline-step:hover .ldg-pipeline-arrow { color: oklch(0.86 0.10 150); }
