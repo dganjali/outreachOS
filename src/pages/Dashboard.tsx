@@ -184,14 +184,14 @@ export function Dashboard() {
     return (
       <div className="launchpad">
         <section className="launchpad-card">
-          <p className="launchpad-eyebrow">Welcome{firstName ? `, ${firstName}` : ''} 👋</p>
+          <p className="launchpad-eyebrow">{firstName ? `Welcome, ${firstName}` : 'Welcome'}</p>
           <h1 className="launchpad-title">Let's land your first reply.</h1>
           <p className="launchpad-sub">
             Tell us who you want to reach. The agent finds the companies, the right people, the angle,
-            and writes the emails. You just review and send.
+            and writes the emails. You review and send.
           </p>
           <Link to="/missions/new" className="launchpad-cta">
-            Start your first mission →
+            Start your first mission
           </Link>
 
           <div className="launchpad-nudges">
@@ -250,9 +250,14 @@ export function Dashboard() {
       <header className="dash-head">
         <div>
           <h1>{firstName ? `Welcome back, ${firstName}` : 'Dashboard'}</h1>
-          <p className="dash-sub">Your outreach pipeline at a glance.</p>
+          <p className="dash-sub">
+            {stats.missions} {stats.missions === 1 ? 'mission' : 'missions'}
+            {stats.drafts > 0 && `, ${stats.drafts} ${stats.drafts === 1 ? 'draft' : 'drafts'} pending`}
+            {stats.contacted > 0 && `, ${stats.contacted} contacted`}
+            {responseRate !== null && `, ${responseRate}% reply rate`}.
+          </p>
         </div>
-        <Link to="/missions/new" className="btn-primary btn-lg dash-new">New mission</Link>
+        <Link to="/missions/new" className="dash-new">New mission</Link>
       </header>
 
       {error && (
