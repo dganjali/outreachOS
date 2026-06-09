@@ -1,6 +1,8 @@
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Logo } from '../components/Logo';
 import { BrowserFrame, PipelineMock, DraftMock, InboxMock } from '../components/AppMockups';
+import { MountainHero } from '../components/MountainHero';
 
 const HOW = [
   { step: '01', title: 'Tell us the mission', body: 'Pick a mode, describe what you are sending, and who you want to reach. Add your LinkedIn and we auto-fill your bio, proof points, and tone.' },
@@ -25,11 +27,19 @@ const FAQ = [
 ];
 
 export function Landing() {
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > window.innerHeight * 0.7);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
   return (
     <div className="cl-page">
-      <header className="cl-nav">
+      <header className={`cl-nav${scrolled ? ' cl-scrolled' : ''}`}>
         <div className="cl-nav-inner">
-          <Logo size={26} />
+          <Logo size={26} variant={scrolled ? 'default' : 'mono-light'} />
           <nav className="cl-nav-links">
             <a href="#how">How it works</a>
             <a href="#features">Features</a>
@@ -44,27 +54,24 @@ export function Landing() {
       </header>
 
       <main>
-        {/* Hero */}
+        {/* Hero — full-bleed mountain scene */}
         <section className="cl-hero">
-          <span className="cl-pill">Agentic cold outreach</span>
-          <h1 className="cl-hero-title">
-            Cold outreach that<br />writes and sends itself.
-          </h1>
-          <p className="cl-hero-sub">
-            One mission in: a mode, an offer, an audience. OutreachOS researches the targets,
-            finds the right people, sources the evidence, and drafts personalized emails, sent
-            from your Gmail with replies routed back to you.
-          </p>
-          <div className="cl-hero-cta">
-            <Link to="/sign-up" className="cl-btn cl-btn-primary cl-btn-lg">Start free</Link>
-            <a href="#how" className="cl-btn cl-btn-ghost cl-btn-lg">See how it works</a>
-          </div>
-          <p className="cl-hero-note">Runs on Google Gemini. Connect Gmail to send.</p>
-
-          <div className="cl-hero-shot">
-            <BrowserFrame url="app.outreachos.com/missions/q1-sponsorship">
-              <PipelineMock />
-            </BrowserFrame>
+          <MountainHero className="cl-hero-bg" />
+          <div className="cl-hero-inner">
+            <span className="cl-pill cl-pill-onsky">Agentic cold outreach</span>
+            <h1 className="cl-hero-title">
+              Cold outreach that<br />writes and sends itself.
+            </h1>
+            <p className="cl-hero-sub">
+              One mission in: a mode, an offer, an audience. OutreachOS researches the targets,
+              finds the right people, sources the evidence, and drafts personalized emails, sent
+              from your Gmail with replies routed back to you.
+            </p>
+            <div className="cl-hero-cta">
+              <Link to="/sign-up" className="cl-btn cl-btn-onsky cl-btn-lg">Start free</Link>
+              <a href="#how" className="cl-btn cl-btn-skyghost cl-btn-lg">See how it works</a>
+            </div>
+            <p className="cl-hero-note">Runs on Google Gemini. Connect Gmail to send.</p>
           </div>
         </section>
 
