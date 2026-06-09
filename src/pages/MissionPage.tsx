@@ -252,7 +252,7 @@ export function MissionPage() {
                       )}
                       {t.signal_type && <span className="signal-pill">{t.signal_type}</span>}
                       {t.source === 'apollo' && (
-                        <span className="signal-pill subtle" title="Sourced via Apollo">apollo</span>
+                        <span className="signal-pill subtle" title="Sourced from a verified directory">verified</span>
                       )}
                       {t.industry && <span className="signal-pill subtle">{t.industry}</span>}
                       {typeof t.employee_count === 'number' && (
@@ -348,7 +348,7 @@ export function MissionPage() {
                                   </span>
                                 )}
                                 {c.source === 'apollo' && (
-                                  <span className="signal-pill subtle" title="Sourced via Apollo">apollo</span>
+                                  <span className="signal-pill subtle" title="Sourced from a verified directory">verified</span>
                                 )}
                               </div>
                               <div className="contact-row-actions">

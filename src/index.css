@@ -3221,10 +3221,6 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
   text-transform: lowercase;
   letter-spacing: 0.01em;
 }
-.tag-apollo { background: var(--accent-soft); color: var(--accent-hover); }
-.tag-verified { background: var(--success-soft); color: var(--success); }
-.tag-likely { background: var(--warn-soft); color: var(--warn); }
-.tag-web { background: var(--info-soft); color: var(--info); }
 .ldg-visual-draft {
   margin-top: 1rem;
   padding: 0.85rem 1rem;

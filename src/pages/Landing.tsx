@@ -12,7 +12,7 @@ const MODES = [
 
 const PIPELINE = [
   { label: 'Mission', detail: 'Mode + offer + audience' },
-  { label: 'Targets', detail: 'Apollo + web research, ranked' },
+  { label: 'Targets', detail: 'Web research, ranked by fit' },
   { label: 'Contacts', detail: 'Verified emails, decision-makers' },
   { label: 'Evidence', detail: 'Sourced bullets per target' },
   { label: 'Drafts', detail: 'Personalized 3-touch sequence' },
@@ -28,7 +28,7 @@ const HOW = [
   {
     step: '02',
     title: 'Agents do the legwork',
-    body: 'Targeting, contact graph, evidence, and sequence agents run in one click. Apollo provides verified emails when configured; web search fills the gaps.',
+    body: 'Targeting, contact graph, evidence, and sequence agents run in one click. They research the web to find the right companies and people, then verify the contact details.',
   },
   {
     step: '03',
@@ -43,8 +43,8 @@ const FEATURES = [
     body: 'Every line in every draft is anchored to a sourced bullet (funding round, recent launch, hiring signal), so personalization is not a Mad Lib.',
   },
   {
-    title: 'Apollo when you want it',
-    body: 'Drop in an APOLLO_API_KEY and targeting + contact discovery upgrade to verified emails and firmographics. No key? Web search keeps things working.',
+    title: 'Web research, built in',
+    body: 'The agents search the open web for high-fit companies and the right decision-makers, then verify contact details. No data-vendor subscription to wire up, just connect Gmail and go.',
   },
   {
     title: 'Gmail send + reply routing',
@@ -58,7 +58,7 @@ const FEATURES = [
 
 const TRACE = [
   { stage: 'TARGET', ok: 'ok', detail: 'Vercel · Resend · Linear · Supabase · Clerk · 3 more', meta: '8 ranked · 4.1s' },
-  { stage: 'EVIDENCE', ok: 'ok', detail: 'Apollo firmographics + 12 sourced bullets per company', meta: 'grounded · 6.4s' },
+  { stage: 'EVIDENCE', ok: 'ok', detail: 'Web-sourced firmographics + 12 evidence bullets per company', meta: 'grounded · 6.4s' },
   { stage: 'CONTACTS', ok: 'ok', detail: 'Head of DevRel · Director of Community · 91% avg confidence', meta: '14 verified · 3.8s' },
   { stage: 'SEQUENCE', ok: 'ok', detail: 'Subject + 3-touch body, threaded follow-ups scheduled', meta: '5 drafts · 5.7s' },
 ];
@@ -90,7 +90,7 @@ export function Landing() {
             <p className="ldg-hero-meta">
               <span>Agentic cold outreach</span>
               <span className="ldg-hero-meta-sep" aria-hidden />
-              <span>Apollo · LinkedIn · Gmail</span>
+              <span>Web research · LinkedIn · Gmail</span>
               <span className="ldg-hero-meta-sep" aria-hidden />
               <span className="ldg-hero-meta-tag">v1.0 shipping</span>
             </p>
@@ -108,7 +108,7 @@ export function Landing() {
               <a href="#trace" className="ldg-btn ldg-btn-ghost ldg-btn-lg">Watch a real run</a>
             </div>
             <p className="ldg-hero-fineprint">
-              Runs on Google Gemini. Connect Gmail to send. Apollo is optional.
+              Runs on Google Gemini. Connect Gmail to send.
             </p>
           </div>
         </section>
@@ -185,7 +185,7 @@ export function Landing() {
               </div>
               <div className="ldg-specimen-subject">
                 <span className="ldg-specimen-from">re_</span>
-                Sponsoring Hack the North 2026?
+                Sponsoring our 2026 developer conference?
               </div>
             </header>
             <div className="ldg-specimen-body">
@@ -207,8 +207,8 @@ export function Landing() {
               </p>
               <p>
                 We hosted{' '}
-                <mark className="ldg-cite" data-cite="Hack the North recap deck · pg.12">
-                  1,418 attendees last year (60% senior CS)
+                <mark className="ldg-cite" data-cite="Our 2025 event recap · pg.12">
+                  1,400+ engineers last year (60% senior)
                 </mark>
                 , and have a tier that maps to the dev-marketing motion you are
                 building. Worth 15 min next week?
@@ -221,7 +221,7 @@ export function Landing() {
                 <li><span>01</span> Series B announcement · TechCrunch · 2025-03</li>
                 <li><span>02</span> Public job board · Resend careers · open</li>
                 <li><span>03</span> @resend tweet · Vue support shipped</li>
-                <li><span>04</span> HtN 2025 recap deck · pg.12</li>
+                <li><span>04</span> Our 2025 event recap · pg.12</li>
               </ol>
             </aside>
           </article>
@@ -305,7 +305,7 @@ export function Landing() {
               <span className="ldg-hero-italic">Start sending.</span>
             </h2>
             <p>
-              Replace the Apollo, RocketReach, LinkedIn, ChatGPT, Sheets, Gmail dance with
+              Replace the LinkedIn, ChatGPT, spreadsheets, and Gmail tab-juggling with
               one mission, one click, one inbox.
             </p>
             <Link to="/sign-up" className="ldg-btn ldg-btn-cta ldg-btn-lg">

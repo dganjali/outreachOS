@@ -19,10 +19,10 @@ export function AuthShell({ title, subtitle, children, footer }: Props) {
         <div className="auth-marketing-mid">
           <h2>One mission in. A ready-to-send pipeline out.</h2>
           <p>
-            OutreachOS replaces the Apollo → LinkedIn → ChatGPT → Sheets → Gmail dance with five agents that hand you ranked targets, verified contacts, sourced evidence, and personalized drafts, every line anchored in something real.
+            OutreachOS replaces the LinkedIn → ChatGPT → Sheets → Gmail dance with five agents that hand you ranked targets, verified contacts, sourced evidence, and personalized drafts, every line anchored in something real.
           </p>
           <ul className="auth-marketing-bullets">
-            <li>Apollo + web research, ranked by recent “why now” signals</li>
+            <li>Web research, ranked by recent “why now” signals</li>
             <li>Verified emails and decision-makers per target</li>
             <li>Drafts in your voice, sent through your Gmail</li>
             <li>Inbox routes replies back with classification + suggestions</li>

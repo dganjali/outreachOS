@@ -153,7 +153,7 @@ export function Workshop({
         >
           <textarea
             rows={3}
-            placeholder="e.g. Hack the North 2025 (1.4k attendees), backed by Vercel/Notion"
+            placeholder="e.g. ran a 1,400-person developer conference, backed by Vercel/Notion"
             value={form.proof_points}
             onChange={(e) => set('proof_points', e.target.value)}
           />

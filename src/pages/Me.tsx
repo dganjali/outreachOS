@@ -154,10 +154,10 @@ export function Me() {
       await maybeSnapshot(
         enrichedSnap,
         'enrich',
-        `Enriched from ${r.source === 'apollo' ? 'Apollo' : 'web search'}`
+        `Enriched from ${r.source === 'apollo' ? 'a verified directory' : 'web search'}`
       );
       toast.success(
-        `Enriched from ${r.source === 'apollo' ? 'Apollo' : 'web search'}. Review and tweak.`
+        `Enriched from ${r.source === 'apollo' ? 'a verified directory' : 'web search'}. Review and tweak.`
       );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Enrichment failed');

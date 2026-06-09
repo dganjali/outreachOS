@@ -97,7 +97,7 @@ export function MissionNew() {
             id="mission-what"
             value={whatSending}
             onChange={(e) => setWhatSending(e.target.value)}
-            placeholder="Be specific. e.g. 'Sponsorship tiers $5k–25k for Hack the North 2026 (1.4k attendees, 60% senior CS).'"
+            placeholder="Be specific. e.g. 'Sponsorship tiers $5k–25k for a 1,400-person developer conference (60% senior engineers).'"
             required
           />
         </div>
