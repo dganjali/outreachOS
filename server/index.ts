@@ -13,7 +13,6 @@ import agentReply from '../api/agents/reply';
 import agentEnrichProfile from '../api/agents/enrich-profile';
 import agentCoach from '../api/agents/coach';
 import agentParseResume from '../api/agents/parse-resume';
-import agentPipeline from '../api/agents/pipeline';
 
 import gmailSend from '../api/gmail/send';
 import gmailReply from '../api/gmail/reply';
@@ -25,7 +24,6 @@ import gmailDisconnect from '../api/integrations/gmail/disconnect';
 import cronPollGmail from '../api/cron/poll-gmail';
 import cronSendDueTouches from '../api/cron/send-due-touches';
 import cronWeeklyDigest from '../api/cron/weekly-digest';
-import tasksWorker from '../api/tasks/worker';
 import dataRouter from '../api/data/router';
 
 const app = express();
@@ -42,7 +40,6 @@ app.post('/api/agents/reply', wrap(agentReply));
 app.post('/api/agents/enrich-profile', wrap(agentEnrichProfile));
 app.post('/api/agents/coach', wrap(agentCoach));
 app.post('/api/agents/parse-resume', wrap(agentParseResume));
-app.post('/api/agents/pipeline', wrap(agentPipeline));
 
 // gmail
 app.post('/api/gmail/send', wrap(gmailSend));
@@ -52,11 +49,10 @@ app.get('/api/integrations/gmail/callback', wrap(gmailCallback));
 app.get('/api/integrations/gmail/status', wrap(gmailStatus));
 app.post('/api/integrations/gmail/disconnect', wrap(gmailDisconnect));
 
-// cron + tasks
+// cron
 app.post('/api/cron/poll-gmail', wrap(cronPollGmail));
 app.post('/api/cron/send-due-touches', wrap(cronSendDueTouches));
 app.post('/api/cron/weekly-digest', wrap(cronWeeklyDigest));
-app.post('/api/tasks/worker', wrap(tasksWorker));
 
 // generic CRUD for the frontend (replaces direct Supabase queries)
 app.use('/api/data', dataRouter);

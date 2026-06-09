@@ -37,32 +37,6 @@ const HOW = [
   },
 ];
 
-const FEATURES = [
-  {
-    title: 'Evidence-first personalization',
-    body: 'Every line in every draft is anchored to a sourced bullet (funding round, recent launch, hiring signal), so personalization is not a Mad Lib.',
-  },
-  {
-    title: 'Web research, built in',
-    body: 'The agents search the open web for high-fit companies and the right decision-makers, then verify contact details. No data-vendor subscription to wire up, just connect Gmail and go.',
-  },
-  {
-    title: 'Gmail send + reply routing',
-    body: 'Send through your own Gmail. The inbox cron classifies replies (interested, not now, wrong person) with a suggested response queued up.',
-  },
-  {
-    title: 'Your voice, every time',
-    body: 'LinkedIn enrichment auto-fills your bio, proof points, and tone so drafts sound like you on day one, no copy-paste from old emails.',
-  },
-];
-
-const TRACE = [
-  { stage: 'TARGET', ok: 'ok', detail: 'Vercel · Resend · Linear · Supabase · Clerk · 3 more', meta: '8 ranked · 4.1s' },
-  { stage: 'EVIDENCE', ok: 'ok', detail: 'Web-sourced firmographics + 12 evidence bullets per company', meta: 'grounded · 6.4s' },
-  { stage: 'CONTACTS', ok: 'ok', detail: 'Head of DevRel · Director of Community · 91% avg confidence', meta: '14 verified · 3.8s' },
-  { stage: 'SEQUENCE', ok: 'ok', detail: 'Subject + 3-touch body, threaded follow-ups scheduled', meta: '5 drafts · 5.7s' },
-];
-
 export function Landing() {
   return (
     <div className="ldg-page">
@@ -71,8 +45,8 @@ export function Landing() {
           <Logo size={26} variant="mono-light" />
           <nav className="ldg-nav-links">
             <a href="#how">How it works</a>
-            <a href="#trace">Live trace</a>
             <a href="#specimen">A real draft</a>
+            <a href="#pipeline">Pipeline</a>
             <a href="#modes">Modes</a>
           </nav>
           <div className="ldg-nav-cta">
@@ -105,47 +79,11 @@ export function Landing() {
             </p>
             <div className="ldg-hero-cta">
               <Link to="/sign-up" className="ldg-btn ldg-btn-primary ldg-btn-lg">Start free</Link>
-              <a href="#trace" className="ldg-btn ldg-btn-ghost ldg-btn-lg">Watch a real run</a>
+              <a href="#specimen" className="ldg-btn ldg-btn-ghost ldg-btn-lg">See a real draft</a>
             </div>
             <p className="ldg-hero-fineprint">
               Runs on Google Gemini. Connect Gmail to send.
             </p>
-          </div>
-        </section>
-
-        <section id="trace" className="ldg-section ldg-trace-section">
-          <ContourField className="ldg-contour ldg-contour-soft" />
-          <div className="ldg-section-head">
-            <span className="ldg-eyebrow">A real run</span>
-            <h2>What you actually see, not a screenshot.</h2>
-            <p className="ldg-section-sub">
-              Each stage logs its inputs, citations, and latency. No glass mockups, no
-              made-up dashboard chrome, this is the agent output your missions emit.
-            </p>
-          </div>
-          <div className="ldg-trace">
-            <div className="ldg-trace-head">
-              <span className="ldg-trace-title">mission · q1-sponsorship</span>
-              <span className="ldg-trace-status">RUNNING</span>
-            </div>
-            <ol className="ldg-trace-log">
-              {TRACE.map((t, i) => (
-                <li key={t.stage} className="ldg-trace-line" style={{ animationDelay: `${i * 0.12}s` }}>
-                  <span className="ldg-trace-num">{String(i + 1).padStart(2, '0')}</span>
-                  <span className="ldg-trace-stage">{t.stage}</span>
-                  <span className="ldg-trace-ok" aria-label="ok">{t.ok}</span>
-                  <span className="ldg-trace-detail">{t.detail}</span>
-                  <span className="ldg-trace-meta">{t.meta}</span>
-                </li>
-              ))}
-              <li className="ldg-trace-line ldg-trace-line-final" style={{ animationDelay: `${TRACE.length * 0.12}s` }}>
-                <span className="ldg-trace-num">{String(TRACE.length + 1).padStart(2, '0')}</span>
-                <span className="ldg-trace-stage">REVIEW</span>
-                <span className="ldg-trace-ok ldg-trace-ok-wait">queued</span>
-                <span className="ldg-trace-detail">Awaiting your approval before send.</span>
-                <span className="ldg-trace-meta">you</span>
-              </li>
-            </ol>
           </div>
         </section>
 
@@ -279,22 +217,6 @@ export function Landing() {
           </dl>
         </section>
 
-        <section className="ldg-section">
-          <div className="ldg-section-head">
-            <span className="ldg-eyebrow">Why it is different</span>
-            <h2>Vendor-neutral by default. Power-user when you want it.</h2>
-          </div>
-          <div className="ldg-feature-grid">
-            {FEATURES.map((f, i) => (
-              <div key={f.title} className="ldg-feature-row">
-                <span className="ldg-feature-num">{String(i + 1).padStart(2, '0')}</span>
-                <h3>{f.title}</h3>
-                <p>{f.body}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-
         <section className="ldg-cta-section">
           <div className="ldg-cta-card">
             <RidgeEdge edge="top" className="ldg-ridge-edge ldg-ridge-top ldg-ridge-cta" />
@@ -325,7 +247,7 @@ export function Landing() {
             <div>
               <h4>Product</h4>
               <a href="#how">How it works</a>
-              <a href="#trace">Live trace</a>
+              <a href="#specimen">A real draft</a>
               <a href="#pipeline">Pipeline</a>
               <a href="#modes">Modes</a>
             </div>
