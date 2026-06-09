@@ -1,255 +1,208 @@
 import { Link } from 'react-router-dom';
 import { Logo } from '../components/Logo';
-import { MountainScene, RidgeSilhouette, ContourField, RidgeEdge } from '../components/MountainScene';
-
-const MODES = [
-  { key: 'sponsorship', title: 'Sponsorship', blurb: 'Get devtools, brands, and platforms to sponsor your event or community.' },
-  { key: 'bd', title: 'BD / Partnerships', blurb: 'Land integration, co-marketing, and channel deals that move the needle.' },
-  { key: 'internship', title: 'Internship / Job', blurb: 'Reach hiring managers with proof of fit, not yet another generic ask.' },
-  { key: 'recruiting', title: 'Recruiting', blurb: 'Source senior candidates with messages tied to their actual work.' },
-  { key: 'sales', title: 'Cold Sales', blurb: 'Book meetings off real intent signals, funding, hiring, launches.' },
-];
-
-const PIPELINE = [
-  { label: 'Mission', detail: 'Mode + offer + audience' },
-  { label: 'Targets', detail: 'Web research, ranked by fit' },
-  { label: 'Contacts', detail: 'Verified emails, decision-makers' },
-  { label: 'Evidence', detail: 'Sourced bullets per target' },
-  { label: 'Drafts', detail: 'Personalized 3-touch sequence' },
-  { label: 'Sent', detail: 'Gmail + reply tracking' },
-];
+import { BrowserFrame, PipelineMock, DraftMock, InboxMock } from '../components/AppMockups';
 
 const HOW = [
-  {
-    step: '01',
-    title: 'Tell us the mission',
-    body: 'Pick a mode, describe what you are sending, and who you want to reach. Add your LinkedIn and we auto-fill your bio, proof points, and tone.',
-  },
-  {
-    step: '02',
-    title: 'Agents do the legwork',
-    body: 'Targeting, contact graph, evidence, and sequence agents run in one click. They research the web to find the right companies and people, then verify the contact details.',
-  },
-  {
-    step: '03',
-    title: 'Review, send, track',
-    body: 'Approve drafts in your voice, send via Gmail, and watch the inbox classify replies (interested, not now, wrong person) with suggested responses.',
-  },
+  { step: '01', title: 'Tell us the mission', body: 'Pick a mode, describe what you are sending, and who you want to reach. Add your LinkedIn and we auto-fill your bio, proof points, and tone.' },
+  { step: '02', title: 'Agents do the legwork', body: 'Targeting, evidence, contacts, and sequence agents run in one click. They research the web for the right companies and people, then verify the details.' },
+  { step: '03', title: 'Review, send, track', body: 'Approve drafts in your voice, send via Gmail, and watch the inbox classify replies with a suggested response queued up.' },
+];
+
+const MODES = [
+  { title: 'Sponsorship', blurb: 'Get devtools, brands, and platforms to sponsor your event or community.' },
+  { title: 'BD / Partnerships', blurb: 'Land integration, co-marketing, and channel deals that move the needle.' },
+  { title: 'Internship / Job', blurb: 'Reach hiring managers with proof of fit, not another generic ask.' },
+  { title: 'Recruiting', blurb: 'Source senior candidates with messages tied to their actual work.' },
+  { title: 'Cold Sales', blurb: 'Book meetings off real intent signals: funding, hiring, launches.' },
+];
+
+const FAQ = [
+  { q: 'Do I need a data-provider subscription?', a: 'No. The agents research the open web to find high-fit companies and the right decision-makers, then verify contact details. Just connect Gmail and go.' },
+  { q: 'How does it send email?', a: 'Through your own Gmail, over a secure connection. You approve each send, or enable auto-send with guardrails once you trust it.' },
+  { q: 'Is it autonomous, or do I stay in control?', a: 'Reviewable by default: every draft waits for your approval. When you are ready, turn on auto-send, with reply-stop and a suppression list as guardrails.' },
+  { q: 'Does it follow up?', a: 'Yes. Follow-ups are scheduled and sent on cadence, and stop automatically the moment someone replies or unsubscribes.' },
+  { q: 'What does it run on?', a: 'Google Gemini powers the agents. Your data lives in your account; emails send from your Gmail.' },
 ];
 
 export function Landing() {
   return (
-    <div className="ldg-page">
-      <header className="ldg-nav">
-        <div className="ldg-nav-inner">
-          <Logo size={26} variant="mono-light" />
-          <nav className="ldg-nav-links">
+    <div className="cl-page">
+      <header className="cl-nav">
+        <div className="cl-nav-inner">
+          <Logo size={26} />
+          <nav className="cl-nav-links">
             <a href="#how">How it works</a>
-            <a href="#specimen">A real draft</a>
-            <a href="#pipeline">Pipeline</a>
+            <a href="#features">Features</a>
             <a href="#modes">Modes</a>
+            <a href="#faq">FAQ</a>
           </nav>
-          <div className="ldg-nav-cta">
-            <Link to="/sign-in" className="ldg-link">Sign in</Link>
-            <Link to="/sign-up" className="ldg-btn ldg-btn-primary">Get started</Link>
+          <div className="cl-nav-cta">
+            <Link to="/sign-in" className="cl-link">Sign in</Link>
+            <Link to="/sign-up" className="cl-btn cl-btn-primary">Get started</Link>
           </div>
         </div>
       </header>
 
       <main>
-        <section className="ldg-hero">
-          <MountainScene className="ldg-scene" />
-          <div className="ldg-hero-fade" aria-hidden />
-          <div className="ldg-hero-grid">
-            <p className="ldg-hero-meta">
-              <span>Agentic cold outreach</span>
-              <span className="ldg-hero-meta-sep" aria-hidden />
-              <span>Web research · LinkedIn · Gmail</span>
-              <span className="ldg-hero-meta-sep" aria-hidden />
-              <span className="ldg-hero-meta-tag">v1.0 shipping</span>
-            </p>
-            <h1 className="ldg-hero-title">
-              One mission in.<br />
-              <span className="ldg-hero-italic">Pipeline out.</span>
-            </h1>
-            <p className="ldg-hero-sub">
-              Ranked targets, verified contacts, sourced evidence, and personalized drafts,
-              sent from your Gmail with replies routed back to you. Reviewable at every step,
-              autonomous once you trust it.
-            </p>
-            <div className="ldg-hero-cta">
-              <Link to="/sign-up" className="ldg-btn ldg-btn-primary ldg-btn-lg">Start free</Link>
-              <a href="#specimen" className="ldg-btn ldg-btn-ghost ldg-btn-lg">See a real draft</a>
-            </div>
-            <p className="ldg-hero-fineprint">
-              Runs on Google Gemini. Connect Gmail to send.
-            </p>
+        {/* Hero */}
+        <section className="cl-hero">
+          <span className="cl-pill">Agentic cold outreach</span>
+          <h1 className="cl-hero-title">
+            Cold outreach that<br />writes and sends itself.
+          </h1>
+          <p className="cl-hero-sub">
+            One mission in: a mode, an offer, an audience. OutreachOS researches the targets,
+            finds the right people, sources the evidence, and drafts personalized emails, sent
+            from your Gmail with replies routed back to you.
+          </p>
+          <div className="cl-hero-cta">
+            <Link to="/sign-up" className="cl-btn cl-btn-primary cl-btn-lg">Start free</Link>
+            <a href="#how" className="cl-btn cl-btn-ghost cl-btn-lg">See how it works</a>
+          </div>
+          <p className="cl-hero-note">Runs on Google Gemini. Connect Gmail to send.</p>
+
+          <div className="cl-hero-shot">
+            <BrowserFrame url="app.outreachos.com/missions/q1-sponsorship">
+              <PipelineMock />
+            </BrowserFrame>
           </div>
         </section>
 
-        <section id="how" className="ldg-section">
-          <div className="ldg-section-head">
-            <span className="ldg-eyebrow">How it works</span>
+        {/* Features, alternating */}
+        <section id="features" className="cl-features">
+          <div className="cl-feature">
+            <div className="cl-feature-copy">
+              <span className="cl-eyebrow">Targeting</span>
+              <h2>The right companies, ranked by why-now.</h2>
+              <p>
+                The targeting agent finds high-fit companies and scores each one on a real reason
+                to reach out today: a funding round, a launch, a hiring signal. No scraping
+                spreadsheets, no guessing.
+              </p>
+              <ul className="cl-feature-list">
+                <li>Web research, ranked by fit and recency</li>
+                <li>Verified emails and the actual decision-maker</li>
+                <li>Evidence sourced per company, with citations</li>
+              </ul>
+            </div>
+            <div className="cl-feature-shot cl-shot-a">
+              <BrowserFrame url="app.outreachos.com/missions"><PipelineMock /></BrowserFrame>
+            </div>
+          </div>
+
+          <div className="cl-feature cl-feature-rev">
+            <div className="cl-feature-copy">
+              <span className="cl-eyebrow">Drafts</span>
+              <h2>Personalization with receipts.</h2>
+              <p>
+                Every line in every draft is anchored to a sourced bullet, so personalization is
+                not a Mad Lib. The model cannot flatter what it has not read. You review, tweak,
+                and send in your own voice.
+              </p>
+              <ul className="cl-feature-list">
+                <li>Each claim tied to a citation</li>
+                <li>Written in your tone, from your profile</li>
+                <li>A 3-touch sequence, ready to send</li>
+              </ul>
+            </div>
+            <div className="cl-feature-shot cl-shot-b">
+              <BrowserFrame url="app.outreachos.com/draft"><DraftMock /></BrowserFrame>
+            </div>
+          </div>
+
+          <div className="cl-feature">
+            <div className="cl-feature-copy">
+              <span className="cl-eyebrow">Inbox</span>
+              <h2>Replies, sorted and answered.</h2>
+              <p>
+                Send through your Gmail and the inbox classifies every reply, interested, not now,
+                wrong person, with a suggested response queued up. Follow-ups stop the moment
+                someone writes back.
+              </p>
+              <ul className="cl-feature-list">
+                <li>Replies classified automatically</li>
+                <li>Suggested responses, ready to edit</li>
+                <li>Follow-ups stop on reply or unsubscribe</li>
+              </ul>
+            </div>
+            <div className="cl-feature-shot cl-shot-c">
+              <BrowserFrame url="app.outreachos.com/inbox"><InboxMock /></BrowserFrame>
+            </div>
+          </div>
+        </section>
+
+        {/* How it works */}
+        <section id="how" className="cl-how">
+          <div className="cl-section-head">
+            <span className="cl-eyebrow">How it works</span>
             <h2>Mission in. Pipeline out. Three steps.</h2>
           </div>
-          <ol className="ldg-how-list">
+          <div className="cl-how-grid">
             {HOW.map((h) => (
-              <li key={h.step} className="ldg-how-item">
-                <span className="ldg-how-step">{h.step}</span>
-                <div>
-                  <h3>{h.title}</h3>
-                  <p>{h.body}</p>
-                </div>
-              </li>
-            ))}
-          </ol>
-        </section>
-
-        <section id="specimen" className="ldg-section ldg-section-soft">
-          <ContourField className="ldg-contour ldg-contour-soft" />
-          <div className="ldg-section-head">
-            <span className="ldg-eyebrow">A specimen draft</span>
-            <h2>Personalization with receipts.</h2>
-            <p className="ldg-section-sub">
-              Every claim in the email is anchored to a sourced bullet. The model cannot
-              flatter what it has not read. Hover the highlights to see the citation.
-            </p>
-          </div>
-          <article className="ldg-specimen">
-            <header className="ldg-specimen-head">
-              <div>
-                <span className="ldg-specimen-from">to_</span>
-                <span className="ldg-specimen-addr">jess@resend.com</span>
+              <div key={h.step} className="cl-how-card">
+                <span className="cl-how-num">{h.step}</span>
+                <h3>{h.title}</h3>
+                <p>{h.body}</p>
               </div>
-              <div className="ldg-specimen-subject">
-                <span className="ldg-specimen-from">re_</span>
-                Sponsoring our 2026 developer conference?
-              </div>
-            </header>
-            <div className="ldg-specimen-body">
-              <p>Hey Jess,</p>
-              <p>
-                Saw Resend{' '}
-                <mark className="ldg-cite" data-cite="Funding announcement · 2025-03">
-                  closed Series B this March
-                </mark>{' '}
-                and{' '}
-                <mark className="ldg-cite" data-cite="Job board · open as of 2026-05">
-                  is hiring its first developer-marketing lead
-                </mark>
-                . That same week, the team{' '}
-                <mark className="ldg-cite" data-cite="Twitter @resend · 2026-05-14">
-                  shipped Vue support
-                </mark>
-                , the exact framework crowd we host.
-              </p>
-              <p>
-                We hosted{' '}
-                <mark className="ldg-cite" data-cite="Our 2025 event recap · pg.12">
-                  1,400+ engineers last year (60% senior)
-                </mark>
-                , and have a tier that maps to the dev-marketing motion you are
-                building. Worth 15 min next week?
-              </p>
-              <p className="ldg-specimen-sign">Daniel</p>
-            </div>
-            <aside className="ldg-specimen-margin" aria-label="Sourced citations">
-              <p className="ldg-specimen-margin-head">Sources</p>
-              <ol>
-                <li><span>01</span> Series B announcement · TechCrunch · 2025-03</li>
-                <li><span>02</span> Public job board · Resend careers · open</li>
-                <li><span>03</span> @resend tweet · Vue support shipped</li>
-                <li><span>04</span> Our 2025 event recap · pg.12</li>
-              </ol>
-            </aside>
-          </article>
-        </section>
-
-        <section id="pipeline" className="ldg-section ldg-band-dark">
-          <RidgeEdge edge="top" className="ldg-ridge-edge ldg-ridge-top" />
-          <ContourField className="ldg-contour ldg-contour-dark" />
-          <div className="ldg-band-fade" aria-hidden />
-          <div className="ldg-section-head">
-            <span className="ldg-eyebrow">The pipeline</span>
-            <h2>Five agents, one click.</h2>
-            <p className="ldg-section-sub">
-              Click <strong>Run full pipeline</strong> on a mission and watch each stage
-              fire in sequence. Every output is reviewable before it leaves your inbox.
-            </p>
-          </div>
-          <ol className="ldg-pipeline-flow">
-            {PIPELINE.map((s, i) => (
-              <li key={s.label} className="ldg-pipeline-step">
-                <span className="ldg-pipeline-num">{String(i + 1).padStart(2, '0')}</span>
-                <div>
-                  <div className="ldg-pipeline-label">{s.label}</div>
-                  <div className="ldg-pipeline-detail">{s.detail}</div>
-                </div>
-                {i < PIPELINE.length - 1 && (
-                  <span className="ldg-pipeline-arrow" aria-hidden>↓</span>
-                )}
-              </li>
             ))}
-          </ol>
+          </div>
         </section>
 
-        <section id="modes" className="ldg-section ldg-section-soft">
-          <ContourField className="ldg-contour ldg-contour-soft" />
-          <div className="ldg-section-head">
-            <span className="ldg-eyebrow">Built for any mission</span>
+        {/* Modes */}
+        <section id="modes" className="cl-modes">
+          <div className="cl-section-head">
+            <span className="cl-eyebrow">Built for any mission</span>
             <h2>Five modes. Same pipeline. Different angles.</h2>
-            <p className="ldg-section-sub">
-              The system prompt shifts so the agent surfaces sponsorship history, partnership
-              surface area, hiring signals, candidate pitches, or pain points, depending on
-              what you are actually trying to do.
-            </p>
           </div>
-          <dl className="ldg-modes-table">
-            {MODES.map((m, i) => (
-              <div key={m.key} className="ldg-mode-row">
-                <dt>
-                  <span className="ldg-mode-num">{String(i + 1).padStart(2, '0')}</span>
-                  {m.title}
-                </dt>
-                <dd>{m.blurb}</dd>
+          <div className="cl-modes-grid">
+            {MODES.map((m) => (
+              <div key={m.title} className="cl-mode">
+                <h3>{m.title}</h3>
+                <p>{m.blurb}</p>
               </div>
             ))}
-          </dl>
+          </div>
         </section>
 
-        <section className="ldg-cta-section">
-          <div className="ldg-cta-card">
-            <RidgeEdge edge="top" className="ldg-ridge-edge ldg-ridge-top ldg-ridge-cta" />
-            <RidgeSilhouette className="ldg-cta-ridge" />
-            <span className="ldg-cta-eyebrow">Start sending</span>
-            <h2>
-              Stop tab-hopping.<br />
-              <span className="ldg-hero-italic">Start sending.</span>
-            </h2>
-            <p>
-              Replace the LinkedIn, ChatGPT, spreadsheets, and Gmail tab-juggling with
-              one mission, one click, one inbox.
-            </p>
-            <Link to="/sign-up" className="ldg-btn ldg-btn-cta ldg-btn-lg">
-              Create your account
-            </Link>
+        {/* FAQ */}
+        <section id="faq" className="cl-faq">
+          <div className="cl-section-head">
+            <span className="cl-eyebrow">FAQ</span>
+            <h2>Questions, answered.</h2>
+          </div>
+          <div className="cl-faq-list">
+            {FAQ.map((f) => (
+              <details key={f.q} className="cl-faq-item">
+                <summary>{f.q}<span className="cl-faq-mark" aria-hidden>+</span></summary>
+                <p>{f.a}</p>
+              </details>
+            ))}
+          </div>
+        </section>
+
+        {/* CTA */}
+        <section className="cl-cta">
+          <div className="cl-cta-inner">
+            <h2>Stop tab-hopping.<br />Start sending.</h2>
+            <p>Replace the LinkedIn, ChatGPT, spreadsheets, and Gmail juggling with one mission, one click, one inbox.</p>
+            <Link to="/sign-up" className="cl-btn cl-btn-ondark cl-btn-lg">Create your account</Link>
           </div>
         </section>
       </main>
 
-      <footer className="ldg-footer">
-        <div className="ldg-footer-inner">
-          <div className="ldg-footer-brand">
+      <footer className="cl-footer">
+        <div className="cl-footer-inner">
+          <div className="cl-footer-brand">
             <Logo size={24} />
             <p>Agentic cold outreach, end to end.</p>
           </div>
-          <div className="ldg-footer-cols">
+          <div className="cl-footer-cols">
             <div>
               <h4>Product</h4>
               <a href="#how">How it works</a>
-              <a href="#specimen">A real draft</a>
-              <a href="#pipeline">Pipeline</a>
+              <a href="#features">Features</a>
               <a href="#modes">Modes</a>
+              <a href="#faq">FAQ</a>
             </div>
             <div>
               <h4>Account</h4>
@@ -259,9 +212,9 @@ export function Landing() {
             </div>
           </div>
         </div>
-        <div className="ldg-footer-bottom">
+        <div className="cl-footer-bottom">
           <span>© {new Date().getFullYear()} OutreachOS</span>
-          <span className="ldg-footer-tag">Built for senders who actually follow through.</span>
+          <span>Built for senders who actually follow through.</span>
         </div>
       </footer>
     </div>
