@@ -163,6 +163,25 @@ export function ContourField({ className }: { className?: string }) {
   );
 }
 
+// A ridgeline seam between a light section and a dark band. Fills one side
+// with currentColor (set to the adjacent light color via CSS) so the boundary
+// reads as a mountain range instead of a hard horizontal cut.
+export function RidgeEdge({ edge = 'top', className }: { edge?: 'top' | 'bottom'; className?: string }) {
+  const ridge = 'L1380,46 L1200,74 L980,40 L760,70 L540,36 L360,78 L180,44 L0,72';
+  const d = edge === 'top' ? `M0,0 H1440 V66 ${ridge} Z` : `M0,120 H1440 V66 ${ridge} Z`;
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 1440 120"
+      preserveAspectRatio="none"
+      aria-hidden="true"
+      role="presentation"
+    >
+      <path d={d} fill="currentColor" />
+    </svg>
+  );
+}
+
 // Smaller silhouette echo for the bottom CTA band.
 export function RidgeSilhouette({ className }: { className?: string }) {
   return (

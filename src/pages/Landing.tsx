@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Logo } from '../components/Logo';
-import { MountainScene, RidgeSilhouette, ContourField } from '../components/MountainScene';
+import { MountainScene, RidgeSilhouette, ContourField, RidgeEdge } from '../components/MountainScene';
 
 const MODES = [
   { key: 'sponsorship', title: 'Sponsorship', blurb: 'Get devtools, brands, and platforms to sponsor your event or community.' },
@@ -114,6 +114,7 @@ export function Landing() {
         </section>
 
         <section id="trace" className="ldg-section ldg-trace-section">
+          <ContourField className="ldg-contour ldg-contour-soft" />
           <div className="ldg-section-head">
             <span className="ldg-eyebrow">A real run</span>
             <h2>What you actually see, not a screenshot.</h2>
@@ -201,8 +202,8 @@ export function Landing() {
                 . That same week, the team{' '}
                 <mark className="ldg-cite" data-cite="Twitter @resend · 2026-05-14">
                   shipped Vue support
-                </mark>{' '}
-                — the framework crowd we host most.
+                </mark>
+                , the exact framework crowd we host.
               </p>
               <p>
                 We hosted{' '}
@@ -212,7 +213,7 @@ export function Landing() {
                 , and have a tier that maps to the dev-marketing motion you are
                 building. Worth 15 min next week?
               </p>
-              <p className="ldg-specimen-sign">— Daniel</p>
+              <p className="ldg-specimen-sign">Daniel</p>
             </div>
             <aside className="ldg-specimen-margin" aria-label="Sourced citations">
               <p className="ldg-specimen-margin-head">Sources</p>
@@ -227,7 +228,9 @@ export function Landing() {
         </section>
 
         <section id="pipeline" className="ldg-section ldg-band-dark">
+          <RidgeEdge edge="top" className="ldg-ridge-edge ldg-ridge-top" />
           <ContourField className="ldg-contour ldg-contour-dark" />
+          <div className="ldg-band-fade" aria-hidden />
           <div className="ldg-section-head">
             <span className="ldg-eyebrow">The pipeline</span>
             <h2>Five agents, one click.</h2>
@@ -294,6 +297,7 @@ export function Landing() {
 
         <section className="ldg-cta-section">
           <div className="ldg-cta-card">
+            <RidgeEdge edge="top" className="ldg-ridge-edge ldg-ridge-top ldg-ridge-cta" />
             <RidgeSilhouette className="ldg-cta-ridge" />
             <span className="ldg-cta-eyebrow">Start sending</span>
             <h2>

@@ -5129,3 +5129,51 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
 .ldg-band-dark .ldg-pipeline-num { color: oklch(0.84 0.10 150); }
 .ldg-band-dark .ldg-pipeline-arrow { color: oklch(0.72 0.06 150 / 0.5); }
 .ldg-band-dark .ldg-pipeline-step:hover .ldg-pipeline-arrow { color: oklch(0.86 0.10 150); }
+
+/* ============================================================
+   LANDING REHAUL v6 (2026-06) — de-block. Band boundaries become
+   ridgelines (the same terrain language as the hero), not hard
+   horizontal cuts. Containers soften. The page reads as one
+   continuous landscape, light valleys and dark ranges.
+   ============================================================ */
+
+/* --- Ridge seam between light section and dark band ---
+   These are decorative absolute layers; force layout past the
+   .ldg-band-dark > * and .ldg-cta-card > * flow overrides. */
+.ldg-ridge-edge {
+  position: absolute !important; left: 0; right: 0;
+  width: 100% !important; max-width: none !important; margin: 0 !important;
+  height: clamp(64px, 9vh, 130px);
+  display: block; z-index: 1; pointer-events: none;
+}
+.ldg-ridge-top { top: -1px !important; bottom: auto !important; }
+
+/* dark band sits below a light section; paint the seam with that light color */
+.ldg-band-dark { padding-top: clamp(7rem, 13vh, 11rem); padding-bottom: clamp(6rem, 11vh, 9rem); }
+.ldg-band-dark .ldg-ridge-top { color: var(--surface); }
+
+/* soft fade out the bottom of the dark band into the light section below */
+.ldg-band-fade {
+  position: absolute !important; left: 0; right: 0; bottom: 0 !important; top: auto !important;
+  width: 100% !important; max-width: none !important; margin: 0 !important;
+  height: clamp(70px, 10vh, 140px); z-index: 1; pointer-events: none;
+  background: linear-gradient(180deg, transparent 0%, var(--surface) 100%);
+}
+
+/* CTA band: ridge seam from the light features section above */
+.ldg-cta-card { padding-top: clamp(7rem, 13vh, 11rem); }
+.ldg-cta-card .ldg-ridge-top { color: var(--bg); }
+.ldg-cta-card .ldg-ridge-top path { fill: var(--bg); }
+
+/* --- Trace section: relative + soft contour behind --- */
+.ldg-trace-section { position: relative; overflow: hidden; }
+.ldg-trace-section > *:not(.ldg-contour) { position: relative; z-index: 1; }
+
+/* --- Soften the containers (less blocky) --- */
+.ldg-trace, .ldg-specimen { border-radius: var(--radius-xl); box-shadow: var(--shadow); border-color: var(--border-soft); }
+.ldg-pipeline-flow { border-radius: var(--radius-lg); }
+.ldg-band-dark .ldg-pipeline-flow { box-shadow: 0 20px 60px -30px oklch(0.08 0.03 160 / 0.7); }
+.ldg-trace-head, .ldg-specimen-head { border-top-left-radius: var(--radius-xl); border-top-right-radius: var(--radius-xl); }
+
+/* keep the CTA bottom silhouette behind content but above the gradient */
+.ldg-cta-ridge { z-index: 0; }
