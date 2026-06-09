@@ -5575,3 +5575,60 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
    does not consume layout space at the top */
 .cl-nav { position: fixed; top: 0; left: 0; right: 0; }
 .cl-nav.cl-scrolled { position: fixed; }
+
+/* ============================================================
+   LANDING v10 — motion. Hero entrance, scroll-reveal, mountain
+   scene life, hover lifts. Opacity + transform only (no layout
+   animation), ease-out, all gated by reduced-motion.
+   ============================================================ */
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Hero entrance: staggered rise on load */
+  .cl-hero-inner > * { opacity: 0; animation: cl-rise 0.85s var(--ease-out) forwards; }
+  .cl-hero-inner > *:nth-child(1) { animation-delay: 0.08s; }
+  .cl-hero-inner > *:nth-child(2) { animation-delay: 0.18s; }
+  .cl-hero-inner > *:nth-child(3) { animation-delay: 0.30s; }
+  .cl-hero-inner > *:nth-child(4) { animation-delay: 0.42s; }
+  .cl-hero-inner > *:nth-child(5) { animation-delay: 0.52s; }
+
+  /* Mountain scene: slow life */
+  .mh-sun { transform-box: fill-box; transform-origin: center; animation: mh-breathe 9s var(--ease-in-out) infinite; }
+  .mh-haze { animation: mh-drift 26s ease-in-out infinite alternate; }
+}
+
+@keyframes cl-rise { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: none; } }
+@keyframes mh-breathe { 0%, 100% { opacity: 0.92; transform: scale(1); } 50% { opacity: 1; transform: scale(1.035); } }
+@keyframes mh-drift { from { transform: translateX(-26px); } to { transform: translateX(26px); } }
+
+/* Scroll-reveal (only armed once JS adds .cl-anim, so no-JS stays visible) */
+.cl-page.cl-anim .cl-feature,
+.cl-page.cl-anim .cl-how-card,
+.cl-page.cl-anim .cl-mode,
+.cl-page.cl-anim .cl-faq-item,
+.cl-page.cl-anim .cl-section-head,
+.cl-page.cl-anim .cl-cta-inner {
+  opacity: 0; transform: translateY(20px);
+  transition: opacity 0.7s var(--ease-out), transform 0.7s var(--ease-out);
+  will-change: opacity, transform;
+}
+.cl-page.cl-anim .cl-in { opacity: 1; transform: none; }
+
+/* Stagger cards within a grid as they reveal */
+.cl-page.cl-anim .cl-how-grid .cl-how-card:nth-child(2) { transition-delay: 0.08s; }
+.cl-page.cl-anim .cl-how-grid .cl-how-card:nth-child(3) { transition-delay: 0.16s; }
+.cl-page.cl-anim .cl-modes-grid .cl-mode:nth-child(2) { transition-delay: 0.05s; }
+.cl-page.cl-anim .cl-modes-grid .cl-mode:nth-child(3) { transition-delay: 0.10s; }
+.cl-page.cl-anim .cl-modes-grid .cl-mode:nth-child(4) { transition-delay: 0.15s; }
+.cl-page.cl-anim .cl-modes-grid .cl-mode:nth-child(5) { transition-delay: 0.20s; }
+
+/* Hover lifts (transform only) */
+.cl-how-card, .cl-mode {
+  transition: transform var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out), box-shadow var(--dur) var(--ease-out);
+}
+.cl-how-card:hover, .cl-mode:hover { transform: translateY(-3px); border-color: var(--accent-line); box-shadow: var(--shadow); }
+.cl-browser { transition: transform var(--dur-slow) var(--ease-out), box-shadow var(--dur-slow) var(--ease-out); }
+.cl-feature-shot:hover .cl-browser { transform: translateY(-5px); box-shadow: 0 40px 90px -42px oklch(0.30 0.06 156 / 0.55), 0 10px 28px -18px oklch(0.2 0.02 250 / 0.25); }
+.cl-btn { transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out); }
+.cl-btn:active { transform: translateY(1px); }
+.cl-mock-targets li, .cl-mock-reply { transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out); }
+.cl-mock-targets li:hover, .cl-mock-reply:hover { border-color: var(--accent-line); }

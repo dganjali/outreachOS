@@ -35,6 +35,30 @@ export function Landing() {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
+  // Scroll-reveal: fade sections up as they enter the viewport.
+  useEffect(() => {
+    const page = document.querySelector('.cl-page');
+    if (!page) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    page.classList.add('cl-anim');
+    const els = page.querySelectorAll(
+      '.cl-feature, .cl-how-card, .cl-mode, .cl-faq-item, .cl-section-head, .cl-cta-inner'
+    );
+    const io = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((e) => {
+          if (e.isIntersecting) {
+            e.target.classList.add('cl-in');
+            io.unobserve(e.target);
+          }
+        });
+      },
+      { rootMargin: '0px 0px -10% 0px', threshold: 0.12 }
+    );
+    els.forEach((el) => io.observe(el));
+    return () => io.disconnect();
+  }, []);
+
   return (
     <div className="cl-page">
       <header className={`cl-nav${scrolled ? ' cl-scrolled' : ''}`}>
