@@ -3,6 +3,7 @@ import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { AuthShell } from '../components/AuthShell';
 import { useToast } from '../context/ToastContext';
+import { Button } from '@/components/ui/button';
 
 type LocationState = { email?: string } | null;
 
@@ -62,19 +63,23 @@ export function CheckEmail() {
         </span>
       }
     >
-      <p className="auth-info">
+      <p className="rounded-md border border-border bg-secondary/40 px-3 py-2.5 text-sm text-muted-foreground">
         This page will continue automatically once your email is verified. Didn't get it? Check spam, or resend below.
       </p>
-      <button
+      <Button
         type="button"
-        className="btn-primary"
+        variant="secondary"
+        className="mt-3 w-full"
         onClick={handleResend}
         disabled={resending}
-        style={{ marginTop: '0.75rem' }}
       >
         {resending ? 'Resending…' : 'Resend verification email'}
-      </button>
-      {resendError && <p role="alert" className="auth-alert">{resendError}</p>}
+      </Button>
+      {resendError && (
+        <p role="alert" className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {resendError}
+        </p>
+      )}
     </AuthShell>
   );
 }

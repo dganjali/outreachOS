@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { ArrowRight, Plus } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { gmail } from '../lib/api';
 import type { Mission, AgentRun } from '../types';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import { cn } from '@/lib/utils';
 
 interface Stats {
   missions: number;
@@ -182,33 +187,52 @@ export function Dashboard() {
   // ---- First-run launchpad ----
   if (!loading && missions.length === 0) {
     return (
-      <div className="launchpad">
-        <section className="launchpad-card">
-          <p className="launchpad-eyebrow">{firstName ? `Welcome, ${firstName}` : 'Welcome'}</p>
-          <h1 className="launchpad-title">Let's land your first reply.</h1>
-          <p className="launchpad-sub">
-            Tell us who you want to reach. The agent finds the companies, the right people, the angle,
-            and writes the emails. You review and send.
-          </p>
-          <Link to="/missions/new" className="launchpad-cta">
-            Start your first mission
-          </Link>
-
-          <div className="launchpad-nudges">
-            {gmailConnected === false && (
-              <Link to="/settings" className="launchpad-nudge">
-                <span className="launchpad-nudge-dot" aria-hidden />
-                Connect Gmail <em>so you can send</em>
+      <div className="mx-auto flex max-w-4xl flex-col gap-6 py-4 animate-fade-in">
+        <div className="relative">
+          {/* accent glow */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -top-10 left-1/4 h-48 w-2/3 -translate-x-1/2 rounded-full bg-primary/20 blur-[100px]"
+          />
+          <div className="panel relative overflow-hidden p-8 md:p-12">
+            <span className="inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
+              {firstName ? `Welcome, ${firstName}` : 'Welcome to OutreachOS'}
+            </span>
+            <h1 className="mt-5 max-w-xl font-display text-4xl font-bold tracking-tight text-wash md:text-5xl">
+              Let's land your first reply.
+            </h1>
+            <p className="mt-4 max-w-lg text-base leading-relaxed text-muted-foreground">
+              Tell us who you want to reach. The agent finds the companies, the right people, the
+              angle, and writes the emails. You review and send.
+            </p>
+            <div className="mt-7 flex flex-wrap items-center gap-3">
+              <Button asChild size="lg" className="btn-glow gap-2 border-0 font-semibold text-primary-foreground">
+                <Link to="/missions/new">
+                  <Plus className="h-4 w-4" /> Start your first mission
+                </Link>
+              </Button>
+              {gmailConnected === false && (
+                <Link
+                  to="/settings"
+                  className="inline-flex items-center gap-2 rounded-lg border border-border bg-secondary/40 px-3.5 py-2 text-sm text-muted-foreground transition-colors hover:border-border/80 hover:text-foreground"
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary" aria-hidden />
+                  Connect Gmail
+                </Link>
+              )}
+              <Link
+                to="/me"
+                className="inline-flex items-center gap-2 rounded-lg border border-border bg-secondary/40 px-3.5 py-2 text-sm text-muted-foreground transition-colors hover:border-border/80 hover:text-foreground"
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-primary" aria-hidden />
+                Profile <span className="text-foreground/70">{percent}%</span>
               </Link>
-            )}
-            <Link to="/me" className="launchpad-nudge">
-              <span className="launchpad-nudge-dot" aria-hidden />
-              Sharpen your profile <em>{percent}% complete</em>
-            </Link>
+            </div>
           </div>
-        </section>
+        </div>
 
-        <div className="launchpad-steps" aria-hidden>
+        <div className="grid gap-4 sm:grid-cols-3">
           <LaunchStep n={1} title="Find targets" body="High-fit companies with a real reason to reach out now." />
           <LaunchStep n={2} title="Research & contacts" body="Sourced evidence + the decision-makers to email." />
           <LaunchStep n={3} title="Drafts ready" body="A personalized sequence per contact, ready to send." />
@@ -246,77 +270,102 @@ export function Dashboard() {
   }>;
 
   return (
-    <div className="dash">
-      <header className="dash-head">
+    <div className="flex flex-col gap-6 animate-fade-in">
+      <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1>{firstName ? `Welcome back, ${firstName}` : 'Dashboard'}</h1>
-          <p className="dash-sub">
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+            {firstName ? `Welcome back, ${firstName}` : 'Dashboard'}
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
             {stats.missions} {stats.missions === 1 ? 'mission' : 'missions'}
             {stats.drafts > 0 && `, ${stats.drafts} ${stats.drafts === 1 ? 'draft' : 'drafts'} pending`}
             {stats.contacted > 0 && `, ${stats.contacted} contacted`}
             {responseRate !== null && `, ${responseRate}% reply rate`}.
           </p>
         </div>
-        <Link to="/missions/new" className="dash-new">New mission</Link>
       </header>
 
       {error && (
-        <div className="error-banner" role="alert">
+        <div
+          className="flex items-center justify-between gap-3 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+          role="alert"
+        >
           <span>{error}</span>
-          <button type="button" className="link-button" onClick={() => setReloadKey((k) => k + 1)}>
+          <button
+            type="button"
+            className="font-medium underline-offset-2 hover:underline"
+            onClick={() => setReloadKey((k) => k + 1)}
+          >
             Retry
           </button>
         </div>
       )}
 
       {focusItems.length > 0 ? (
-        <section className="focus-band" aria-label="Needs your attention">
+        <section className="grid gap-4 sm:grid-cols-2" aria-label="Needs your attention">
           {focusItems.map((f) => (
-            <Link key={f.key} to={f.to} className={`focus-card tone-${f.tone}`}>
-              <span className="focus-count">{f.count}</span>
-              <span className="focus-body">
-                <span className="focus-noun">{f.noun}</span>
-                <span className="focus-sub">{f.sub}</span>
+            <Link
+              key={f.key}
+              to={f.to}
+              className="group flex items-center gap-4 rounded-lg border border-border bg-card p-4 transition-colors hover:border-primary/50 hover:bg-secondary/40"
+            >
+              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-xl font-bold text-primary">
+                {f.count}
               </span>
-              <span className="focus-cta">{f.cta} →</span>
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="text-sm font-semibold text-foreground">{f.noun}</span>
+                <span className="truncate text-xs text-muted-foreground">{f.sub}</span>
+              </span>
+              <span className="inline-flex items-center gap-1 text-sm font-medium text-primary opacity-0 transition-opacity group-hover:opacity-100">
+                {f.cta} <ArrowRight className="h-3.5 w-3.5" />
+              </span>
             </Link>
           ))}
         </section>
       ) : (
         !loading && (
-          <p className="dash-allclear">
-            You're all caught up. <Link to="/missions/new">Start a mission</Link> to fill your pipeline.
+          <p className="text-sm text-muted-foreground">
+            You're all caught up.{' '}
+            <Link to="/missions/new" className="font-medium text-primary hover:underline">
+              Start a mission
+            </Link>{' '}
+            to fill your pipeline.
           </p>
         )
       )}
 
-      <div className="dash-grid">
-        <section className="dash-main">
-          <div className="dash-section-head">
-            <h2>Active missions</h2>
-            <Link to="/missions" className="dash-section-link">All missions →</Link>
+      <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+        <section className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Active missions</h2>
+            <Link to="/missions" className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">
+              All missions <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
           </div>
           {loading ? (
-            <div className="skeleton-list">
-              <div className="skeleton-row" />
-              <div className="skeleton-row" />
-              <div className="skeleton-row" />
+            <div className="flex flex-col gap-2">
+              <Skeleton className="h-16 w-full rounded-lg" />
+              <Skeleton className="h-16 w-full rounded-lg" />
+              <Skeleton className="h-16 w-full rounded-lg" />
             </div>
           ) : (
-            <ul className="mission-row-list">
+            <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
               {missions.map((m) => {
                 const pct = m.target_count > 0 ? Math.round((m.draft_count / m.target_count) * 100) : 0;
                 return (
                   <li key={m.id}>
-                    <Link to={`/missions/${m.id}`} className="mission-row">
-                      <div className="mission-row-main">
-                        <strong>{m.name}</strong>
-                        <span className="mode-pill subtle">{m.mode}</span>
+                    <Link
+                      to={`/missions/${m.id}`}
+                      className="flex flex-col gap-3 p-4 transition-colors hover:bg-secondary/40"
+                    >
+                      <div className="flex items-center gap-2">
+                        <strong className="text-sm font-semibold text-foreground">{m.name}</strong>
+                        <Badge variant="secondary" className="font-normal capitalize">{m.mode}</Badge>
                       </div>
-                      <div className="mission-progress" aria-hidden>
-                        <div className="mission-progress-bar" style={{ width: `${Math.min(pct, 100)}%` }} />
+                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary" aria-hidden>
+                        <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${Math.min(pct, 100)}%` }} />
                       </div>
-                      <div className="mission-row-stats">
+                      <div className="flex gap-4 text-xs text-muted-foreground">
                         <span>{m.target_count} targets</span>
                         <span>{m.contact_count} contacts</span>
                         <span>{m.draft_count} drafts</span>
@@ -329,41 +378,44 @@ export function Dashboard() {
           )}
         </section>
 
-        <aside className="dash-rail">
-          <section className="dash-rail-block">
-            <h2>Recent activity</h2>
+        <aside className="flex flex-col gap-6">
+          <section className="flex flex-col gap-3">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Recent activity</h2>
             {runs.length === 0 ? (
-              <p className="dash-muted">Nothing yet. Run a mission to see activity here.</p>
+              <p className="text-sm text-muted-foreground">Nothing yet. Run a mission to see activity here.</p>
             ) : (
-              <ul className="run-list">
+              <ul className="flex flex-col gap-px overflow-hidden rounded-lg border border-border bg-card">
                 {runs.map((r) => (
-                  <li key={r.id} className={`run-item run-${r.status}`}>
-                    <span className="run-type">{RUN_LABEL[r.agent_type] ?? r.agent_type}</span>
-                    <span className={`run-status status-${r.status}`}>
+                  <li key={r.id} className="flex items-center gap-2 px-3 py-2.5 text-sm">
+                    <span className="min-w-0 flex-1 truncate text-foreground">{RUN_LABEL[r.agent_type] ?? r.agent_type}</span>
+                    <span
+                      className={cn(
+                        'shrink-0 text-xs font-medium',
+                        r.status === 'running' && 'text-primary',
+                        r.status === 'completed' && 'text-muted-foreground',
+                        r.status === 'failed' && 'text-destructive'
+                      )}
+                    >
                       {r.status === 'running' ? 'running…' : r.status}
                     </span>
-                    <span className="run-time">{timeAgo(r.started_at)}</span>
+                    <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{timeAgo(r.started_at)}</span>
                   </li>
                 ))}
               </ul>
             )}
           </section>
 
-          <section className="dash-rail-block">
-            <h2>This week</h2>
-            <dl className="stat-strip">
-              <div>
-                <dt>Contacted</dt>
-                <dd>{stats.contacted}</dd>
-              </div>
-              <div>
-                <dt>Reply rate</dt>
-                <dd>{responseRate === null ? '—' : `${responseRate}%`}</dd>
-              </div>
-              <div className={stats.runsToday >= 40 ? 'is-warn' : ''}>
-                <dt>Runs today</dt>
-                <dd>{stats.runsToday}<span className="stat-max">/50</span></dd>
-              </div>
+          <section className="flex flex-col gap-3">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">This week</h2>
+            <dl className="grid grid-cols-3 gap-px overflow-hidden rounded-lg border border-border bg-border">
+              <StatCell label="Contacted" value={String(stats.contacted)} />
+              <StatCell label="Reply rate" value={responseRate === null ? '—' : `${responseRate}%`} />
+              <StatCell
+                label="Runs today"
+                value={`${stats.runsToday}`}
+                suffix="/50"
+                warn={stats.runsToday >= 40}
+              />
             </dl>
           </section>
         </aside>
@@ -372,13 +424,27 @@ export function Dashboard() {
   );
 }
 
+function StatCell({ label, value, suffix, warn }: { label: string; value: string; suffix?: string; warn?: boolean }) {
+  return (
+    <div className="bg-card p-3">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className={cn('mt-1 text-lg font-semibold tabular-nums', warn ? 'text-warning' : 'text-foreground')}>
+        {value}
+        {suffix && <span className="text-xs font-normal text-muted-foreground">{suffix}</span>}
+      </dd>
+    </div>
+  );
+}
+
 function LaunchStep({ n, title, body }: { n: number; title: string; body: string }) {
   return (
-    <div className="launch-step">
-      <div className="launch-step-num">{n}</div>
+    <div className="panel flex gap-3 p-4 transition-transform duration-200 hover:-translate-y-0.5">
+      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-sm font-semibold text-primary ring-1 ring-inset ring-primary/20">
+        {n}
+      </div>
       <div>
-        <div className="launch-step-title">{title}</div>
-        <div className="launch-step-body">{body}</div>
+        <div className="text-sm font-semibold text-foreground">{title}</div>
+        <div className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{body}</div>
       </div>
     </div>
   );

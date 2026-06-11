@@ -1,9 +1,23 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Plus, Download, Archive, RotateCcw, Target } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { exportPipelineCsv } from '../lib/exportPipeline';
 import type { Mission } from '../types';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Card } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
+import { cn } from '@/lib/utils';
+
+const STATUS_TONE: Record<string, string> = {
+  active: 'border-primary/30 bg-primary/10 text-primary',
+  running: 'border-primary/30 bg-primary/10 text-primary',
+  draft: 'border-border bg-secondary text-muted-foreground',
+  completed: 'border-border bg-secondary text-muted-foreground',
+  archived: 'border-border bg-secondary text-muted-foreground',
+};
 
 function truncate(str: string, max: number) {
   if (str.length <= max) return str;
@@ -93,68 +107,102 @@ export function Missions() {
   }
 
   return (
-    <div>
-      <header className="dashboard-header">
-        <h1 style={{ margin: 0 }}>Missions</h1>
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-          <button
-            type="button"
-            className="link-button"
-            onClick={() => setShowArchived((v) => !v)}
-          >
+    <div className="flex flex-col gap-6 animate-fade-in">
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Missions</h1>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={() => setShowArchived((v) => !v)}>
             {showArchived ? 'Hide archived' : 'Show archived'}
-          </button>
-          <button type="button" className="btn-secondary" disabled={exporting} onClick={handleExport}>
+          </Button>
+          <Button variant="outline" size="sm" className="gap-1.5" disabled={exporting} onClick={handleExport}>
+            <Download className="h-4 w-4" />
             {exporting ? 'Exporting…' : 'Export CSV'}
-          </button>
-          <Link to="/missions/new" className="dashboard-create">
-            + Create Mission
-          </Link>
+          </Button>
+          <Button asChild size="sm" className="gap-1.5 font-semibold">
+            <Link to="/missions/new">
+              <Plus className="h-4 w-4" /> Create mission
+            </Link>
+          </Button>
         </div>
       </header>
 
       {error ? (
-        <div className="error-banner" role="alert">
+        <div
+          className="flex items-center justify-between gap-3 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+          role="alert"
+        >
           <span>{error}</span>
-          <button type="button" className="link-button" onClick={() => user?.id && load(user.id, showArchived)}>
+          <button
+            type="button"
+            className="font-medium underline-offset-2 hover:underline"
+            onClick={() => user?.id && load(user.id, showArchived)}
+          >
             Retry
           </button>
         </div>
       ) : loading ? (
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.9375rem' }}>Loading…</p>
-      ) : missions.length === 0 ? (
-        <div className="empty-illo">
-          <div className="empty-illo-graphic" aria-hidden>🚀</div>
-          <h3>No missions yet</h3>
-          <p>
-            A mission is one outreach campaign, a mode (sponsorship, BD, sales…), an offer, and an audience. Create one and the agents take it from there.
-          </p>
-          <Link to="/missions/new" className="dashboard-create" style={{ marginTop: '1.25rem' }}>
-            Create your first mission
-          </Link>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <Skeleton className="h-40 w-full rounded-lg" />
+          <Skeleton className="h-40 w-full rounded-lg" />
+          <Skeleton className="h-40 w-full rounded-lg" />
         </div>
+      ) : missions.length === 0 ? (
+        <Card className="flex flex-col items-center gap-3 border-dashed border-border bg-card/50 px-6 py-16 text-center">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <Target className="h-6 w-6" />
+          </div>
+          <h3 className="text-lg font-semibold text-foreground">No missions yet</h3>
+          <p className="max-w-md text-sm leading-relaxed text-muted-foreground">
+            A mission is one outreach campaign, a mode (sponsorship, BD, sales…), an offer, and an
+            audience. Create one and the agents take it from there.
+          </p>
+          <Button asChild className="mt-2 gap-1.5 font-semibold">
+            <Link to="/missions/new">
+              <Plus className="h-4 w-4" /> Create your first mission
+            </Link>
+          </Button>
+        </Card>
       ) : (
-        <div className="mission-cards">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {missions.map((m) => (
-            <Link key={m.id} to={`/missions/${m.id}`} className="mission-card">
-              <div className="mission-card-top">
-                <h3 className="mission-card-name">{m.name}</h3>
-                <span className="mode-pill subtle">{MODE_LABEL[m.mode] ?? m.mode}</span>
+            <Link
+              key={m.id}
+              to={`/missions/${m.id}`}
+              className="group flex flex-col gap-3 rounded-lg border border-border bg-card p-5 transition-colors hover:border-primary/50 hover:bg-secondary/30"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <h3 className="text-base font-semibold leading-tight text-foreground">{m.name}</h3>
+                <Badge variant="secondary" className="shrink-0 font-normal">{MODE_LABEL[m.mode] ?? m.mode}</Badge>
               </div>
-              <p className="mission-card-goal" title={m.goal}>
+              <p className="line-clamp-2 text-sm leading-relaxed text-muted-foreground" title={m.goal}>
                 {truncate(m.goal, 140)}
               </p>
-              <div className="mission-card-stats">
-                <span>{m.target_count} targets</span>
-                <span>{m.draft_count} drafts</span>
-                <span className={`status-pill status-${m.status}`}>{m.status}</span>
+              <div className="mt-auto flex flex-wrap items-center gap-x-4 gap-y-2 pt-2 text-xs text-muted-foreground">
+                <span className="tabular-nums">{m.target_count} targets</span>
+                <span className="tabular-nums">{m.draft_count} drafts</span>
+                <span
+                  className={cn(
+                    'rounded-full border px-2 py-0.5 text-[11px] font-medium capitalize',
+                    STATUS_TONE[m.status] ?? 'border-border bg-secondary text-muted-foreground'
+                  )}
+                >
+                  {m.status}
+                </span>
                 {m.archived_at ? (
-                  <button type="button" className="link-button" onClick={(e) => restore(e, m)}>
-                    Restore
+                  <button
+                    type="button"
+                    className="ml-auto inline-flex items-center gap-1 font-medium text-muted-foreground transition-colors hover:text-foreground"
+                    onClick={(e) => restore(e, m)}
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" /> Restore
                   </button>
                 ) : (
-                  <button type="button" className="link-button" onClick={(e) => archive(e, m)}>
-                    Archive
+                  <button
+                    type="button"
+                    className="ml-auto inline-flex items-center gap-1 font-medium text-muted-foreground transition-colors hover:text-foreground"
+                    onClick={(e) => archive(e, m)}
+                  >
+                    <Archive className="h-3.5 w-3.5" /> Archive
                   </button>
                 )}
               </div>

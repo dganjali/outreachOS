@@ -1,4 +1,5 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { Toaster } from 'sonner';
 import { AuthProvider } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
@@ -25,6 +26,7 @@ function App() {
     <BrowserRouter>
       <AuthProvider>
         <ToastProvider>
+        <Toaster theme="dark" position="bottom-right" richColors closeButton />
         <Routes>
           <Route
             path="/"
