@@ -9,9 +9,9 @@ interface LogoProps {
 }
 
 export function LogoMark({ size = 28, variant = 'default' }: { size?: number; variant?: LogoProps['variant'] }) {
-  const stroke = variant === 'mono-light' ? '#ffffff' : '#0f172a';
-  const fillPrimary = variant === 'mono-light' ? '#ffffff' : '#0f172a';
-  const fillAccent = variant === 'mono-light' ? 'rgba(255,255,255,0.55)' : '#7c3aed';
+  const stroke = variant === 'mono-light' ? '#F4F7FA' : variant === 'mono-dark' ? '#0f172a' : '#F4F7FA';
+  const fillPrimary = variant === 'mono-light' ? '#F4F7FA' : variant === 'mono-dark' ? '#0f172a' : '#F4F7FA';
+  const fillAccent = variant === 'mono-light' ? 'rgba(255,255,255,0.55)' : '#42A478';
   return (
     <svg
       width={size}
@@ -37,7 +37,7 @@ export function LogoMark({ size = 28, variant = 'default' }: { size?: number; va
 
 export function Logo({ size = 28, withWordmark = true, to = '/', variant = 'default', className }: LogoProps) {
   const wordmarkColor =
-    variant === 'mono-light' ? 'var(--primary-foreground)' : 'var(--text)';
+    variant === 'mono-dark' ? '#0f172a' : 'hsl(var(--foreground))';
 
   const inner = (
     <span className={`logo ${className ?? ''}`}>

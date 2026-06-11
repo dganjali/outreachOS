@@ -2,6 +2,9 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { AuthShell } from '../components/AuthShell';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 export function SignUp() {
   const [email, setEmail] = useState('');
@@ -37,10 +40,10 @@ export function SignUp() {
         </span>
       }
     >
-      <form onSubmit={handleSubmit} noValidate>
-        <div className="field">
-          <label htmlFor="signup-email">Work email</label>
-          <input
+      <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="signup-email">Work email</Label>
+          <Input
             id="signup-email"
             type="email"
             value={email}
@@ -50,9 +53,9 @@ export function SignUp() {
             placeholder="you@company.com"
           />
         </div>
-        <div className="field">
-          <label htmlFor="signup-password">Password</label>
-          <input
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="signup-password">Password</Label>
+          <Input
             id="signup-password"
             type="password"
             value={password}
@@ -63,11 +66,15 @@ export function SignUp() {
             minLength={8}
           />
         </div>
-        <button type="submit" className="btn-primary" disabled={loading}>
-          {loading ? 'Creating account…' : 'Create account →'}
-        </button>
+        <Button type="submit" className="btn-glow mt-2 gap-1.5 border-0 font-semibold text-primary-foreground" disabled={loading}>
+          {loading ? 'Creating account…' : 'Create account'}
+        </Button>
       </form>
-      {error && <p role="alert" className="auth-alert">{error}</p>}
+      {error && (
+        <p role="alert" className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </p>
+      )}
     </AuthShell>
   );
 }

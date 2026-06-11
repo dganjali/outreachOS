@@ -3,6 +3,9 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { AuthShell } from '../components/AuthShell';
 import { useToast } from '../context/ToastContext';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 export function SignIn() {
   const [email, setEmail] = useState('');
@@ -58,10 +61,10 @@ export function SignIn() {
         </>
       }
     >
-      <form onSubmit={handleSubmit} noValidate>
-        <div className="field">
-          <label htmlFor="signin-email">Email</label>
-          <input
+      <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="signin-email">Email</Label>
+          <Input
             id="signin-email"
             type="email"
             value={email}
@@ -71,9 +74,9 @@ export function SignIn() {
             placeholder="you@example.com"
           />
         </div>
-        <div className="field">
-          <label htmlFor="signin-password">Password</label>
-          <input
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="signin-password">Password</Label>
+          <Input
             id="signin-password"
             type="password"
             value={password}
@@ -83,23 +86,28 @@ export function SignIn() {
             placeholder="••••••••"
           />
         </div>
-        <button type="submit" className="btn-primary" disabled={loading}>
+        <Button type="submit" className="btn-glow mt-2 border-0 font-semibold text-primary-foreground" disabled={loading}>
           {loading ? 'Signing in…' : 'Sign in'}
-        </button>
+        </Button>
       </form>
-      {error && <p role="alert" className="auth-alert">{error}</p>}
+      {error && (
+        <p role="alert" className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </p>
+      )}
       {needsConfirm && (
-        <div role="alert" className="auth-alert" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+        <div role="alert" className="mt-4 flex flex-col gap-3 rounded-md border border-warning/40 bg-warning/10 px-3 py-3 text-sm text-foreground">
           <span>Your email isn't verified yet. Check your inbox for the link, or resend it below.</span>
-          <button
+          <Button
             type="button"
-            className="btn-primary"
+            variant="secondary"
+            size="sm"
+            className="self-start"
             onClick={handleResend}
             disabled={resending || !email}
-            style={{ alignSelf: 'flex-start' }}
           >
             {resending ? 'Resending…' : 'Resend verification email'}
-          </button>
+          </Button>
         </div>
       )}
     </AuthShell>

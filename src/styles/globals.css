@@ -1,0 +1,274 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  OutreachOS dark design system (shadcn HSL tokens).
+  The app is forced-dark (html.dark), so the dark palette is defined on both
+  :root and .dark. Deep slate ground, hairline borders, emerald as the single
+  restrained brand/"go" accent. Source of truth: plan + DESIGN.md accent rules.
+*/
+:root,
+.dark {
+  --background: 218 36% 4%;
+  --foreground: 210 38% 97%;
+
+  --card: 220 24% 7%;
+  --card-foreground: 210 38% 97%;
+
+  --popover: 220 24% 7%;
+  --popover-foreground: 210 38% 97%;
+
+  /* forest green — the brand / "go" action (Send, Run, Connect, New mission).
+     Muted & deep to match the landing tones, not a neon emerald. */
+  --primary: 153 43% 39%;
+  --primary-foreground: 150 40% 96%;
+
+  /* neutral elevated surfaces (segmented controls, soft chips) */
+  --secondary: 216 21% 11%;
+  --secondary-foreground: 210 38% 97%;
+
+  --muted: 216 21% 11%;
+  --muted-foreground: 213 14% 66%;
+
+  /* shadcn uses --accent for hover surfaces (menu items, ghost buttons).
+     Keep it NEUTRAL so green stays reserved for primary actions. */
+  --accent: 215 20% 16%;
+  --accent-foreground: 210 38% 97%;
+
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 210 38% 98%;
+
+  --success: 150 42% 42%;
+  --success-foreground: 150 40% 96%;
+
+  --warning: 38 80% 52%;
+  --warning-foreground: 38 80% 8%;
+
+  --border: 213 20% 17%;
+  --input: 213 20% 17%;
+  --ring: 152 45% 46%;
+
+  --radius: 0.625rem;
+
+  /* sidebar (app shell) */
+  --sidebar-background: 220 26% 6%;
+  --sidebar-foreground: 213 14% 70%;
+  --sidebar-primary: 153 43% 41%;
+  --sidebar-primary-foreground: 150 40% 96%;
+  --sidebar-accent: 216 21% 12%;
+  --sidebar-accent-foreground: 210 38% 97%;
+  --sidebar-border: 213 20% 14%;
+  --sidebar-ring: 152 45% 46%;
+
+  color-scheme: dark;
+}
+
+/* Force the page background dark globally (legacy index.css sets body to a
+   light --paper, which otherwise shows through behind transparent sections). */
+html,
+body {
+  background-color: hsl(var(--background));
+}
+
+/* ---- Legacy dark compatibility layer ----
+   The legacy index.css theme is fully token-driven (light register). Flipping
+   its NON-colliding surface/ink tokens to dark renders every not-yet-rewritten
+   legacy page (mission detail/run, profile, onboarding) in a dark theme that
+   matches the new shadcn surfaces, without rewriting all their JSX. (The few
+   tokens that collide with shadcn — border/accent/primary — are handled by the
+   shadcn values; legacy hairlines fall back gracefully.) */
+:root,
+.dark {
+  --paper: oklch(0.155 0.008 255);
+  --bg: oklch(0.155 0.008 255);
+  --bg-elev: oklch(0.195 0.009 255);
+  --bg-soft: oklch(0.178 0.009 255);
+  --surface: oklch(0.182 0.009 255);
+  --surface-2: oklch(0.232 0.011 255);
+  --surface-sunk: oklch(0.140 0.008 255);
+  --border-soft: oklch(0.262 0.010 255);
+  --border-strong: oklch(0.340 0.012 255);
+
+  --fg: oklch(0.965 0.004 255);
+  --fg-muted: oklch(0.735 0.012 255);
+  --fg-subtle: oklch(0.620 0.012 255);
+  --fg-faint: oklch(0.520 0.012 255);
+  --text: oklch(0.965 0.004 255);
+  --text-muted: oklch(0.735 0.012 255);
+  --text-subtle: oklch(0.620 0.012 255);
+
+  /* legacy forest-green accent family. NOTE: --accent itself collides with a
+     shadcn token (kept as the shadcn value), so legacy .btn-go/links lose their
+     green — acceptable, they are rare on the remaining legacy pages. These
+     non-colliding members keep their dark-tuned values. */
+  --accent-hover: oklch(0.470 0.095 156);
+  --accent-press: oklch(0.430 0.090 156);
+  --accent-soft: oklch(0.260 0.040 156);
+  --accent-line: oklch(0.330 0.050 156);
+  --accent-fg: oklch(0.985 0.004 255);
+  --primary-hover: oklch(0.90 0.01 255);
+}
+
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+  }
+  /* Preflight is disabled for legacy coexistence, so restore the button reset:
+     without it, bare <button>s show the UA `buttonface` grey fill + `buttonborder`
+     bevel under dark color-scheme (the grey + weird outline on ghost buttons).
+     Placed in @layer base so explicit background/border utilities still win. */
+  button,
+  [type='button'],
+  [type='reset'],
+  [type='submit'] {
+    appearance: none;
+    -webkit-appearance: none;
+    background-color: transparent;
+    background-image: none;
+    border: 0 solid;
+  }
+}
+
+/* ============================================================
+   Premium dark surface treatment — depth, glow, texture.
+   Gives the app a modern startup feel (Cluely / Linear / Vercel)
+   instead of flat dark rectangles.
+   ============================================================ */
+
+/* App background: deep slate + a soft forest-green aurora + faint grid. */
+.app-canvas {
+  position: relative;
+  background-color: hsl(var(--background));
+  background-image:
+    radial-gradient(60rem 40rem at 12% -8%, hsl(153 43% 39% / 0.10), transparent 60%),
+    radial-gradient(50rem 36rem at 100% 0%, hsl(190 50% 40% / 0.06), transparent 55%);
+}
+.app-canvas::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, hsl(213 30% 60% / 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, hsl(213 30% 60% / 0.035) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(120% 90% at 50% 0%, #000 35%, transparent 80%);
+  -webkit-mask-image: radial-gradient(120% 90% at 50% 0%, #000 35%, transparent 80%);
+  z-index: 0;
+}
+
+@layer components {
+  /* Elevated panel: subtle top-light gradient, hairline, depth shadow. */
+  .panel {
+    position: relative;
+    border: 1px solid hsl(var(--border) / 0.9);
+    border-radius: var(--radius-lg);
+    background:
+      linear-gradient(180deg, hsl(216 24% 11% / 0.65), hsl(220 26% 7% / 0.65));
+    box-shadow:
+      0 1px 0 0 hsl(210 40% 98% / 0.05) inset,
+      0 1px 2px hsl(0 0% 0% / 0.3),
+      0 24px 50px -28px hsl(0 0% 0% / 0.75);
+    backdrop-filter: blur(8px);
+  }
+  /* faint top sheen that catches the eye on larger panels */
+  .panel::before {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 1px;
+    border-radius: inherit;
+    background: linear-gradient(90deg, transparent, hsl(210 40% 98% / 0.10), transparent);
+    pointer-events: none;
+  }
+  /* Glowing primary action. */
+  .btn-glow {
+    background: linear-gradient(180deg, hsl(153 46% 43%), hsl(153 48% 35%));
+    box-shadow:
+      0 1px 0 0 hsl(150 60% 80% / 0.25) inset,
+      0 8px 24px -10px hsl(153 50% 40% / 0.6);
+  }
+  .btn-glow:hover {
+    background: linear-gradient(180deg, hsl(153 48% 46%), hsl(153 50% 38%));
+    box-shadow:
+      0 1px 0 0 hsl(150 60% 80% / 0.3) inset,
+      0 10px 30px -8px hsl(153 50% 42% / 0.7);
+  }
+}
+
+@layer utilities {
+  /* Heading wash: bright foreground fading to a cooler tone. */
+  .text-balance { text-wrap: balance; }
+  .text-wash {
+    background: linear-gradient(180deg, hsl(210 40% 99%), hsl(213 18% 74%));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    /* Tailwind's text-4xl/5xl set line-height:1, which clips glyph descenders
+       under background-clip:text. Give the clip box room so g/p/y aren't cut. */
+    padding-bottom: 0.14em;
+  }
+  .ring-soft {
+    box-shadow: 0 0 0 1px hsl(var(--border)), 0 0 0 4px hsl(153 43% 39% / 0.08);
+  }
+}
+
+/* Neutralize legacy index.css link underlines inside the new dark surfaces
+   (legacy `a:hover{text-decoration:underline}` is non-layered and would beat
+   Tailwind utilities). Scoped to .app-canvas so the legacy landing is untouched. */
+.app-canvas a,
+.app-canvas a:hover {
+  text-decoration: none;
+}
+
+/* Legacy index.css styles bare `input/textarea/select` with a LIGHT background.
+   Those rules are unlayered and beat shadcn's `bg-transparent` (which sits in
+   @layer utilities). Override globally so shadcn form controls render dark
+   everywhere (the whole app is forced-dark now). */
+input[type="text"], input[type="email"], input[type="password"], input[type="search"],
+input[type="url"], input[type="number"], input[type="tel"], input[type="date"],
+input:not([type]), textarea, select {
+  background-color: transparent;
+  color: hsl(var(--foreground));
+  border-color: hsl(var(--input));
+}
+input::placeholder,
+textarea::placeholder {
+  color: hsl(var(--muted-foreground));
+  opacity: 1;
+}
+
+/* Restore forest green on the key legacy identity elements whose `var(--accent)`
+   fill is now invalid (--accent is a shadcn triplet). Targeted, low-risk. */
+.btn-primary.is-go,
+.btn-primary.go,
+.btn-go {
+  background: oklch(0.52 0.095 156);
+  border-color: oklch(0.52 0.095 156);
+  color: oklch(0.99 0.004 255);
+}
+.btn-primary.is-go:hover:not(:disabled),
+.btn-primary.go:hover:not(:disabled),
+.btn-go:hover:not(:disabled) {
+  background: oklch(0.47 0.095 156);
+  border-color: oklch(0.47 0.095 156);
+}
+.mission-progress-bar,
+.run-progress-bar {
+  background: oklch(0.52 0.095 156);
+}
+
+/* Refined dark scrollbars. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(213 16% 26%) transparent;
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb {
+  background: hsl(213 16% 24%);
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover { background: hsl(213 16% 32%); background-clip: content-box; }

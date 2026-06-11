@@ -1,9 +1,27 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { RefreshCw, Inbox as InboxIcon, Loader2 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { agents, gmail } from '../lib/api';
 import type { Reply, ReplyClassification, SentMessage } from '../types';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Skeleton } from '@/components/ui/skeleton';
+import { cn } from '@/lib/utils';
+
+const PILL_TONE: Record<string, string> = {
+  green: 'border-primary/30 bg-primary/10 text-primary',
+  amber: 'border-amber-500/30 bg-amber-500/10 text-amber-400',
+  blue: 'border-sky-500/30 bg-sky-500/10 text-sky-400',
+  red: 'border-destructive/40 bg-destructive/10 text-destructive',
+  gray: 'border-border bg-secondary text-muted-foreground',
+};
+
+function pill(tone: string) {
+  return cn('inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium', PILL_TONE[tone] ?? PILL_TONE.gray);
+}
 
 const CLASS_LABEL: Record<ReplyClassification, string> = {
   interested: 'Interested',
@@ -170,89 +188,107 @@ export function Inbox() {
   const unclassifiedCount = replies.filter((r) => !r.classification).length;
 
   return (
-    <div>
-      <header className="dashboard-header">
+    <div className="flex flex-col gap-6 animate-fade-in">
+      <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 style={{ margin: 0 }}>Inbox</h1>
-          <p style={{ margin: '0.25rem 0 0', color: 'var(--text-muted)', fontSize: '0.9375rem' }}>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">Inbox</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
             Replies to your outreach, triaged automatically.{' '}
             {classifyingIds.size > 0 && unclassifiedCount > 0 ? 'Classifying new replies…' : ''}
           </p>
         </div>
-        <div className="inbox-filter">
+        <div className="flex items-center gap-1 rounded-lg border border-border bg-secondary/40 p-1">
+          {(['unhandled', 'all'] as const).map((f) => (
+            <button
+              key={f}
+              type="button"
+              className={cn(
+                'rounded-md px-3 py-1.5 text-sm font-medium capitalize transition-colors',
+                filter === f ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+              )}
+              onClick={() => setFilter(f)}
+            >
+              {f}
+            </button>
+          ))}
           <button
             type="button"
-            className={filter === 'unhandled' ? 'pill-tab active' : 'pill-tab'}
-            onClick={() => setFilter('unhandled')}
+            className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-card hover:text-foreground"
+            onClick={() => load()}
+            title="Check for new replies"
           >
-            Unhandled
-          </button>
-          <button
-            type="button"
-            className={filter === 'all' ? 'pill-tab active' : 'pill-tab'}
-            onClick={() => setFilter('all')}
-          >
-            All
-          </button>
-          <button type="button" className="pill-tab" onClick={() => load()} title="Check for new replies">
-            ↻
+            <RefreshCw className="h-4 w-4" />
           </button>
         </div>
       </header>
 
-      {error && <div className="banner-error">{error}</div>}
+      {error && (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {error}
+        </div>
+      )}
 
       {loading ? (
-        <div className="skeleton-list">
-          <div className="skeleton-row" />
-          <div className="skeleton-row" />
-          <div className="skeleton-row" />
+        <div className="flex flex-col gap-3">
+          <Skeleton className="h-28 w-full rounded-lg" />
+          <Skeleton className="h-28 w-full rounded-lg" />
+          <Skeleton className="h-28 w-full rounded-lg" />
         </div>
       ) : replies.length === 0 ? (
-        <div className="empty-illo">
-          <div className="empty-illo-graphic" aria-hidden>📥</div>
-          <h3>No replies yet</h3>
-          <p>
-            We check Gmail every 15 minutes for replies on threads you've sent. When one lands, it shows
-            up here, already classified, with a suggested response ready to go.
+        <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border bg-card/50 px-6 py-16 text-center">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <InboxIcon className="h-6 w-6" />
+          </div>
+          <h3 className="text-lg font-semibold text-foreground">No replies yet</h3>
+          <p className="max-w-md text-sm leading-relaxed text-muted-foreground">
+            We check Gmail every 15 minutes for replies on threads you've sent. When one lands, it
+            shows up here, already classified, with a suggested response ready to go.
           </p>
         </div>
       ) : (
-        <div className="reply-list">
+        <div className="flex flex-col gap-3">
           {replies.map((r) => {
             const sent = sentByReply[r.id];
             const cls = r.classification as ReplyClassification | null;
             const isClassifying = classifyingIds.has(r.id);
             return (
-              <article key={r.id} className={`reply-card ${r.handled ? 'handled' : ''}`}>
-                <header className="reply-card-head">
-                  <div>
-                    <strong>{r.from_email ?? 'unknown sender'}</strong>
-                    {cls && <span className={`class-pill ${CLASS_COLOR[cls]}`}>{CLASS_LABEL[cls]}</span>}
+              <article
+                key={r.id}
+                className={cn('panel p-5 transition-opacity', r.handled && 'opacity-60')}
+              >
+                <header className="flex items-start justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <strong className="text-sm font-semibold text-foreground">{r.from_email ?? 'unknown sender'}</strong>
+                    {cls && <span className={pill(CLASS_COLOR[cls])}>{CLASS_LABEL[cls]}</span>}
                     {!cls && isClassifying && (
-                      <span className="class-pill gray">
-                        <span className="step-spin" style={{ marginRight: '0.3rem' }} />
-                        triaging…
+                      <span className={pill('gray')}>
+                        <Loader2 className="h-3 w-3 animate-spin" /> triaging…
                       </span>
                     )}
-                    {r.urgency === 'high' && <span className="class-pill red">urgent</span>}
+                    {r.urgency === 'high' && <span className={pill('red')}>urgent</span>}
                   </div>
-                  <span className="reply-time">{r.received_at ? timeAgo(r.received_at) : '—'}</span>
+                  <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                    {r.received_at ? timeAgo(r.received_at) : '—'}
+                  </span>
                 </header>
 
-                {r.subject && <div className="reply-subject">{r.subject}</div>}
-                <div className="reply-body">{r.body || r.snippet}</div>
+                {r.subject && <div className="mt-2 text-sm font-medium text-foreground">{r.subject}</div>}
+                <div className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+                  {r.body || r.snippet}
+                </div>
 
                 {sent && (
-                  <details className="reply-original">
-                    <summary>Original outreach</summary>
-                    <div className="reply-subject">{sent.subject}</div>
-                    <pre className="sequence-text">{sent.body}</pre>
+                  <details className="mt-3 rounded-lg border border-border bg-secondary/30 p-3 text-sm">
+                    <summary className="cursor-pointer text-xs font-medium text-muted-foreground">Original outreach</summary>
+                    <div className="mt-2 text-sm font-medium text-foreground">{sent.subject}</div>
+                    <pre className="mt-1 whitespace-pre-wrap font-sans text-xs leading-relaxed text-muted-foreground">{sent.body}</pre>
                   </details>
                 )}
 
                 {r.recommended_action && (
-                  <div className="reply-action"><strong>Recommended:</strong> {r.recommended_action}</div>
+                  <div className="mt-3 rounded-md border border-border bg-secondary/30 px-3 py-2 text-sm text-muted-foreground">
+                    <strong className="font-medium text-foreground">Recommended:</strong> {r.recommended_action}
+                  </div>
                 )}
 
                 {r.suggested_response && (
@@ -262,24 +298,21 @@ export function Inbox() {
                   />
                 )}
 
-                <div className="reply-actions">
+                <div className="mt-4 flex items-center gap-2">
                   {!cls && !isClassifying && (
-                    <button
+                    <Button
                       type="button"
-                      className="btn-secondary tiny"
+                      variant="outline"
+                      size="sm"
                       disabled={busy === r.id}
                       onClick={() => classifyManually(r)}
                     >
                       {busy === r.id ? 'Classifying…' : 'Classify with AI'}
-                    </button>
+                    </Button>
                   )}
-                  <button
-                    type="button"
-                    className="btn-secondary tiny"
-                    onClick={() => markHandled(r, !r.handled)}
-                  >
+                  <Button type="button" variant="ghost" size="sm" onClick={() => markHandled(r, !r.handled)}>
                     {r.handled ? 'Mark unhandled' : 'Mark handled'}
-                  </button>
+                  </Button>
                 </div>
               </article>
             );
@@ -320,28 +353,24 @@ function SuggestedReply({ reply, onSent }: { reply: Reply; onSent: () => void })
   }
 
   if (sent) {
-    return <div className="reply-suggested sent">✓ Reply sent.</div>;
+    return (
+      <div className="mt-3 rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-sm font-medium text-primary">
+        ✓ Reply sent.
+      </div>
+    );
   }
 
   const notConnected = err && /gmail_not_connected/i.test(err);
 
   return (
-    <div className="reply-suggested">
-      <div className="reply-suggested-label">Suggested reply, edit &amp; send</div>
-      <input
-        className="reply-subject-input"
-        value={subject}
-        onChange={(e) => setSubject(e.target.value)}
-        placeholder="Subject"
-      />
-      <textarea
-        className="reply-body-input"
-        value={body}
-        onChange={(e) => setBody(e.target.value)}
-        rows={5}
-      />
+    <div className="mt-4 flex flex-col gap-2 rounded-lg border border-border bg-secondary/30 p-3">
+      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        Suggested reply, edit &amp; send
+      </div>
+      <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" className="bg-background/40" />
+      <Textarea value={body} onChange={(e) => setBody(e.target.value)} rows={5} className="bg-background/40" />
       {err && (
-        <div className="banner-error">
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive [&_a]:font-medium [&_a]:text-primary">
           {notConnected ? (
             <>Connect Gmail in <Link to="/settings">Settings</Link> to send replies.</>
           ) : (
@@ -349,11 +378,21 @@ function SuggestedReply({ reply, onSent }: { reply: Reply; onSent: () => void })
           )}
         </div>
       )}
-      <div className="reply-suggested-actions">
-        <button type="button" className="btn-primary tiny" onClick={send} disabled={sending || !body.trim()}>
+      <div className="flex items-center gap-3">
+        <Button
+          type="button"
+          size="sm"
+          className="btn-glow border-0 font-semibold text-primary-foreground"
+          onClick={send}
+          disabled={sending || !body.trim()}
+        >
           {sending ? 'Sending…' : 'Send reply'}
-        </button>
-        <button type="button" className="link-button" onClick={copy}>
+        </Button>
+        <button
+          type="button"
+          className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+          onClick={copy}
+        >
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
