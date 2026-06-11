@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Sparkles, Target, FileText, Inbox as InboxIcon, Check } from 'lucide-react';
 import { Logo } from '../components/Logo';
-import { BrowserFrame, PipelineMock, DraftMock, InboxMock } from '../components/AppMockups';
-import { MountainScene } from '../components/MountainScene';
+import { BrowserFrame, HeroAppMock, PipelineMock, DraftMock, InboxMock } from '../components/AppMockups';
+import { GenerativeMountains } from '../components/GenerativeMountains';
 import { Button } from '@/components/ui/button';
 import {
   Accordion,
@@ -113,30 +113,40 @@ export function Landing() {
 
       <main>
         {/* Hero */}
-        <section className="relative overflow-hidden px-5 pb-20 pt-36 md:pt-44">
-          {/* layered atmospheric background — prominent mountain horizon */}
+        <section className="relative isolate overflow-hidden px-5 pb-12 pt-20 md:pt-24">
+          {/* atmospheric background — near-black with a restrained green, particle terrain below */}
           <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
-            {/* brand mountain scene: teal sky + sun + ridges, clearly visible */}
+            {/* base gradient: black at the top, easing to a very dark green-slate near the terrain */}
+            <div className="absolute inset-0 bg-[linear-gradient(180deg,hsl(220_30%_4%)_0%,hsl(216_24%_5%)_34%,hsl(200_18%_8%)_60%,hsl(168_22%_10%)_84%,hsl(164_26%_8%)_100%)]" />
+
+            {/* soft radial halo behind the headline — white with a whisper of green, low opacity */}
+            <div className="absolute left-1/2 top-[30%] h-[40rem] w-[58rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(ellipse_at_center,hsl(150_30%_82%/0.10),hsl(155_40%_55%/0.05)_42%,transparent_70%)] blur-[60px]" />
+
+            {/* low horizon glow — subtle green light where the terrain meets the dark */}
+            <div className="absolute bottom-[30%] left-1/2 h-72 w-[88rem] -translate-x-1/2 rounded-[50%] bg-[radial-gradient(ellipse_at_center,hsl(150_55%_60%/0.16),hsl(152_50%_45%/0.07)_46%,transparent_72%)] blur-[60px]" />
+
+            {/* generative particle terrain (three.js) — white dots with green crest highlights */}
+            <GenerativeMountains className="absolute inset-x-0 bottom-0 h-[86%] w-full" />
+
+            {/* faint grid near the top */}
             <div
-              className="absolute inset-x-0 bottom-0 h-[76%]"
+              className="absolute inset-0 opacity-30"
               style={{
-                maskImage: 'linear-gradient(to bottom, transparent, #000 13%)',
-                WebkitMaskImage: 'linear-gradient(to bottom, transparent, #000 13%)',
+                backgroundImage:
+                  'linear-gradient(to right, hsl(160 30% 60% / 0.045) 1px, transparent 1px), linear-gradient(to bottom, hsl(160 30% 60% / 0.045) 1px, transparent 1px)',
+                backgroundSize: '60px 60px',
+                maskImage: 'radial-gradient(110% 45% at 50% 0%, #000 25%, transparent 70%)',
+                WebkitMaskImage: 'radial-gradient(110% 45% at 50% 0%, #000 25%, transparent 70%)',
               }}
-            >
-              <MountainScene className="h-full w-full" />
-            </div>
-
-            {/* keep the top behind the headline near-black */}
-            <div className="absolute inset-x-0 top-0 h-[32%] bg-gradient-to-b from-background via-background to-transparent" />
-
-            {/* lift the sun glow on the right of the horizon */}
-            <div className="absolute right-[16%] top-[42%] h-72 w-72 rounded-full bg-[radial-gradient(circle,hsl(110_55%_82%/0.45),hsl(140_55%_55%/0.18)_45%,transparent_68%)] blur-2xl" />
-
+            />
             {/* film grain */}
             <div className="bg-grain absolute inset-0 opacity-[0.05] mix-blend-soft-light" />
-            {/* gentle side fade so the ridges meet the page edges cleanly */}
-            <div className="absolute inset-0 bg-[radial-gradient(ellipse_115%_100%_at_50%_30%,transparent_82%,hsl(var(--background))_100%)]" />
+            {/* darken under the nav so the logo/links stay crisp */}
+            <div className="absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-background to-transparent" />
+            {/* clean fade into the next section at the bottom */}
+            <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-b from-transparent to-background" />
+            {/* gentle side vignette */}
+            <div className="absolute inset-0 bg-[radial-gradient(ellipse_75%_115%_at_50%_45%,transparent_68%,hsl(var(--background))_100%)]" />
           </div>
 
           <div className="mx-auto max-w-3xl text-center animate-fade-in">
@@ -144,15 +154,14 @@ export function Landing() {
               <Sparkles className="h-3.5 w-3.5" />
               Agentic cold outreach
             </span>
-            <h1 className="mt-6 text-balance font-display text-5xl font-bold leading-[1.05] tracking-tight text-wash md:text-7xl">
+            <h1 className="mt-5 text-balance font-display text-5xl font-bold leading-[1.05] tracking-tight text-wash md:text-7xl">
               Cold outreach that writes and sends itself.
             </h1>
-            <p className="mx-auto mt-6 max-w-2xl text-pretty text-lg leading-relaxed text-muted-foreground">
-              One mission in: a mode, an offer, an audience. OutreachOS researches the targets, finds
-              the right people, sources the evidence, and drafts personalized emails, sent from your
-              Gmail with replies routed back to you.
+            <p className="mx-auto mt-4 max-w-2xl text-pretty text-lg leading-relaxed text-muted-foreground">
+              One mission in — a mode, an offer, an audience. OutreachOS researches the targets and
+              drafts personalized emails, sent from your Gmail.
             </p>
-            <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
               <Button asChild size="lg" className="btn-glow gap-2 border-0 px-6 font-semibold text-primary-foreground">
                 <Link to="/sign-up">
                   Start free <ArrowRight className="h-4 w-4" />
@@ -162,16 +171,16 @@ export function Landing() {
                 <a href="#how">See how it works</a>
               </Button>
             </div>
-            <p className="mt-5 text-sm text-muted-foreground/80">Runs on Google Gemini. Connect Gmail to send.</p>
+            <p className="mt-4 text-sm text-muted-foreground/80">Runs on Google Gemini. Connect Gmail to send.</p>
           </div>
 
           {/* hero product shot */}
-          <div className="relative mx-auto mt-28 max-w-4xl animate-fade-in">
+          <div className="relative mx-auto mt-8 max-w-5xl animate-fade-in">
             <div aria-hidden className="pointer-events-none absolute -inset-x-10 -top-8 bottom-0 -z-10 rounded-[2rem] bg-primary/10 blur-[80px]" />
             {/* gradient ring frame */}
             <div className="rounded-2xl bg-gradient-to-b from-primary/30 via-border/50 to-transparent p-px shadow-[0_50px_140px_-40px_rgba(0,0,0,0.95)]">
-              <BrowserFrame url="app.outreachos.com/missions">
-                <PipelineMock />
+              <BrowserFrame url="app.outreachos.com/missions" bodyClassName="p-0">
+                <HeroAppMock />
               </BrowserFrame>
             </div>
 
