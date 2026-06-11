@@ -15,6 +15,15 @@ dist-ssr
 # Environment files
 .env
 .env.*
+/env
+/env.*
+
+# Secrets / service-account keys — never commit these
+/secrets/
+*service-account*.json
+outreachos-*-*.json
+gcp-*.json
+*-key.json
 
 
 # Editor directories and files
