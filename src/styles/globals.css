@@ -197,9 +197,22 @@ body {
   }
 }
 
+@keyframes aurora-1 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(7%, -5%) scale(1.15); }
+}
+@keyframes aurora-2 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(-7%, 5%) scale(0.9); }
+}
+
 @layer utilities {
   /* Heading wash: bright foreground fading to a cooler tone. */
   .text-balance { text-wrap: balance; }
+  /* Fine film grain (TypeOS-style texture) via an inline noise SVG. */
+  .bg-grain {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
   .text-wash {
     background: linear-gradient(180deg, hsl(210 40% 99%), hsl(213 18% 74%));
     -webkit-background-clip: text;

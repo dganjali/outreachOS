@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { ArrowRight, Sparkles, Target, FileText, Inbox as InboxIcon, Check } from 'lucide-react';
 import { Logo } from '../components/Logo';
 import { BrowserFrame, PipelineMock, DraftMock, InboxMock } from '../components/AppMockups';
+import { MountainScene } from '../components/MountainScene';
 import { Button } from '@/components/ui/button';
 import {
   Accordion,
@@ -113,19 +114,29 @@ export function Landing() {
       <main>
         {/* Hero */}
         <section className="relative overflow-hidden px-5 pb-20 pt-36 md:pt-44">
-          {/* background glow + grid */}
-          <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
-            <div className="absolute left-1/2 top-0 h-[480px] w-[820px] -translate-x-1/2 rounded-full bg-primary/20 blur-[140px]" />
+          {/* layered atmospheric background — prominent mountain horizon */}
+          <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
+            {/* brand mountain scene: teal sky + sun + ridges, clearly visible */}
             <div
-              className="absolute inset-0 opacity-[0.55]"
+              className="absolute inset-x-0 bottom-0 h-[76%]"
               style={{
-                backgroundImage:
-                  'linear-gradient(to right, hsl(213 30% 60% / 0.05) 1px, transparent 1px), linear-gradient(to bottom, hsl(213 30% 60% / 0.05) 1px, transparent 1px)',
-                backgroundSize: '60px 60px',
-                maskImage: 'radial-gradient(110% 70% at 50% 0%, #000 30%, transparent 75%)',
-                WebkitMaskImage: 'radial-gradient(110% 70% at 50% 0%, #000 30%, transparent 75%)',
+                maskImage: 'linear-gradient(to bottom, transparent, #000 13%)',
+                WebkitMaskImage: 'linear-gradient(to bottom, transparent, #000 13%)',
               }}
-            />
+            >
+              <MountainScene className="h-full w-full" />
+            </div>
+
+            {/* keep the top behind the headline near-black */}
+            <div className="absolute inset-x-0 top-0 h-[32%] bg-gradient-to-b from-background via-background to-transparent" />
+
+            {/* lift the sun glow on the right of the horizon */}
+            <div className="absolute right-[16%] top-[42%] h-72 w-72 rounded-full bg-[radial-gradient(circle,hsl(110_55%_82%/0.45),hsl(140_55%_55%/0.18)_45%,transparent_68%)] blur-2xl" />
+
+            {/* film grain */}
+            <div className="bg-grain absolute inset-0 opacity-[0.05] mix-blend-soft-light" />
+            {/* gentle side fade so the ridges meet the page edges cleanly */}
+            <div className="absolute inset-0 bg-[radial-gradient(ellipse_115%_100%_at_50%_30%,transparent_82%,hsl(var(--background))_100%)]" />
           </div>
 
           <div className="mx-auto max-w-3xl text-center animate-fade-in">
@@ -155,7 +166,7 @@ export function Landing() {
           </div>
 
           {/* hero product shot */}
-          <div className="relative mx-auto mt-16 max-w-4xl animate-fade-in">
+          <div className="relative mx-auto mt-28 max-w-4xl animate-fade-in">
             <div aria-hidden className="pointer-events-none absolute -inset-x-10 -top-8 bottom-0 -z-10 rounded-[2rem] bg-primary/10 blur-[80px]" />
             {/* gradient ring frame */}
             <div className="rounded-2xl bg-gradient-to-b from-primary/30 via-border/50 to-transparent p-px shadow-[0_50px_140px_-40px_rgba(0,0,0,0.95)]">
