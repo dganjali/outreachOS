@@ -39,6 +39,15 @@ const RUN_LABEL: Record<string, string> = {
 // Fields that make a profile "sharp enough" for good drafts.
 const PROFILE_FIELDS = ['name', 'role', 'bio', 'proof_points', 'achievements', 'metrics', 'linkedin_url', 'writing_tone'] as const;
 
+function countByMission(rows: Array<Record<string, unknown>>): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const r of rows) {
+    const k = String(r.mission_id ?? '');
+    map.set(k, (map.get(k) ?? 0) + 1);
+  }
+  return map;
+}
+
 function profileCompleteness(profile: Record<string, unknown> | null | undefined): number {
   if (!profile) return 0;
   const filled = PROFILE_FIELDS.filter((f) => {
@@ -112,26 +121,28 @@ export function Dashboard() {
 
       const missionsList = (msData ?? []) as Mission[];
 
-      const missionsWithStats: MissionWithStats[] = await Promise.all(
-        missionsList.map(async (m) => {
-          const [{ count: tc }, { data: targetIds }] = await Promise.all([
-            supabase.from('targets').select('id', { count: 'exact', head: true }).eq('mission_id', m.id),
-            supabase.from('targets').select('id').eq('mission_id', m.id),
-          ]);
-          const ids = (targetIds ?? []).map((r) => r.id as string);
-          let cc = 0;
-          let dc = 0;
-          if (ids.length > 0) {
-            const [{ count: c1 }, { count: c2 }] = await Promise.all([
-              supabase.from('contacts').select('id', { count: 'exact', head: true }).in('target_id', ids),
-              supabase.from('email_sequences').select('id', { count: 'exact', head: true }).eq('mission_id', m.id),
-            ]);
-            cc = c1 ?? 0;
-            dc = c2 ?? 0;
-          }
-          return { ...m, target_count: tc ?? 0, contact_count: cc, draft_count: dc };
-        })
-      );
+      // Three batched queries instead of ~4 per mission. Contacts carry a
+      // denormalized mission_id, so everything groups client-side. The old
+      // per-mission fan-out helped exhaust browser connections
+      // (ERR_INSUFFICIENT_RESOURCES) on dashboards with several missions.
+      const missionIds = missionsList.map((m) => m.id);
+      const counts = { targets: new Map<string, number>(), contacts: new Map<string, number>(), drafts: new Map<string, number>() };
+      if (missionIds.length > 0) {
+        const [tRes, cRes, sRes] = await Promise.all([
+          supabase.from('targets').select('id, mission_id').in('mission_id', missionIds),
+          supabase.from('contacts').select('id, mission_id').in('mission_id', missionIds),
+          supabase.from('email_sequences').select('id, mission_id').in('mission_id', missionIds),
+        ]);
+        counts.targets = countByMission(tRes.data ?? []);
+        counts.contacts = countByMission(cRes.data ?? []);
+        counts.drafts = countByMission(sRes.data ?? []);
+      }
+      const missionsWithStats: MissionWithStats[] = missionsList.map((m) => ({
+        ...m,
+        target_count: counts.targets.get(m.id) ?? 0,
+        contact_count: counts.contacts.get(m.id) ?? 0,
+        draft_count: counts.drafts.get(m.id) ?? 0,
+      }));
 
       if (cancelled) return;
 

@@ -33,12 +33,17 @@ export function Onboarding() {
   }, [profile?.id]);
 
   async function upsertProfile(updates: Partial<Profile>) {
-    if (!user?.id) return;
-    const { data: existing } = await supabase
+    // The db shim reports failures via the returned `error` instead of
+    // throwing. Every call here must be checked — a swallowed write error made
+    // onboarding "complete" without persisting onboarding_completed_at, so the
+    // route gates bounced the user straight back into onboarding.
+    if (!user?.id) throw new Error('Not signed in. Please sign in again.');
+    const { data: existing, error: selErr } = await supabase
       .from('profiles')
       .select('id')
       .limit(1)
       .single();
+    if (selErr) throw new Error(selErr.message);
 
     const row = {
       updated_at: new Date().toISOString(),
@@ -46,12 +51,14 @@ export function Onboarding() {
     };
 
     if (existing?.id) {
-      await supabase.from('profiles').update(row).eq('id', existing.id);
+      const { error: updErr } = await supabase.from('profiles').update(row).eq('id', existing.id);
+      if (updErr) throw new Error(updErr.message);
     } else {
-      await supabase.from('profiles').insert({
+      const { error: insErr } = await supabase.from('profiles').insert({
         ...row,
         onboarding_step: 0,
       });
+      if (insErr) throw new Error(insErr.message);
     }
   }
 
@@ -314,7 +321,7 @@ export function Onboarding() {
           </div>
         </div>
 
-        {error && <p role="alert">{error}</p>}
+        {error && <p role="alert" className="auth-alert">{error}</p>}
         {enrichmentStatus && (
           <p className="section-hint" style={{ marginTop: '0.75rem' }}>{enrichmentStatus}</p>
         )}

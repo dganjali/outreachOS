@@ -61,8 +61,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const fetchProfile = useCallback(async () => {
-    const { data } = await db.from('profiles').select('*').limit(1);
-    setProfile(((data?.[0] ?? null) as unknown) as Profile | null);
+    // One retry, then on persistent failure keep the last known profile.
+    // Nulling it here made every route gate read "not onboarded" and bounce
+    // the user into /onboarding whenever a single profiles request flaked.
+    let res = await db.from('profiles').select('*').limit(1);
+    if (res.error) {
+      await new Promise((r) => setTimeout(r, 600));
+      res = await db.from('profiles').select('*').limit(1);
+      if (res.error) return;
+    }
+    setProfile(((res.data?.[0] ?? null) as unknown) as Profile | null);
   }, []);
 
   const refreshProfile = useCallback(async () => {

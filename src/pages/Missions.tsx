@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Plus, Download, Archive, RotateCcw, Target, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { exportPipelineCsv } from '../lib/exportPipeline';
@@ -22,6 +23,15 @@ const STATUS_TONE: Record<string, string> = {
 function truncate(str: string, max: number) {
   if (str.length <= max) return str;
   return str.slice(0, max).trim() + '…';
+}
+
+function countBy(rows: Array<Record<string, unknown>>, key: string): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const r of rows) {
+    const k = String(r[key] ?? '');
+    map.set(k, (map.get(k) ?? 0) + 1);
+  }
+  return map;
 }
 
 const MODE_LABEL: Record<string, string> = {
@@ -69,16 +79,29 @@ export function Missions() {
       const { data: ms, error: qErr } = await query;
       if (qErr) throw qErr;
       const list = (ms ?? []) as Mission[];
-      const withCounts = await Promise.all(
-        list.map(async (m) => {
-          const [{ count: tc }, { count: dc }] = await Promise.all([
-            supabase.from('targets').select('id', { count: 'exact', head: true }).eq('mission_id', m.id),
-            supabase.from('email_sequences').select('id', { count: 'exact', head: true }).eq('mission_id', m.id),
-          ]);
-          return { ...m, target_count: tc ?? 0, draft_count: dc ?? 0 };
-        })
+      // Two batched queries instead of two per mission — the per-mission
+      // fan-out was a major contributor to exhausting browser connections
+      // (ERR_INSUFFICIENT_RESOURCES) on accounts with many missions.
+      const ids = list.map((m) => m.id);
+      let targetCounts = new Map<string, number>();
+      let draftCounts = new Map<string, number>();
+      if (ids.length > 0) {
+        const [tRes, sRes] = await Promise.all([
+          supabase.from('targets').select('id, mission_id').in('mission_id', ids),
+          supabase.from('email_sequences').select('id, mission_id').in('mission_id', ids),
+        ]);
+        if (tRes.error) throw new Error(tRes.error.message);
+        if (sRes.error) throw new Error(sRes.error.message);
+        targetCounts = countBy(tRes.data ?? [], 'mission_id');
+        draftCounts = countBy(sRes.data ?? [], 'mission_id');
+      }
+      setMissions(
+        list.map((m) => ({
+          ...m,
+          target_count: targetCounts.get(m.id) ?? 0,
+          draft_count: draftCounts.get(m.id) ?? 0,
+        }))
       );
-      setMissions(withCounts);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load missions');
     } finally {
@@ -95,14 +118,24 @@ export function Missions() {
     e.preventDefault();
     e.stopPropagation();
     if (!confirm(`Archive "${mission.name}"? You can restore it from the archived view.`)) return;
-    await supabase.from('missions').update({ archived_at: new Date().toISOString() }).eq('id', mission.id);
+    const { error: err } = await supabase.from('missions').update({ archived_at: new Date().toISOString() }).eq('id', mission.id);
+    if (err) {
+      toast.error(`Could not archive: ${err.message}`);
+      return;
+    }
+    toast.success(`Archived "${mission.name}"`);
     if (user?.id) load(user.id, showArchived);
   }
 
   async function restore(e: React.MouseEvent, mission: MissionWithCounts) {
     e.preventDefault();
     e.stopPropagation();
-    await supabase.from('missions').update({ archived_at: null }).eq('id', mission.id);
+    const { error: err } = await supabase.from('missions').update({ archived_at: null }).eq('id', mission.id);
+    if (err) {
+      toast.error(`Could not restore: ${err.message}`);
+      return;
+    }
+    toast.success(`Restored "${mission.name}"`);
     if (user?.id) load(user.id, showArchived);
   }
 
@@ -117,9 +150,10 @@ export function Missions() {
       return;
     const { error: delErr } = await supabase.from('missions').delete().eq('id', mission.id);
     if (delErr) {
-      setError(delErr.message);
+      toast.error(`Could not delete: ${delErr.message}`);
       return;
     }
+    toast.success(`Deleted "${mission.name}" and all its data`);
     if (user?.id) load(user.id, showArchived);
   }
 
