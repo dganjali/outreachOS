@@ -20,6 +20,7 @@ import { MissionRun } from './pages/MissionRun';
 import { Inbox } from './pages/Inbox';
 import { Me } from './pages/Me';
 import { SettingsPage } from './pages/SettingsPage';
+import { Privacy, Terms } from './pages/Legal';
 
 function App() {
   return (
@@ -61,6 +62,8 @@ function App() {
             }
           />
           <Route path="/check-email" element={<CheckEmail />} />
+          <Route path="/privacy" element={<Privacy />} />
+          <Route path="/terms" element={<Terms />} />
           <Route
             path="/onboarding"
             element={

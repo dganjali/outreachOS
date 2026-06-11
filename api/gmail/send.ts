@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { forUser, newId, type InsertDoc } from '../_lib/db';
-import { getActiveAccessToken, createDraft, sendNow } from '../_lib/gmail';
+import { getActiveAccessToken, sendNow } from '../_lib/gmail';
 import { scheduleFollowups, isSuppressed } from '../_lib/sequencing';
 import type {
   ContactDoc,
@@ -129,17 +129,20 @@ export default async function handler(req: Request, res: Response) {
       inReplyTo: priorMessageId ?? undefined,
     };
 
+    // Drafts are kept in OutreachOS only — pushing them into the user's Gmail
+    // would need the restricted gmail.compose scope. The user reviews the draft
+    // here and clicks Send (gmail.send) when ready.
     let result: { messageId: string; threadId: string; draftId?: string };
     if (mode === 'send') {
       result = await sendNow(sendArgs);
     } else {
-      result = await createDraft(sendArgs);
+      result = { messageId: '', threadId: threadId ?? '' };
     }
 
     await scope.collection<SentMessageDoc>('sent_messages').updateById(sentRowId, {
-      gmailDraftId: mode === 'draft' ? result.draftId ?? null : null,
-      gmailMessageId: result.messageId,
-      gmailThreadId: result.threadId,
+      gmailDraftId: null,
+      gmailMessageId: mode === 'send' ? result.messageId : null,
+      gmailThreadId: mode === 'send' ? result.threadId : threadId ?? null,
       status: mode === 'send' ? 'sent' : 'draft',
       sentAt: mode === 'send' ? new Date() : null,
     });
@@ -164,7 +167,7 @@ export default async function handler(req: Request, res: Response) {
       mode,
       gmail_message_id: result.messageId,
       gmail_thread_id: result.threadId,
-      gmail_draft_id: mode === 'draft' ? result.draftId : undefined,
+      gmail_draft_id: undefined,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'send_failed';

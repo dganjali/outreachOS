@@ -102,6 +102,7 @@ export interface ScopedCollection<T extends Document = Document> {
   updateById(id: string, update: Partial<T>): Promise<number>;
   deleteOne(filter: Filter<T>): Promise<number>;
   deleteById(id: string): Promise<number>;
+  deleteMany(filter: Filter<T>): Promise<number>;
   countDocuments(filter?: Filter<T>): Promise<number>;
 }
 
@@ -196,6 +197,11 @@ function buildScoped<T extends Document>(uid: string, name: CollectionName): Sco
     async deleteById(id) {
       const c = await col();
       const r = await c.deleteOne(ownFilter({ _id: id } as unknown as Filter<T>));
+      return r.deletedCount;
+    },
+    async deleteMany(filter) {
+      const c = await col();
+      const r = await c.deleteMany(ownFilter(filter));
       return r.deletedCount;
     },
     async countDocuments(filter = {}) {

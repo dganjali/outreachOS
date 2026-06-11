@@ -314,6 +314,11 @@ export function Landing() {
               <Link to="/sign-up" className="text-muted-foreground transition-colors hover:text-foreground">Sign up</Link>
               <Link to="/forgot-password" className="text-muted-foreground transition-colors hover:text-foreground">Forgot password</Link>
             </div>
+            <div>
+              <h4>Legal</h4>
+              <Link to="/privacy">Privacy</Link>
+              <Link to="/terms">Terms</Link>
+            </div>
           </div>
         </div>
         <div className="mx-auto mt-10 flex max-w-6xl flex-col items-center justify-between gap-2 border-t border-border/60 pt-6 text-xs text-muted-foreground sm:flex-row">

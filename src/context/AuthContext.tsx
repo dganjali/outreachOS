@@ -70,10 +70,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [firebaseUser?.uid, fetchProfile]);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
+    const unsub = onAuthStateChanged(auth, async (u) => {
       setFirebaseUser(u ?? null);
+      // Await the profile fetch BEFORE clearing `loading`. Otherwise there's a
+      // window where loading=false and profile=null, which the onboarding gates
+      // read as "not onboarded" and bounce the user to /onboarding on every load.
       if (u?.uid) {
-        fetchProfile().catch(() => setProfile(null));
+        try {
+          await fetchProfile();
+        } catch {
+          setProfile(null);
+        }
       } else {
         setProfile(null);
       }

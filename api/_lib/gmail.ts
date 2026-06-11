@@ -12,10 +12,13 @@ const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1';
 const REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
 
+// gmail.send is the ONLY Gmail scope in Google's "sensitive" tier (no CASA).
+// Everything else that touches the mailbox — readonly, modify, and even
+// compose (it manages draft content) — is "restricted" and triggers a paid
+// annual security assessment. So we send only; "drafts" are stored in-app and
+// never pushed to the user's Gmail.
 export const GMAIL_SCOPES = [
   'https://www.googleapis.com/auth/gmail.send',
-  'https://www.googleapis.com/auth/gmail.modify',
-  'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/userinfo.email',
   'openid',
 ];

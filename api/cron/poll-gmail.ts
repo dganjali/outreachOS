@@ -21,8 +21,19 @@ import type {
   UserIntegrationDoc,
 } from '../../shared/schemas';
 
+// Reply polling needs the restricted gmail.readonly scope to read inbound
+// threads. We intentionally request send-only (gmail.send) to stay in Google's
+// "sensitive" verification tier and avoid the annual CASA security assessment,
+// so there is no read access and this poller is disabled. Re-enable by adding
+// gmail.readonly back to GMAIL_SCOPES and completing restricted-scope review.
+const REPLY_POLLING_ENABLED = false;
+
 export default async function handler(req: Request, res: Response) {
   if (!requireCronSecret(req, res)) return;
+
+  if (!REPLY_POLLING_ENABLED) {
+    return res.status(200).json({ disabled: 'gmail_reply_polling_requires_readonly_scope', checked: 0 });
+  }
 
   const db = await adminDb();
   const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);

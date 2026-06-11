@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Download, Archive, RotateCcw, Target } from 'lucide-react';
+import { Plus, Download, Archive, RotateCcw, Target, Trash2 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { exportPipelineCsv } from '../lib/exportPipeline';
@@ -106,6 +106,23 @@ export function Missions() {
     if (user?.id) load(user.id, showArchived);
   }
 
+  async function remove(e: React.MouseEvent, mission: MissionWithCounts) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (
+      !confirm(
+        `Permanently delete "${mission.name}"? This also deletes its targets, drafts, and replies, and cannot be undone.`
+      )
+    )
+      return;
+    const { error: delErr } = await supabase.from('missions').delete().eq('id', mission.id);
+    if (delErr) {
+      setError(delErr.message);
+      return;
+    }
+    if (user?.id) load(user.id, showArchived);
+  }
+
   return (
     <div className="flex flex-col gap-6 animate-fade-in">
       <header className="flex flex-wrap items-center justify-between gap-3">
@@ -188,23 +205,32 @@ export function Missions() {
                 >
                   {m.status}
                 </span>
-                {m.archived_at ? (
+                <div className="ml-auto flex items-center gap-3">
+                  {m.archived_at ? (
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 font-medium text-muted-foreground transition-colors hover:text-foreground"
+                      onClick={(e) => restore(e, m)}
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" /> Restore
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 font-medium text-muted-foreground transition-colors hover:text-foreground"
+                      onClick={(e) => archive(e, m)}
+                    >
+                      <Archive className="h-3.5 w-3.5" /> Archive
+                    </button>
+                  )}
                   <button
                     type="button"
-                    className="ml-auto inline-flex items-center gap-1 font-medium text-muted-foreground transition-colors hover:text-foreground"
-                    onClick={(e) => restore(e, m)}
+                    className="inline-flex items-center gap-1 font-medium text-muted-foreground transition-colors hover:text-destructive"
+                    onClick={(e) => remove(e, m)}
                   >
-                    <RotateCcw className="h-3.5 w-3.5" /> Restore
+                    <Trash2 className="h-3.5 w-3.5" /> Delete
                   </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="ml-auto inline-flex items-center gap-1 font-medium text-muted-foreground transition-colors hover:text-foreground"
-                    onClick={(e) => archive(e, m)}
-                  >
-                    <Archive className="h-3.5 w-3.5" /> Archive
-                  </button>
-                )}
+                </div>
               </div>
             </Link>
           ))}

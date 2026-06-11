@@ -72,6 +72,39 @@ router.post('/_storage/remove', async (req, res) => {
   return res.json({ ok: true });
 });
 
+// ---- mission delete with cascade ----
+// A mission owns targets, contacts, evidence, sequences, sent messages,
+// replies, and agent runs (all carry a denormalized missionId). Deleting just
+// the mission doc would orphan all of that, so hard-delete the dependents
+// first. Registered before the generic '/:collection/:id' DELETE so it wins for
+// missions; everything is scoped to the caller via forUser(uid).
+const MISSION_CHILDREN: CollectionName[] = [
+  COL.targets,
+  COL.contacts,
+  COL.evidencePacks,
+  COL.emailSequences,
+  COL.sentMessages,
+  COL.replies,
+  COL.agentRuns,
+];
+
+router.delete('/missions/:id', async (req, res) => {
+  const uid = uidOf(req);
+  const scope = forUser(uid);
+  const missionId = req.params.id;
+
+  const mission = await scope.collection(COL.missions).findById(missionId);
+  if (!mission) return res.status(404).json({ error: 'not_found' });
+
+  const deleted: Record<string, number> = {};
+  for (const child of MISSION_CHILDREN) {
+    deleted[child] = await scope.collection(child).deleteMany({ missionId } as any);
+  }
+  await scope.collection(COL.missions).deleteById(missionId);
+
+  res.json({ ok: true, deleted });
+});
+
 // ---- list with filter/order/limit ----
 router.post('/:collection/query', async (req, res) => {
   const collection = req.params.collection;
