@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { RefreshCw, Inbox as InboxIcon, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { agents, gmail } from '../lib/api';
@@ -181,7 +182,11 @@ export function Inbox() {
   }
 
   async function markHandled(reply: Reply, handled: boolean) {
-    await supabase.from('replies').update({ handled }).eq('id', reply.id);
+    const { error } = await supabase.from('replies').update({ handled }).eq('id', reply.id);
+    if (error) {
+      toast.error(`Could not update reply: ${error.message}`);
+      return;
+    }
     setReplies((rs) => rs.map((x) => (x.id === reply.id ? { ...x, handled } : x)));
   }
 
@@ -193,8 +198,8 @@ export function Inbox() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">Inbox</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Replies to your outreach, triaged automatically.{' '}
-            {classifyingIds.size > 0 && unclassifiedCount > 0 ? 'Classifying new replies…' : ''}
+            Recorded replies, classified with a suggested response.{' '}
+            {classifyingIds.size > 0 && unclassifiedCount > 0 ? 'Classifying…' : ''}
           </p>
         </div>
         <div className="flex items-center gap-1 rounded-lg border border-border bg-secondary/40 p-1">
@@ -215,7 +220,7 @@ export function Inbox() {
             type="button"
             className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-card hover:text-foreground"
             onClick={() => load()}
-            title="Check for new replies"
+            title="Reload"
           >
             <RefreshCw className="h-4 w-4" />
           </button>
@@ -239,10 +244,11 @@ export function Inbox() {
           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
             <InboxIcon className="h-6 w-6" />
           </div>
-          <h3 className="text-lg font-semibold text-foreground">No replies yet</h3>
+          <h3 className="text-lg font-semibold text-foreground">No replies recorded</h3>
           <p className="max-w-md text-sm leading-relaxed text-muted-foreground">
-            We check Gmail every 15 minutes for replies on threads you've sent. When one lands, it
-            shows up here, already classified, with a suggested response ready to go.
+            Replies land directly in your Gmail inbox — OutreachOS sends from your account and
+            never reads your mail. When someone writes back, open their contact on the mission
+            page and hit &ldquo;Mark replied&rdquo; so their scheduled follow-ups stop.
           </p>
         </div>
       ) : (

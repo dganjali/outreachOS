@@ -14,7 +14,7 @@ const BULLETS = [
   'Web research, ranked by recent "why now" signals',
   'Verified emails and decision-makers per target',
   'Drafts in your voice, sent through your Gmail',
-  'Inbox routes replies back with classification + suggestions',
+  'Send-only Gmail access, your inbox is never read',
 ];
 
 export function AuthShell({ title, subtitle, children, footer }: Props) {

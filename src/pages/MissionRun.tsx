@@ -41,6 +41,7 @@ export function MissionRun() {
   }, [phase]);
 
   // Load the mission (does NOT auto-run, the user launches deliberately).
+  const [missionLoadError, setMissionLoadError] = useState<string | null>(null);
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
@@ -49,8 +50,11 @@ export function MissionRun() {
       .select('*')
       .eq('id', id)
       .single()
-      .then(({ data }) => {
-        if (!cancelled && data) setMission(data as Mission);
+      .then(({ data, error: err }) => {
+        if (cancelled) return;
+        if (err) setMissionLoadError(err.message);
+        else if (!data) setMissionLoadError('Mission not found.');
+        else setMission(data as Mission);
       });
     return () => {
       cancelled = true;
@@ -186,13 +190,18 @@ export function MissionRun() {
           <p className="run-ready-fineprint">
             Runs live in this tab; keep it open until it finishes (about a minute). Finished targets are saved as you go. Uses up to ~{1 + TOP_N * 3} of your daily agent runs.
           </p>
+          {missionLoadError && (
+            <p className="run-banner error" role="alert">
+              {missionLoadError} <Link to="/missions">Back to missions</Link>
+            </p>
+          )}
           <button
             type="button"
             className="launchpad-cta"
             disabled={!mission}
             onClick={() => mission && runPipeline(mission)}
           >
-            Launch pipeline →
+            {mission ? 'Launch pipeline →' : missionLoadError ? 'Unavailable' : 'Loading…'}
           </button>
         </div>
       </div>
@@ -222,7 +231,7 @@ export function MissionRun() {
           </p>
         </div>
         <div className="run-head-meta">
-          <span className="run-clock">⏱ {fmt(elapsed)}</span>
+          <span className="run-clock">{fmt(elapsed)}</span>
           {isLive && (
             <button
               type="button"

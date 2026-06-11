@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { agents, gmail } from '../lib/api';
@@ -29,7 +30,10 @@ export function MissionPage() {
   const [targets, setTargets] = useState<Target[]>([]);
   const [contactsByTarget, setContactsByTarget] = useState<Record<string, Contact[]>>({});
   const [packsByTarget, setPacksByTarget] = useState<Record<string, EvidencePack | undefined>>({});
-  const [sequencesByContact, setSequencesByContact] = useState<Record<string, EmailSequence | undefined>>({});
+  // null = loaded, no sequence; undefined = not loaded yet. The distinction
+  // matters: storing undefined for "none" made the loader effect refire
+  // endlessly (its guard never tripped), flooding the API with requests.
+  const [sequencesByContact, setSequencesByContact] = useState<Record<string, EmailSequence | null | undefined>>({});
   const [activeTargetId, setActiveTargetId] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -84,31 +88,84 @@ export function MissionPage() {
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
-    setSequencesByContact((s) => ({ ...s, [contactId]: (data as EmailSequence | null) ?? undefined }));
+    setSequencesForContactDone(contactId, (data as EmailSequence | null) ?? null);
   }, []);
+
+  function setSequencesForContactDone(contactId: string, seq: EmailSequence | null) {
+    setSequencesByContact((s) => ({ ...s, [contactId]: seq }));
+  }
 
   useEffect(() => {
     loadMission();
     loadTargets();
   }, [loadMission, loadTargets]);
 
+  // Batched: contacts + evidence for ALL targets in two requests (was 2 per
+  // target). Keyed on the id list so it only refires when the set changes.
+  const targetIdsKey = useMemo(() => targets.map((t) => t.id).join(','), [targets]);
   useEffect(() => {
-    targets.forEach((t) => {
-      loadContactsForTarget(t.id);
-      loadEvidenceForTarget(t.id);
-    });
-  }, [targets, loadContactsForTarget, loadEvidenceForTarget]);
+    const ids = targetIdsKey ? targetIdsKey.split(',') : [];
+    if (ids.length === 0) {
+      setContactsByTarget({});
+      setPacksByTarget({});
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const [cRes, eRes] = await Promise.all([
+        supabase.from('contacts').select('*').in('target_id', ids).order('confidence', { ascending: false, nullsFirst: false }),
+        supabase.from('evidence_packs').select('*').in('target_id', ids).order('created_at', { ascending: false }),
+      ]);
+      if (cancelled) return;
+      const byTarget: Record<string, Contact[]> = {};
+      for (const tid of ids) byTarget[tid] = [];
+      for (const c of (cRes.data ?? []) as Contact[]) (byTarget[c.target_id] ??= []).push(c);
+      setContactsByTarget(byTarget);
+      const packs: Record<string, EvidencePack | undefined> = {};
+      for (const p of (eRes.data ?? []) as EvidencePack[]) {
+        if (!packs[p.target_id]) packs[p.target_id] = p; // ordered desc → first is newest
+      }
+      setPacksByTarget(packs);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [targetIdsKey]);
 
   const allContacts = useMemo(
     () => Object.values(contactsByTarget).flat(),
     [contactsByTarget]
   );
 
+  // Batched: one email_sequences request for ALL contacts (was 1 per contact,
+  // and — because "no sequence" was stored as undefined — the old per-contact
+  // effect refired endlessly for any contact without a draft, flooding the API.
+  const contactIdsKey = useMemo(() => allContacts.map((c) => c.id).sort().join(','), [allContacts]);
   useEffect(() => {
-    allContacts.forEach((c) => {
-      if (sequencesByContact[c.id] === undefined) loadSequencesForContact(c.id);
-    });
-  }, [allContacts, sequencesByContact, loadSequencesForContact]);
+    const ids = contactIdsKey ? contactIdsKey.split(',') : [];
+    if (ids.length === 0) {
+      setSequencesByContact({});
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('email_sequences')
+        .select('*')
+        .in('contact_id', ids)
+        .order('created_at', { ascending: false });
+      if (cancelled) return;
+      const map: Record<string, EmailSequence | null> = {};
+      for (const cid of ids) map[cid] = null;
+      for (const s of (data ?? []) as EmailSequence[]) {
+        if (!map[s.contact_id]) map[s.contact_id] = s; // ordered desc → first is newest
+      }
+      setSequencesByContact(map);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [contactIdsKey]);
 
   async function runWith<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
     setBusy(label);
@@ -147,14 +204,41 @@ export function MissionPage() {
   }
 
   async function setTargetStatus(target: Target, status: Target['status']) {
-    await supabase.from('targets').update({ status }).eq('id', target.id);
+    const { error } = await supabase.from('targets').update({ status }).eq('id', target.id);
+    if (error) {
+      toast.error(`Could not update ${target.company_name}: ${error.message}`);
+      return;
+    }
     setTargets((ts) => ts.map((t) => (t.id === target.id ? { ...t, status } : t)));
   }
 
   async function deleteTarget(target: Target) {
     if (!confirm(`Remove ${target.company_name}?`)) return;
-    await supabase.from('targets').delete().eq('id', target.id);
+    const { error } = await supabase.from('targets').delete().eq('id', target.id);
+    if (error) {
+      toast.error(`Could not remove ${target.company_name}: ${error.message}`);
+      return;
+    }
     setTargets((ts) => ts.filter((t) => t.id !== target.id));
+  }
+
+  // With send-only Gmail scope the app can't see replies, so this is the
+  // reply-stop: the user marks the contact replied and the follow-up cron
+  // skips them at send time (it checks contact.status === 'replied').
+  async function markContactReplied(c: Contact) {
+    const { error } = await supabase.from('contacts').update({ status: 'replied' }).eq('id', c.id);
+    if (error) {
+      toast.error(`Could not mark ${c.name} as replied: ${error.message}`);
+      return;
+    }
+    setContactsByTarget((s) => {
+      const next: typeof s = {};
+      for (const [tid, list] of Object.entries(s)) {
+        next[tid] = list.map((x) => (x.id === c.id ? { ...x, status: 'replied' as Contact['status'] } : x));
+      }
+      return next;
+    });
+    toast.success(`Marked ${c.name} as replied. Their scheduled follow-ups will not send.`);
   }
 
   if (!mission) {
@@ -357,6 +441,20 @@ export function MissionPage() {
                                     LinkedIn ↗
                                   </a>
                                 )}
+                                {c.status === 'replied' ? (
+                                  <span className="signal-pill subtle" title="Follow-ups stopped">replied</span>
+                                ) : (
+                                  c.status === 'contacted' && (
+                                    <button
+                                      type="button"
+                                      className="btn-secondary small"
+                                      title="They wrote back in Gmail — stop their scheduled follow-ups"
+                                      onClick={() => markContactReplied(c)}
+                                    >
+                                      Mark replied
+                                    </button>
+                                  )
+                                )}
                                 <button
                                   type="button"
                                   className="btn-primary small"
@@ -411,14 +509,24 @@ function SequenceCard({ sequence, contact }: { sequence: EmailSequence; contact:
   });
 
   async function saveTouch(touchIndex: number, subject: string, body: string) {
+    // Send reads subject/body from the server, so a silently failed save here
+    // means the OLD text gets sent while the UI shows the edit. Must surface.
     if (touchIndex === 0) {
-      await supabase.from('email_sequences').update({ subject, body }).eq('id', sequence.id);
+      const { error } = await supabase.from('email_sequences').update({ subject, body }).eq('id', sequence.id);
+      if (error) {
+        toast.error(`Draft not saved: ${error.message}`);
+        throw new Error(error.message);
+      }
       setDraft((d) => ({ ...d, subject, body }));
     } else {
       const followups = draft.followups.map((f, i) =>
         i === touchIndex - 1 ? { ...f, subject, body } : f
       );
-      await supabase.from('email_sequences').update({ followups }).eq('id', sequence.id);
+      const { error } = await supabase.from('email_sequences').update({ followups }).eq('id', sequence.id);
+      if (error) {
+        toast.error(`Draft not saved: ${error.message}`);
+        throw new Error(error.message);
+      }
       setDraft((d) => ({ ...d, followups }));
     }
   }
@@ -589,6 +697,8 @@ function Touch({
     try {
       await onSave(touchIndex, s, b);
       setEditing(false);
+    } catch {
+      // onSave already toasted; stay in edit mode so the user can retry.
     } finally {
       setSaving(false);
     }
@@ -600,7 +710,7 @@ function Touch({
         <span className="touch-label">
           {label}
           {isSent && <span className="sent-badge">sent</span>}
-          {isDraft && <span className="sent-badge draft">draft created</span>}
+          {isDraft && <span className="sent-badge draft">draft saved</span>}
         </span>
         <div className="touch-actions">
           {!isSent && !editing && (
@@ -620,7 +730,7 @@ function Touch({
                 title={disabledReason}
                 onClick={() => onSend(touchIndex, 'draft')}
               >
-                {sending === `draft:${touchIndex}` ? 'Drafting…' : isDraft ? 'Recreate draft' : 'Save as Gmail draft'}
+                {sending === `draft:${touchIndex}` ? 'Saving…' : isDraft ? 'Update draft' : 'Save draft'}
               </button>
               <button
                 type="button"

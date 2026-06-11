@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Mail, X } from 'lucide-react';
+import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { gmail } from '../lib/api';
@@ -34,6 +35,7 @@ export function SettingsPage() {
   // Follow-ups + suppression
   const [paused, setPaused] = useState(false);
   const [pauseBusy, setPauseBusy] = useState(false);
+  const [profileId, setProfileId] = useState<string | null>(null);
   const [suppressions, setSuppressions] = useState<Array<{ id: string; email: string; reason: string }>>([]);
   const [newEmail, setNewEmail] = useState('');
 
@@ -43,12 +45,27 @@ export function SettingsPage() {
   }
 
   async function togglePause() {
-    if (!user?.id) return;
+    // Must update by profile id — the shim's update().eq() only routes ids, so
+    // the old .eq('user_id', ...) form failed silently and the toggle never
+    // actually persisted.
+    if (!profileId) {
+      toast.error('Profile still loading, try again in a second.');
+      return;
+    }
     const next = !paused;
     setPaused(next);
     setPauseBusy(true);
     try {
-      await supabase.from('profiles').update({ pause_followups: next }).eq('user_id', user.id);
+      const { error: err } = await supabase
+        .from('profiles')
+        .update({ pause_followups: next })
+        .eq('id', profileId);
+      if (err) {
+        setPaused(!next); // revert — server state did not change
+        toast.error(`Could not ${next ? 'pause' : 'resume'} follow-ups: ${err.message}`);
+        return;
+      }
+      toast.success(next ? 'Follow-ups paused.' : 'Follow-ups resumed.');
     } finally {
       setPauseBusy(false);
     }
@@ -58,17 +75,22 @@ export function SettingsPage() {
     e.preventDefault();
     const email = newEmail.trim().toLowerCase();
     if (!email) return;
-    try {
-      await supabase.from('suppressions').insert({ email, reason: 'manual', note: null });
-      setNewEmail('');
-      await loadSuppressions();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not add to suppression list');
+    const { error: err } = await supabase.from('suppressions').insert({ email, reason: 'manual', note: null });
+    if (err) {
+      toast.error(`Could not suppress ${email}: ${err.message}`);
+      return;
     }
+    setNewEmail('');
+    toast.success(`${email} will never be emailed.`);
+    await loadSuppressions();
   }
 
   async function removeSuppression(id: string) {
-    await supabase.from('suppressions').delete().eq('id', id);
+    const { error: err } = await supabase.from('suppressions').delete().eq('id', id);
+    if (err) {
+      toast.error(`Could not remove: ${err.message}`);
+      return;
+    }
     setSuppressions((s) => s.filter((x) => x.id !== id));
   }
 
@@ -110,7 +132,11 @@ export function SettingsPage() {
       .eq('user_id', user.id)
       .single()
       .then(({ data }) => {
-        if (data) setPaused(!!(data as { pause_followups?: boolean }).pause_followups);
+        if (data) {
+          const row = data as { id?: string; pause_followups?: boolean };
+          setPaused(!!row.pause_followups);
+          setProfileId(row.id ?? null);
+        }
       });
     void loadSuppressions();
   }, [user?.id]);
@@ -173,7 +199,7 @@ export function SettingsPage() {
 
       <SettingsSection
         title="Integrations"
-        hint="Connect Gmail to create drafts in your inbox or send via OutreachOS, with reply tracking."
+        hint="Connect Gmail to send outreach from your own address. You approve every email in OutreachOS before it sends."
       >
         {gmailLoading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
@@ -195,7 +221,7 @@ export function SettingsPage() {
                 <div className="mt-0.5 text-xs text-muted-foreground">
                   {integration
                     ? integration.provider_account_email ?? '—'
-                    : 'Required to send outreach and detect replies.'}
+                    : 'Required to send outreach from your address.'}
                 </div>
                 {integration?.last_error && (
                   <div className="mt-1 text-xs text-destructive">Last error: {integration.last_error}</div>
@@ -230,7 +256,7 @@ export function SettingsPage() {
 
       <SettingsSection
         title="Follow-ups & sending"
-        hint="When you send an initial email, OutreachOS schedules its follow-ups and sends them on their cadence. They stop automatically the moment a contact replies or unsubscribes."
+        hint="When you send an initial email, OutreachOS schedules its follow-ups and sends them on their cadence. Follow-ups stop for any contact you mark as replied in the inbox, and suppressed addresses are never emailed."
       >
         <div className="flex flex-wrap items-center gap-3">
           <Button

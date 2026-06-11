@@ -15,7 +15,7 @@ import {
 const HOW = [
   { step: '01', title: 'Tell us the mission', body: 'Pick a mode, describe what you are sending, and who you want to reach. Add your LinkedIn and we auto-fill your bio, proof points, and tone.' },
   { step: '02', title: 'Agents do the legwork', body: 'Targeting, evidence, contacts, and sequence agents run in one click. They research the web for the right companies and people, then verify the details.' },
-  { step: '03', title: 'Review, send, track', body: 'Approve drafts in your voice, send via Gmail, and watch the inbox classify replies with a suggested response queued up.' },
+  { step: '03', title: 'Review, send, follow up', body: 'Approve drafts in your voice and send via Gmail. Follow-ups go out on their cadence and stop the moment you mark a contact as replied.' },
 ];
 
 const MODES = [
@@ -46,21 +46,21 @@ const FEATURES = [
     mock: <DraftMock />,
   },
   {
-    eyebrow: 'Inbox',
+    eyebrow: 'Guardrails',
     icon: InboxIcon,
-    title: 'Replies, sorted and answered.',
-    body: 'Send through your Gmail and the inbox classifies every reply, interested, not now, wrong person, with a suggested response queued up. Follow-ups stop the moment someone writes back.',
-    bullets: ['Replies classified automatically', 'Suggested responses, ready to edit', 'Follow-ups stop on reply or unsubscribe'],
-    url: 'app.outreachos.com/inbox',
+    title: 'Your inbox stays yours.',
+    body: 'OutreachOS connects to Gmail with send-only access, so it can never read your mail. Replies land in your inbox like any other email; mark a contact as replied and their scheduled follow-ups stop.',
+    bullets: ['Send-only Gmail access, it cannot read your mail', 'Follow-ups stop when you mark a contact replied', 'Suppressed and unsubscribed addresses are never emailed'],
+    url: 'app.outreachos.com/missions',
     mock: <InboxMock />,
   },
 ];
 
 const FAQ = [
   { q: 'Do I need a data-provider subscription?', a: 'No. The agents research the open web to find high-fit companies and the right decision-makers, then verify contact details. Just connect Gmail and go.' },
-  { q: 'How does it send email?', a: 'Through your own Gmail, over a secure connection. You approve each send, or enable auto-send with guardrails once you trust it.' },
-  { q: 'Is it autonomous, or do I stay in control?', a: 'Reviewable by default: every draft waits for your approval. When you are ready, turn on auto-send, with reply-stop and a suppression list as guardrails.' },
-  { q: 'Does it follow up?', a: 'Yes. Follow-ups are scheduled and sent on cadence, and stop automatically the moment someone replies or unsubscribes.' },
+  { q: 'How does it send email?', a: 'Through your own Gmail with send-only access. OutreachOS can send the emails you approve, and it can never read your inbox.' },
+  { q: 'Is it autonomous, or do I stay in control?', a: 'Initial emails always wait for your approval. Once you send, follow-ups go out on schedule, with a suppression list and a one-click reply-stop as guardrails.' },
+  { q: 'Does it follow up?', a: 'Yes. Follow-ups are scheduled and sent on cadence. Mark a contact as replied and theirs stop; suppressed addresses are never emailed.' },
   { q: 'What does it run on?', a: 'Google Gemini powers the agents. Your data lives in your account; emails send from your Gmail.' },
 ];
 

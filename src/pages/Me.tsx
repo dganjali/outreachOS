@@ -110,12 +110,13 @@ export function Me() {
       return;
     }
 
-    await supabase.from('profile_versions').insert({
+    const { error: verErr } = await supabase.from('profile_versions').insert({
       user_id: profile.user_id,
       snapshot: snapshot as unknown as Record<string, unknown>,
       source,
       label,
     });
+    if (verErr) throw new Error(verErr.message);
     setHistoryReloadKey((k) => k + 1);
   }
 
@@ -195,12 +196,13 @@ export function Me() {
     setForm(merged);
     try {
       await persistProfile(merged);
-      await supabase.from('profile_versions').insert({
+      const { error: impErr } = await supabase.from('profile_versions').insert({
         user_id: profile.user_id,
         snapshot: merged as unknown as Record<string, unknown>,
         source: 'import',
         label: `Imported from resume`,
       });
+      if (impErr) throw new Error(impErr.message);
       await refreshProfile();
       setHistoryReloadKey((k) => k + 1);
       setParseModal({ open: false, asset: null, parsed: null });
@@ -215,12 +217,13 @@ export function Me() {
     if (!profile?.user_id) return;
     try {
       await persistProfile(snapshot);
-      await supabase.from('profile_versions').insert({
+      const { error: resErr } = await supabase.from('profile_versions').insert({
         user_id: profile.user_id,
         snapshot: snapshot as unknown as Record<string, unknown>,
         source: 'restore',
         label: `Restored from ${new Date().toLocaleDateString()}`,
       });
+      if (resErr) throw new Error(resErr.message);
       await refreshProfile();
       setHistoryReloadKey((k) => k + 1);
       toast.success('Profile restored from this snapshot.');
