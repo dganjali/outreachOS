@@ -210,18 +210,6 @@ interface SendArgs {
   inReplyTo?: string;
 }
 
-export async function createDraft(args: SendArgs): Promise<{ draftId: string; messageId: string; threadId: string }> {
-  const raw = base64Url(buildRfc2822(args));
-  const r = await fetch(`${GMAIL_API}/users/me/drafts`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${args.accessToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message: { raw, threadId: args.threadId } }),
-  });
-  if (!r.ok) throw new Error(`create_draft_failed: ${await r.text()}`);
-  const j = (await r.json()) as { id: string; message: { id: string; threadId: string | null } };
-  return { draftId: j.id, messageId: j.message.id, threadId: j.message.threadId ?? '' };
-}
-
 export async function sendNow(args: SendArgs): Promise<{ messageId: string; threadId: string }> {
   const raw = base64Url(buildRfc2822(args));
   const r = await fetch(`${GMAIL_API}/users/me/messages/send`, {
