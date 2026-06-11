@@ -18,6 +18,14 @@ import {
   type ApolloOrganization,
   type OrgSearchFilters,
 } from '../_lib/apollo';
+import { resolveCompanyDomains } from '../_lib/company-enrich';
+import {
+  isExcludedName,
+  isValidDomain,
+  normalizeDomain,
+  senderContextLines,
+  senderExclusions,
+} from '../_lib/sender-context';
 import type { MissionDoc, ProfileDoc, TargetDoc } from '../../shared/schemas';
 
 interface TargetSuggestion {
@@ -101,14 +109,10 @@ async function runWebSearchOnly(args: {
     `Mode: ${mode}`,
     `What I'm sending / offer: ${mission.goal}`,
     `Target description (the why): ${mission.targetDescription}`,
-    profile?.name
-      ? `Sender: ${profile.name}${profile.role ? `, ${profile.role}` : ''}${
-          profile.organization ? ` at ${profile.organization}` : ''
-        }`
-      : '',
-    profile?.proofPoints ? `Sender credibility: ${profile.proofPoints}` : '',
+    ...senderContextLines(profile),
     '',
-    `Find ${desired} target organizations with strong recent "why now" signals. Use web_search.`,
+    `Find ${desired} target organizations with strong recent "why now" signals.`,
+    'Each MUST have a verified website domain. Use web_search to confirm the company exists and matches the audience/geography above.',
     'Return JSON only, no commentary.',
   ]
     .filter(Boolean)
@@ -125,10 +129,29 @@ async function runWebSearchOnly(args: {
   const parsed = extractJson<{ targets: TargetSuggestion[] }>(message);
   if (!parsed.ok || !parsed.data?.targets) throw new Error('parse_failed');
 
-  return parsed.data.targets.slice(0, 25).map((t) => ({
+  const exclusions = senderExclusions(profile);
+  let candidates = parsed.data.targets.filter((t) => {
+    const name = (t.company_name ?? '').trim();
+    return !!name && !isExcludedName(name, exclusions);
+  });
+
+  const missingDomain = candidates.filter((t) => !isValidDomain(normalizeDomain(t.domain)));
+  if (missingDomain.length > 0) {
+    const resolved = await resolveCompanyDomains(
+      missingDomain.map((t) => ({ name: t.company_name, hint: mission.targetDescription }))
+    );
+    candidates = candidates.map((t) => ({
+      ...t,
+      domain: normalizeDomain(t.domain) ?? resolved.get(t.company_name.trim()) ?? t.domain,
+    }));
+  }
+
+  const filtered = candidates.filter((t) => isValidDomain(normalizeDomain(t.domain)));
+
+  return filtered.slice(0, desired).map((t) => ({
     missionId: mission_id,
     companyName: t.company_name,
-    domain: t.domain,
+    domain: normalizeDomain(t.domain),
     score: clamp(t.score, 0, 100),
     whyNow: t.why_now,
     fitReason: t.fit_reason,
@@ -156,7 +179,7 @@ async function runApolloHybrid(args: {
     `Mode: ${mode}`,
     `Offer: ${mission.goal}`,
     `Audience: ${mission.targetDescription}`,
-    profile?.organization ? `Sender org (don't target): ${profile.organization}` : '',
+    ...senderContextLines(profile),
     '',
     'Output Apollo filters as JSON only.',
   ]
@@ -183,9 +206,9 @@ async function runApolloHybrid(args: {
 
   if (candidates.length === 0) return runWebSearchOnly(args);
 
-  const sender = profile?.organization?.trim().toLowerCase();
+  const exclusions = senderExclusions(profile);
   const trimmed = candidates
-    .filter((o) => o.name && (!sender || o.name.toLowerCase() !== sender))
+    .filter((o) => o.name && !isExcludedName(o.name, exclusions))
     .slice(0, perPage);
 
   const candidateList = trimmed.map((o, i) => ({
@@ -245,12 +268,21 @@ async function runApolloHybrid(args: {
   }
 
   const byName = new Map(trimmed.map((o) => [o.name?.toLowerCase() ?? '', o]));
-  return rankParsed.data.targets.slice(0, desired).map((t) => {
+  return rankParsed.data.targets
+    .filter((t) => {
+      const name = (t.company_name ?? '').trim();
+      if (!name || isExcludedName(name, exclusions)) return false;
+      const apollo = byName.get(name.toLowerCase());
+      const domain = normalizeDomain(t.domain ?? apollo?.primary_domain ?? domainFromUrl(apollo?.website_url));
+      return !!domain;
+    })
+    .slice(0, desired)
+    .map((t) => {
     const apollo = byName.get(t.company_name.toLowerCase());
     return {
       missionId: mission_id,
       companyName: t.company_name,
-      domain: t.domain ?? apollo?.primary_domain ?? domainFromUrl(apollo?.website_url) ?? null,
+      domain: normalizeDomain(t.domain ?? apollo?.primary_domain ?? domainFromUrl(apollo?.website_url)),
       score: clamp(t.score, 0, 100),
       whyNow: t.why_now,
       fitReason: t.fit_reason,

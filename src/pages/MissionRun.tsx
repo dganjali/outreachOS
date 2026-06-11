@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { agents } from '../lib/api';
+import { asScore } from '../lib/score';
 import type { Mission, Contact } from '../types';
 
 type StepStatus = 'queued' | 'running' | 'done' | 'failed';
@@ -77,12 +78,41 @@ export function MissionRun() {
       const ctrl = new AbortController();
       abortRef.current = ctrl;
       const stopped = () => ctrl.signal.aborted;
-      const isRateLimit = (e: unknown) =>
-        /rate.?limit|\b429\b|daily .*limit/i.test(e instanceof Error ? e.message : String(e));
+      const msgOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
+      // Two different 429s: the per-minute throttle just means "slow down",
+      // the daily cap means stop for today. Only the latter pauses the run.
+      const isDailyLimit = (e: unknown) => /daily/i.test(msgOf(e));
+      const isRateLimit = (e: unknown) => /rate.?limit|\b429\b/i.test(msgOf(e));
+      const sleep = (ms: number) =>
+        new Promise<void>((resolve) => {
+          const t = setTimeout(resolve, ms);
+          ctrl.signal.addEventListener('abort', () => {
+            clearTimeout(t);
+            resolve();
+          });
+        });
+      // Space agent calls so a 5/min deploy cap doesn't stall mid-pipeline.
+      const pace = () => sleep(2_500);
+      // Retry a step through transient minute-limit 429s (wait ~35s, twice).
+      async function withMinuteRetry<T>(fn: () => Promise<T>, waitNote: string): Promise<T> {
+        for (let attempt = 0; ; attempt++) {
+          try {
+            return await fn();
+          } catch (e) {
+            if (stopped() || isDailyLimit(e) || !isRateLimit(e) || attempt >= 2) throw e;
+            setNote(waitNote);
+            await sleep(35_000);
+            if (stopped()) throw e;
+          }
+        }
+      }
 
       try {
         // 1) Targets.
-        const { targets: found } = await agents.target(m.id, TARGET_COUNT);
+        const { targets: found } = await withMinuteRetry(
+          () => agents.target(m.id, TARGET_COUNT),
+          'Pacing requests, resuming in ~30s…'
+        );
         if (stopped()) return;
         const top = [...found]
           .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
@@ -95,7 +125,7 @@ export function MissionRun() {
           top.map((t) => ({
             id: t.id,
             name: t.company_name,
-            score: t.score ?? null,
+            score: asScore(t.score),
             evidence: 'queued',
             contacts: 'queued',
             sequence: 'queued',
@@ -106,14 +136,15 @@ export function MissionRun() {
         // 2) Per target: evidence -> contacts -> best contact -> sequence.
         for (const t of top) {
           if (stopped()) return;
+          await pace();
 
           setStep(t.id, 'evidence', 'running');
           setNote(`Researching ${t.company_name}, reading recent sources…`);
           try {
-            await agents.evidence(t.id);
+            await withMinuteRetry(() => agents.evidence(t.id), 'Pacing requests, resuming in ~30s…');
             setStep(t.id, 'evidence', 'done');
           } catch (e) {
-            if (isRateLimit(e)) return setPhase('paused');
+            if (isDailyLimit(e)) return setPhase('paused');
             setStep(t.id, 'evidence', 'failed');
             continue;
           }
@@ -123,11 +154,11 @@ export function MissionRun() {
           setNote(`Finding the right decision-makers at ${t.company_name}…`);
           let contacts: Contact[] = [];
           try {
-            const r = await agents.contacts(t.id);
+            const r = await withMinuteRetry(() => agents.contacts(t.id), 'Pacing requests, resuming in ~30s…');
             contacts = r.contacts ?? [];
             setStep(t.id, 'contacts', 'done');
           } catch (e) {
-            if (isRateLimit(e)) return setPhase('paused');
+            if (isDailyLimit(e)) return setPhase('paused');
             setStep(t.id, 'contacts', 'failed');
             continue;
           }
@@ -141,10 +172,10 @@ export function MissionRun() {
           setStep(t.id, 'sequence', 'running');
           setNote(`Drafting a personalized email for ${t.company_name}…`);
           try {
-            await agents.sequence(best.id);
+            await withMinuteRetry(() => agents.sequence(best.id), 'Pacing requests, resuming in ~30s…');
             setStep(t.id, 'sequence', 'done');
           } catch (e) {
-            if (isRateLimit(e)) return setPhase('paused');
+            if (isDailyLimit(e)) return setPhase('paused');
             setStep(t.id, 'sequence', 'failed');
           }
         }
@@ -154,7 +185,7 @@ export function MissionRun() {
         setPhase('done');
       } catch (err) {
         if (stopped()) return;
-        if (isRateLimit(err)) return setPhase('paused');
+        if (isDailyLimit(err)) return setPhase('paused');
         setError(err instanceof Error ? err.message : 'Pipeline failed');
         setPhase('error');
       }
@@ -279,11 +310,13 @@ export function MissionRun() {
 
       {targets.length > 0 && (
         <ul className="run-targets">
-          {targets.map((t) => (
+          {targets.map((t) => {
+            const score = asScore(t.score);
+            return (
             <li key={t.id} className={`run-target ${t.sequence === 'done' ? 'ready' : ''}`}>
               <div className="run-target-name">
                 {t.name}
-                {typeof t.score === 'number' && <span className="run-target-score">{t.score}</span>}
+                {score != null && <span className="run-target-score">{score}</span>}
               </div>
               <div className="run-target-steps">
                 <StepChip label="Evidence" status={t.evidence} />
@@ -296,7 +329,8 @@ export function MissionRun() {
                 </Link>
               )}
             </li>
-          ))}
+          );
+          })}
         </ul>
       )}
 

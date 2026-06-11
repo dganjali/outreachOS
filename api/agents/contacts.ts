@@ -11,7 +11,16 @@ import {
   normalizeEmailStatus,
   type ApolloPerson,
 } from '../_lib/apollo';
-import type { ContactDoc, MissionDoc, TargetDoc } from '../../shared/schemas';
+import { enrichContactEmail, resolveCompanyDomain } from '../_lib/company-enrich';
+import { scrapeCompanyEmails } from '../_lib/web-scrape';
+import {
+  isExcludedName,
+  normalizeDomain,
+  senderContextLines,
+  senderExclusions,
+} from '../_lib/sender-context';
+import type { ContactDoc, MissionDoc, ProfileDoc, TargetDoc } from '../../shared/schemas';
+import type { UserScope } from '../_lib/db';
 
 interface ContactSuggestion {
   name: string;
@@ -67,9 +76,17 @@ export default async function handler(req: Request, res: Response) {
   if (!target) return res.status(404).json({ error: 'target_not_found' });
   const mission = await scope.collection<MissionDoc>('missions').findById(target.missionId);
   if (!mission) return res.status(404).json({ error: 'mission_not_found' });
+  const profile = await scope.collection<ProfileDoc>('profiles').findOne();
 
   const mode = (mission.mode as MissionMode | null) ?? 'sales';
-  const useApollo = apolloEnabled() && !!target.domain;
+  let domain = normalizeDomain(target.domain);
+  if (!domain) {
+    domain = await resolveCompanyDomain(target.companyName, mission.targetDescription);
+    if (domain) {
+      await scope.collection<TargetDoc>('targets').updateById(target._id, { domain });
+    }
+  }
+  const useApollo = apolloEnabled() && !!domain;
 
   const run = await startRun(scope, {
     agentType: 'contacts',
@@ -81,10 +98,12 @@ export default async function handler(req: Request, res: Response) {
   try {
     let rows: Array<Omit<ContactDoc, '_id' | 'userId' | 'createdAt' | 'updatedAt'>>;
     if (useApollo) {
-      rows = await runApolloHybrid({ target, mission, mode });
+      rows = await runApolloHybrid({ target: { ...target, domain }, mission, mode, profile });
     } else {
-      rows = await runWebSearchOnly({ target, mission, mode });
+      rows = await runWebSearchOnly({ target: { ...target, domain }, mission, mode, profile });
     }
+
+    rows = await enrichRowsWithScrapedEmails(rows, domain, scope, target._id);
 
     if (rows.length === 0) {
       await failRun(scope, run._id, 'no_contacts_found');
@@ -115,16 +134,22 @@ async function runWebSearchOnly(args: {
   target: TargetDoc;
   mission: MissionDoc;
   mode: MissionMode;
+  profile: ProfileDoc | null;
 }): Promise<Array<Omit<ContactDoc, '_id' | 'userId' | 'createdAt' | 'updatedAt'>>> {
-  const { target, mission, mode } = args;
+  const { target, mission, mode, profile } = args;
+  const exclusions = senderContextLines(profile);
   const userPrompt = [
     `Target organization: ${target.companyName}${target.domain ? ` (${target.domain})` : ''}`,
     `Mission mode: ${mode}`,
     `What's being offered: ${mission.goal}`,
     `Why this target: ${target.fitReason ?? mission.targetDescription}`,
     target.whyNow ? `Why now: ${target.whyNow}` : '',
+    ...exclusions,
+    target.domain
+      ? `Company domain for email patterns: ${target.domain}`
+      : 'WARNING: no domain on file — use web_search to find the official company website first.',
     '',
-    'Find the 2-4 best people to contact. Use web_search on company site, LinkedIn public pages, press, blog. Output JSON only.',
+    'Find the 2-4 best people to contact at THIS company (not the sender). Use web_search on company site, LinkedIn public pages, press, blog. Output JSON only.',
   ]
     .filter(Boolean)
     .join('\n');
@@ -140,7 +165,11 @@ async function runWebSearchOnly(args: {
   const parsed = extractJson<{ contacts: ContactSuggestion[] }>(message);
   if (!parsed.ok || !parsed.data?.contacts) throw new Error('parse_failed');
 
-  return parsed.data.contacts.slice(0, 6).map((c) => ({
+  const filtered = parsed.data.contacts.filter(
+    (c) => !isExcludedName(c.name ?? '', senderExclusions(profile))
+  );
+
+  return filtered.slice(0, 6).map((c) => ({
     targetId: target._id,
     missionId: mission._id,
     name: c.name,
@@ -164,8 +193,9 @@ async function runApolloHybrid(args: {
   target: TargetDoc;
   mission: MissionDoc;
   mode: MissionMode;
+  profile: ProfileDoc | null;
 }): Promise<Array<Omit<ContactDoc, '_id' | 'userId' | 'createdAt' | 'updatedAt'>>> {
-  const { target, mission, mode } = args;
+  const { target, mission, mode, profile } = args;
   const titles = TITLE_HINTS_BY_MODE[mode];
   const seniorities = SENIORITIES_BY_MODE[mode];
 
@@ -247,7 +277,11 @@ async function runApolloHybrid(args: {
   }
 
   const byId = new Map(list.map((p) => [p.apollo_person_id ?? '', p]));
-  return rankParsed.data.contacts.slice(0, 4).map((c) => {
+  const exclusions = senderExclusions(profile);
+  return rankParsed.data.contacts
+    .filter((c) => !isExcludedName(c.name ?? '', exclusions))
+    .slice(0, 4)
+    .map((c) => {
     const apollo = byId.get(c.apollo_person_id ?? '');
     return {
       targetId: target._id,
@@ -266,6 +300,42 @@ async function runApolloHybrid(args: {
       seniority: apollo?.seniority ?? c.seniority ?? null,
       headline: apollo?.headline ?? c.headline ?? null,
       location: apollo?.location ?? c.location ?? null,
+    };
+  });
+}
+
+async function enrichRowsWithScrapedEmails(
+  rows: Array<Omit<ContactDoc, '_id' | 'userId' | 'createdAt' | 'updatedAt'>>,
+  domain: string | null,
+  scope: UserScope,
+  targetId: string
+): Promise<Array<Omit<ContactDoc, '_id' | 'userId' | 'createdAt' | 'updatedAt'>>> {
+  if (!domain || rows.length === 0) return rows;
+
+  let scraped;
+  try {
+    scraped = await scrapeCompanyEmails(domain);
+  } catch (err) {
+    console.warn('scrape_company_emails_failed', targetId, err);
+    return rows;
+  }
+
+  return rows.map((row) => {
+    const enriched = enrichContactEmail(
+      row.name,
+      {
+        email: row.email,
+        emailStatus: row.emailStatus,
+        likelyEmailPattern: row.likelyEmailPattern,
+      },
+      domain,
+      scraped
+    );
+    return {
+      ...row,
+      email: enriched.email,
+      emailStatus: enriched.emailStatus,
+      likelyEmailPattern: enriched.likelyEmailPattern,
     };
   });
 }

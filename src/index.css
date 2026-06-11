@@ -1437,7 +1437,8 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 1rem;
+  flex-wrap: wrap;
+  gap: 1rem 1.25rem;
   margin-bottom: 1rem;
 }
 .mission-detail-meta {
@@ -1448,7 +1449,21 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
   font-size: 0.875rem;
   color: var(--text-muted);
 }
-.mission-detail-actions { display: flex; gap: 0.5rem; align-items: center; }
+.mission-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+.mission-detail-actions .btn-primary.go {
+  color: oklch(0.99 0.004 255);
+  background: oklch(0.52 0.095 156);
+  border: 1px solid oklch(0.52 0.095 156);
+}
+.mission-detail-actions .btn-primary.go:hover:not(:disabled) {
+  background: oklch(0.47 0.095 156);
+  border-color: oklch(0.47 0.095 156);
+}
 
 /* Target list */
 .target-list {
@@ -1487,11 +1502,13 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
   align-items: center;
   justify-content: center;
   min-width: 2rem;
-  padding: 0.1rem 0.4rem;
+  padding: 0.12rem 0.45rem;
   font-size: 0.75rem;
   font-weight: 700;
-  background: var(--text);
-  color: var(--primary-foreground);
+  font-variant-numeric: tabular-nums;
+  color: oklch(0.58 0.095 156);
+  background: oklch(0.955 0.02 156);
+  border: 1px solid oklch(0.895 0.03 156);
   border-radius: 6px;
 }
 .target-card-actions { display: flex; align-items: center; gap: 0.375rem; }
@@ -4019,7 +4036,16 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
 }
 .run-target.ready { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft); }
 .run-target-name { font-weight: 600; display: flex; align-items: center; gap: 0.5rem; min-width: 9rem; flex: 1; }
-.run-target-score { font-size: 0.7rem; font-weight: 700; color: var(--accent); background: var(--accent-soft); border-radius: 999px; padding: 0.05rem 0.4rem; }
+.run-target-score {
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: oklch(0.58 0.095 156);
+  background: oklch(0.955 0.02 156);
+  border: 1px solid oklch(0.895 0.03 156);
+  border-radius: 999px;
+  padding: 0.08rem 0.45rem;
+}
 .run-target-steps { display: flex; gap: 0.4rem; }
 .run-target-review { font-weight: 600; font-size: 0.875rem; color: var(--accent); text-decoration: none; white-space: nowrap; }
 .run-target-review:hover { text-decoration: underline; }

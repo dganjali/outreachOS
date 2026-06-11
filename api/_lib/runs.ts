@@ -4,8 +4,12 @@ import type { Response } from 'express';
 import { newId, type InsertDoc, type UserScope } from './db';
 import type { AgentRunDoc } from '../../shared/schemas';
 
-const RATE_PER_MINUTE = 5;
-const RATE_PER_DAY = 50;
+// The mission pipeline legitimately fires ~12 agent calls/minute (evidence →
+// contacts → sequence per target, ~5s each), so the per-minute cap must sit
+// above that or the app rate-limits its own orchestrator mid-run. The daily
+// cap is the real cost guard (one full pipeline launch ≈ 16 runs).
+const RATE_PER_MINUTE = 20;
+const RATE_PER_DAY = 150;
 
 export type AgentType = AgentRunDoc['agentType'];
 

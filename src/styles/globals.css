@@ -272,6 +272,57 @@ textarea::placeholder {
   background: oklch(0.52 0.095 156);
 }
 
+/* Legacy mission pages: score badge + header actions (shadcn collision fixes) */
+.target-score,
+.run-target-score {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  padding: 0.12rem 0.45rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  color: oklch(0.72 0.11 156);
+  background: oklch(0.26 0.04 156);
+  border: 1px solid oklch(0.38 0.055 156);
+  border-radius: 6px;
+}
+
+.mission-detail-header {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 1rem 1.25rem;
+}
+
+.mission-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+@media (max-width: 720px) {
+  .mission-detail-actions {
+    width: 100%;
+  }
+  .mission-detail-actions .btn-primary.go {
+    flex: 1 1 auto;
+    min-width: 9rem;
+  }
+}
+
+.launchpad-cta {
+  color: oklch(0.99 0.004 255) !important;
+  background: oklch(0.52 0.095 156) !important;
+  border: 1px solid oklch(0.52 0.095 156) !important;
+}
+.launchpad-cta:hover {
+  background: oklch(0.47 0.095 156) !important;
+  border-color: oklch(0.47 0.095 156) !important;
+}
+
 /* Refined dark scrollbars. */
 * {
   scrollbar-width: thin;

@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { agents, gmail } from '../lib/api';
+import { asScore } from '../lib/score';
 import { CsvImport } from '../components/CsvImport';
 import type {
   Mission,
@@ -274,7 +275,7 @@ export function MissionPage() {
           </button>
           <button
             type="button"
-            className="btn-primary"
+            className="btn-primary go"
             onClick={() => navigate(`/missions/${mission.id}/run`)}
             title="Find targets, build evidence packs, find contacts, and draft initial emails, live."
           >
@@ -316,6 +317,7 @@ export function MissionPage() {
               const contacts = contactsByTarget[t.id] ?? [];
               const pack = packsByTarget[t.id];
               const isActive = activeTargetId === t.id;
+              const score = asScore(t.score);
               return (
                 <article
                   key={t.id}
@@ -329,9 +331,9 @@ export function MissionPage() {
                           {t.domain} ↗
                         </a>
                       )}
-                      {typeof t.score === 'number' && (
+                      {score != null && (
                         <span className="target-score" title="Fit score">
-                          {t.score}
+                          {score}
                         </span>
                       )}
                       {t.signal_type && <span className="signal-pill">{t.signal_type}</span>}
@@ -500,7 +502,7 @@ function SequenceCard({ sequence, contact }: { sequence: EmailSequence; contact:
   const [sending, setSending] = useState<string | null>(null);
   const [sendErr, setSendErr] = useState<string | null>(null);
   const [sentMessages, setSentMessages] = useState<Record<number, SentMessage | undefined>>({});
-  const [overrideEmail, setOverrideEmail] = useState('');
+  const [overrideEmail, setOverrideEmail] = useState(() => suggestEmail(contact));
   const [needsEmail, setNeedsEmail] = useState(false);
   const [draft, setDraft] = useState({
     subject: sequence.subject,
@@ -586,10 +588,12 @@ function SequenceCard({ sequence, contact }: { sequence: EmailSequence; contact:
       </button>
       {open && (
         <div className="sequence-body">
-          {needsEmail && (
+          {(needsEmail || !contact.email) && (
             <div className="email-override">
               <label>
-                Recipient email (not in our records)
+                {contact.likely_email_pattern
+                  ? `Recipient email (no verified address — pattern suggests ${contact.likely_email_pattern})`
+                  : 'Recipient email (no verified address on file)'}
                 <input
                   type="email"
                   value={overrideEmail}
@@ -613,6 +617,11 @@ function SequenceCard({ sequence, contact }: { sequence: EmailSequence; contact:
             onSend={doSend}
             onSave={saveTouch}
             disabled={!contact.email && !overrideEmail}
+            disabledReason={
+              !contact.email && !overrideEmail
+                ? 'No email for this contact — enter a recipient address above'
+                : undefined
+            }
           />
           {draft.followups.map((f, i) => {
             const idx = i + 1;
@@ -638,6 +647,19 @@ function SequenceCard({ sequence, contact }: { sequence: EmailSequence; contact:
       )}
     </div>
   );
+}
+
+function suggestEmail(contact: Contact): string {
+  if (contact.email) return contact.email;
+  const pattern = contact.likely_email_pattern?.trim();
+  if (!pattern || pattern.includes('@')) return pattern ?? '';
+  const parts = contact.name.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (parts.length < 2) return '';
+  const [first, last] = parts;
+  if (pattern.includes('first') && pattern.includes('last')) {
+    return pattern.replace(/first/gi, first).replace(/last/gi, last);
+  }
+  return '';
 }
 
 function EmailStatusPill({ status }: { status: Contact['email_status'] }) {

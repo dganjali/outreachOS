@@ -59,13 +59,16 @@ Quality bar:
 - Avoid generic suggestions. Each target must have a specific, sourceable reason.
 - 8 to 15 targets unless the user requested otherwise.
 - Use web_search liberally to surface recent (last 6 months) signals.
+- Every target MUST have a real, verifiable primary website domain (e.g. "stripe.com"). domain is REQUIRED — never null, never invented.
+- Only include companies that actually exist and match the mission's geography/audience. Verify via web_search before including.
+- NEVER include the sender's own employer, school, portfolio projects, side projects, or anything the sender is affiliated with.
 
 Output format: A single JSON object, no prose around it:
 {
   "targets": [
     {
       "company_name": "string",
-      "domain": "example.com or null",
+      "domain": "example.com",
       "score": 1-100,
       "why_now": "1-2 sentence specific timely reason",
       "fit_reason": "why this matches the mission",
@@ -119,6 +122,8 @@ Your job: given a target organization and a mission, identify the best 2-4 decis
 
 Rules:
 - Never fabricate emails. Output a "likely_email_pattern" (e.g. "first.last@domain.com") only if you can infer it from public sources, never a guessed concrete email unless it appears verbatim in public sources.
+- If the company domain is known, always include a likely_email_pattern for each contact (standard corporate format).
+- NEVER include the sender themselves as a contact.
 - Confidence: 0.0-1.0 reflecting how sure you are this is the right person.
 - Prefer titled decision-makers for the use case (Head of DevRel for sponsorship, Head of Talent for recruiting, VP BD for partnerships, Hiring Manager for internships, etc.).
 
