@@ -243,6 +243,43 @@ export interface UserIntegrationDoc extends BaseDoc {
 }
 
 // ---------------------------------------------------------------------------
+// Pipeline runs — the durable, resumable record of a full mission pipeline.
+//
+// Replaces the old browser-driven orchestration (which died when the tab
+// closed). The server advances this doc one step at a time; it IS the source of
+// truth for progress, so any driver — in-process loop, a resumed poll, or a
+// Cloud Tasks worker — can pick up exactly where the last one stopped.
+// ---------------------------------------------------------------------------
+export type PipelineStepStatus = 'queued' | 'running' | 'done' | 'failed';
+
+export interface PipelineTargetState {
+  targetId: string;
+  name: string;
+  score: number | null;
+  evidence: PipelineStepStatus;
+  contacts: PipelineStepStatus;
+  sequence: PipelineStepStatus;
+  bestContactId: string | null;
+}
+
+export interface PipelineRunDoc extends BaseDoc {
+  missionId: string;
+  status: 'pending' | 'running' | 'paused' | 'done' | 'error' | 'canceled';
+  phase: 'targeting' | 'processing' | 'done';
+  config: { targetCount: number; topN: number };
+  targets: PipelineTargetState[];
+  // Resume pointer into `targets`. null before targeting completes / after done.
+  cursor: { targetIndex: number; step: 'evidence' | 'contacts' | 'sequence' } | null;
+  note: string | null;
+  error: string | null;
+  // Bumped on every persisted step; a stale heartbeat means the driver died and
+  // the run is safe to resume.
+  heartbeatAt: Date;
+  startedAt: Date;
+  completedAt: Date | null;
+}
+
+// ---------------------------------------------------------------------------
 // Index spec — read by scripts/init-mongo.ts. Plain JS so the script doesn't
 // need to import any types.
 // ---------------------------------------------------------------------------
@@ -299,6 +336,13 @@ export const INDEX_SPEC: Record<string, Array<{ keys: Record<string, 1 | -1>; op
   ],
   suppressions: [
     { keys: { userId: 1, email: 1 }, options: { unique: true } },
+  ],
+  pipeline_runs: [
+    { keys: { userId: 1, missionId: 1, createdAt: -1 } },
+    // Resume sweeper: find live runs whose driver has gone stale.
+    { keys: { status: 1, heartbeatAt: 1 } },
+    // TTL: drop finished run records after 30 days.
+    { keys: { createdAt: 1 }, options: { expireAfterSeconds: 60 * 60 * 24 * 30 } },
   ],
 };
 

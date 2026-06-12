@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
-import { agents } from '../lib/api';
+import { pipeline, type PipelineRunView, type PipelineStepStatus } from '../lib/api';
 import { asScore } from '../lib/score';
-import type { Mission, Contact } from '../types';
+import type { Mission } from '../types';
 
-type StepStatus = 'queued' | 'running' | 'done' | 'failed';
+type StepStatus = PipelineStepStatus;
 type Phase = 'ready' | 'targeting' | 'running' | 'done' | 'paused' | 'error' | 'canceled';
 
 interface RunTarget {
@@ -19,30 +19,65 @@ interface RunTarget {
 
 const TOP_N = 5;
 const TARGET_COUNT = 8;
+const POLL_MS = 2000;
+
+// Map the server run's status/phase onto the UI phase the view already speaks.
+function phaseOf(run: PipelineRunView | null): Phase {
+  if (!run) return 'ready';
+  switch (run.status) {
+    case 'pending':
+      return 'targeting';
+    case 'running':
+      return run.phase === 'targeting' ? 'targeting' : 'running';
+    case 'paused':
+      return 'paused';
+    case 'done':
+      return 'done';
+    case 'error':
+      return 'error';
+    case 'canceled':
+      return 'canceled';
+    default:
+      return 'running';
+  }
+}
+
+// The server stores step status as queued/done/failed; the in-flight step is
+// derived from the run cursor so we can render it as "running" live.
+function targetsOf(run: PipelineRunView | null): RunTarget[] {
+  if (!run) return [];
+  return run.targets.map((t, i) => {
+    const live = run.status === 'running' && run.cursor?.target_index === i;
+    const mark = (step: 'evidence' | 'contacts' | 'sequence'): StepStatus =>
+      live && run.cursor?.step === step && t[step] === 'queued' ? 'running' : t[step];
+    return {
+      id: t.target_id,
+      name: t.name,
+      score: asScore(t.score),
+      evidence: mark('evidence'),
+      contacts: mark('contacts'),
+      sequence: mark('sequence'),
+    };
+  });
+}
 
 export function MissionRun() {
   const { id } = useParams<{ id: string }>();
   const [mission, setMission] = useState<Mission | null>(null);
-  const [phase, setPhase] = useState<Phase>('ready');
-  const [targets, setTargets] = useState<RunTarget[]>([]);
-  const [note, setNote] = useState('');
+  const [run, setRun] = useState<PipelineRunView | null>(null);
+  const [starting, setStarting] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-
-  const setStep = useCallback((tid: string, key: 'evidence' | 'contacts' | 'sequence', status: StepStatus) => {
-    setTargets((ts) => ts.map((t) => (t.id === tid ? { ...t, [key]: status } : t)));
-  }, []);
-
-  // Elapsed clock, runs only during a live run.
-  useEffect(() => {
-    if (phase !== 'targeting' && phase !== 'running') return;
-    const h = setInterval(() => setElapsed((e) => e + 1), 1000);
-    return () => clearInterval(h);
-  }, [phase]);
-
-  // Load the mission (does NOT auto-run, the user launches deliberately).
   const [missionLoadError, setMissionLoadError] = useState<string | null>(null);
+  const runIdRef = useRef<string | null>(null);
+
+  const phase = phaseOf(run);
+  const targets = targetsOf(run);
+  const isLive = phase === 'targeting' || phase === 'running';
+  const note = run?.note ?? '';
+
+  // Load the mission, and rehydrate any run already in flight for it (so a
+  // closed/reopened tab rejoins the live run instead of starting over).
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
@@ -57,152 +92,98 @@ export function MissionRun() {
         else if (!data) setMissionLoadError('Mission not found.');
         else setMission(data as Mission);
       });
+    pipeline
+      .latestForMission(id)
+      .then(({ data }) => {
+        if (cancelled || !data) return;
+        // Only auto-attach to a still-relevant run; a long-finished one stays
+        // on the pre-launch screen so the user can deliberately relaunch.
+        if (data.status === 'pending' || data.status === 'running' || data.status === 'paused') {
+          runIdRef.current = data.id;
+          setRun(data);
+        }
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
-      abortRef.current?.abort();
     };
   }, [id]);
 
-  // Client-driven orchestration. Each agent call is its own short request
-  // (~4-7s on Gemini), so nothing trips Firebase Hosting's 60s proxy cap the
-  // way a single long-lived /pipeline stream did. "Stop" sets the abort flag,
-  // which we check between steps so an in-flight call finishes cleanly.
-  const runPipeline = useCallback(
-    async (m: Mission) => {
-      setError(null);
-      setElapsed(0);
-      setTargets([]);
-      setPhase('targeting');
-      setNote('Finding high-fit companies with a reason to reach out now…');
+  // Elapsed clock — derived from the run's start, ticks only while live.
+  useEffect(() => {
+    if (!run) return;
+    const base = new Date(run.started_at).getTime();
+    const compute = () => {
+      const end = run.completed_at ? new Date(run.completed_at).getTime() : Date.now();
+      setElapsed(Math.max(0, Math.round((end - base) / 1000)));
+    };
+    compute();
+    if (!isLive) return;
+    const h = setInterval(compute, 1000);
+    return () => clearInterval(h);
+  }, [run, isLive]);
 
-      const ctrl = new AbortController();
-      abortRef.current = ctrl;
-      const stopped = () => ctrl.signal.aborted;
-      const msgOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
-      // Two different 429s: the per-minute throttle just means "slow down",
-      // the daily cap means stop for today. Only the latter pauses the run.
-      const isDailyLimit = (e: unknown) => /daily/i.test(msgOf(e));
-      const isRateLimit = (e: unknown) => /rate.?limit|\b429\b/i.test(msgOf(e));
-      const sleep = (ms: number) =>
-        new Promise<void>((resolve) => {
-          const t = setTimeout(resolve, ms);
-          ctrl.signal.addEventListener('abort', () => {
-            clearTimeout(t);
-            resolve();
-          });
-        });
-      // Space agent calls so a 5/min deploy cap doesn't stall mid-pipeline.
-      const pace = () => sleep(2_500);
-      // Retry a step through transient minute-limit 429s (wait ~35s, twice).
-      async function withMinuteRetry<T>(fn: () => Promise<T>, waitNote: string): Promise<T> {
-        for (let attempt = 0; ; attempt++) {
-          try {
-            return await fn();
-          } catch (e) {
-            if (stopped() || isDailyLimit(e) || !isRateLimit(e) || attempt >= 2) throw e;
-            setNote(waitNote);
-            await sleep(35_000);
-            if (stopped()) throw e;
-          }
-        }
-      }
-
+  // Poll the server run while it's live. The server is the source of truth and
+  // self-heals a stalled driver on each poll, so this is all the client needs.
+  // Keyed on id+status only, so steady-state polling keeps one stable timer.
+  const liveStatus = run?.status === 'pending' || run?.status === 'running';
+  useEffect(() => {
+    if (!liveStatus) return;
+    let cancelled = false;
+    const h = setInterval(async () => {
+      const rid = runIdRef.current;
+      if (!rid) return;
       try {
-        // 1) Targets.
-        const { targets: found } = await withMinuteRetry(
-          () => agents.target(m.id, TARGET_COUNT),
-          'Pacing requests, resuming in ~30s…'
-        );
-        if (stopped()) return;
-        const top = [...found]
-          .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
-          .slice(0, TOP_N);
-        if (top.length === 0) {
-          setNote('');
-          return setPhase('done');
-        }
-        setTargets(
-          top.map((t) => ({
-            id: t.id,
-            name: t.company_name,
-            score: asScore(t.score),
-            evidence: 'queued',
-            contacts: 'queued',
-            sequence: 'queued',
-          }))
-        );
-        setPhase('running');
-
-        // 2) Per target: evidence -> contacts -> best contact -> sequence.
-        for (const t of top) {
-          if (stopped()) return;
-          await pace();
-
-          setStep(t.id, 'evidence', 'running');
-          setNote(`Researching ${t.company_name}, reading recent sources…`);
-          try {
-            await withMinuteRetry(() => agents.evidence(t.id), 'Pacing requests, resuming in ~30s…');
-            setStep(t.id, 'evidence', 'done');
-          } catch (e) {
-            if (isDailyLimit(e)) return setPhase('paused');
-            setStep(t.id, 'evidence', 'failed');
-            continue;
-          }
-          if (stopped()) return;
-
-          setStep(t.id, 'contacts', 'running');
-          setNote(`Finding the right decision-makers at ${t.company_name}…`);
-          let contacts: Contact[] = [];
-          try {
-            const r = await withMinuteRetry(() => agents.contacts(t.id), 'Pacing requests, resuming in ~30s…');
-            contacts = r.contacts ?? [];
-            setStep(t.id, 'contacts', 'done');
-          } catch (e) {
-            if (isDailyLimit(e)) return setPhase('paused');
-            setStep(t.id, 'contacts', 'failed');
-            continue;
-          }
-          const best = [...contacts].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))[0];
-          if (!best) {
-            setStep(t.id, 'sequence', 'failed');
-            continue;
-          }
-          if (stopped()) return;
-
-          setStep(t.id, 'sequence', 'running');
-          setNote(`Drafting a personalized email for ${t.company_name}…`);
-          try {
-            await withMinuteRetry(() => agents.sequence(best.id), 'Pacing requests, resuming in ~30s…');
-            setStep(t.id, 'sequence', 'done');
-          } catch (e) {
-            if (isDailyLimit(e)) return setPhase('paused');
-            setStep(t.id, 'sequence', 'failed');
-          }
-        }
-
-        if (stopped()) return;
-        setNote('');
-        setPhase('done');
-      } catch (err) {
-        if (stopped()) return;
-        if (isDailyLimit(err)) return setPhase('paused');
-        setError(err instanceof Error ? err.message : 'Pipeline failed');
-        setPhase('error');
+        const { data } = await pipeline.status(rid);
+        if (!cancelled && data) setRun(data);
+      } catch {
+        /* transient — keep polling */
       }
-    },
-    [setStep]
-  );
+    }, POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(h);
+    };
+  }, [liveStatus]);
+
+  const launch = useCallback(async () => {
+    if (!mission) return;
+    setError(null);
+    setStarting(true);
+    try {
+      const { data } = await pipeline.start(mission.id, TARGET_COUNT, TOP_N);
+      runIdRef.current = data.id;
+      setRun(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not start the pipeline.');
+    } finally {
+      setStarting(false);
+    }
+  }, [mission]);
+
+  const stop = useCallback(async () => {
+    const rid = runIdRef.current;
+    if (!rid) return;
+    try {
+      await pipeline.cancel(rid);
+      const { data } = await pipeline.status(rid);
+      setRun(data);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const totalSteps = targets.length > 0 ? 1 + targets.length * 3 : 1;
+  const targetingDone = run && run.phase !== 'targeting' ? 1 : 0;
   const doneSteps =
-    (phase !== 'ready' && phase !== 'targeting' ? 1 : 0) +
+    targetingDone +
     targets.reduce(
-      (n, t) => n + (t.evidence === 'done' ? 1 : 0) + (t.contacts === 'done' ? 1 : 0) + (t.sequence === 'done' ? 1 : 0),
+      (n, t) =>
+        n + (t.evidence === 'done' ? 1 : 0) + (t.contacts === 'done' ? 1 : 0) + (t.sequence === 'done' ? 1 : 0),
       0
     );
   const pct = Math.min(100, Math.round((doneSteps / totalSteps) * 100));
   const draftsReady = targets.filter((t) => t.sequence === 'done').length;
-  const isLive = phase === 'targeting' || phase === 'running';
 
   // ---- Ready (pre-launch) ----
   if (phase === 'ready') {
@@ -216,23 +197,29 @@ export function MissionRun() {
           <h1 className="run-title">{mission ? `Launch ${mission.name}?` : 'Launch pipeline?'}</h1>
           <p className="run-ready-body">
             The agent will find the top {TOP_N} companies, research each, surface the right contacts,
-            and draft a personalized email per target, live, below. You review and send after.
+            and draft a personalized email per target. You review and send after.
           </p>
           <p className="run-ready-fineprint">
-            Runs live in this tab; keep it open until it finishes (about a minute). Finished targets are saved as you go. Uses up to ~{1 + TOP_N * 3} of your daily agent runs.
+            Runs on the server — you can close this tab and come back; progress is saved as it goes.
+            Uses up to ~{1 + TOP_N * 3} of your daily agent runs.
           </p>
           {missionLoadError && (
             <p className="run-banner error" role="alert">
               {missionLoadError} <Link to="/missions">Back to missions</Link>
             </p>
           )}
+          {error && (
+            <p className="run-banner error" role="alert">
+              {error}
+            </p>
+          )}
           <button
             type="button"
             className="launchpad-cta"
-            disabled={!mission}
-            onClick={() => mission && runPipeline(mission)}
+            disabled={!mission || starting}
+            onClick={launch}
           >
-            {mission ? 'Launch pipeline →' : missionLoadError ? 'Unavailable' : 'Loading…'}
+            {starting ? 'Starting…' : mission ? 'Launch pipeline →' : missionLoadError ? 'Unavailable' : 'Loading…'}
           </button>
         </div>
       </div>
@@ -264,14 +251,7 @@ export function MissionRun() {
         <div className="run-head-meta">
           <span className="run-clock">{fmt(elapsed)}</span>
           {isLive && (
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() => {
-                abortRef.current?.abort();
-                setPhase('canceled');
-              }}
-            >
+            <button type="button" className="btn-secondary" onClick={stop}>
               Stop
             </button>
           )}
@@ -294,8 +274,8 @@ export function MissionRun() {
       )}
       {phase === 'error' && (
         <div className="run-banner error">
-          {error ?? 'The run failed.'}{' '}
-          <button type="button" className="link-button" onClick={() => mission && runPipeline(mission)}>
+          {run?.error ?? error ?? 'The run failed.'}{' '}
+          <button type="button" className="link-button" onClick={launch}>
             Retry
           </button>
         </div>
@@ -313,23 +293,23 @@ export function MissionRun() {
           {targets.map((t) => {
             const score = asScore(t.score);
             return (
-            <li key={t.id} className={`run-target ${t.sequence === 'done' ? 'ready' : ''}`}>
-              <div className="run-target-name">
-                {t.name}
-                {score != null && <span className="run-target-score">{score}</span>}
-              </div>
-              <div className="run-target-steps">
-                <StepChip label="Evidence" status={t.evidence} />
-                <StepChip label="Contacts" status={t.contacts} />
-                <StepChip label="Draft" status={t.sequence} />
-              </div>
-              {t.sequence === 'done' && (
-                <Link to={`/missions/${id}`} className="run-target-review">
-                  Review →
-                </Link>
-              )}
-            </li>
-          );
+              <li key={t.id} className={`run-target ${t.sequence === 'done' ? 'ready' : ''}`}>
+                <div className="run-target-name">
+                  {t.name}
+                  {score != null && <span className="run-target-score">{score}</span>}
+                </div>
+                <div className="run-target-steps">
+                  <StepChip label="Evidence" status={t.evidence} />
+                  <StepChip label="Contacts" status={t.contacts} />
+                  <StepChip label="Draft" status={t.sequence} />
+                </div>
+                {t.sequence === 'done' && (
+                  <Link to={`/missions/${id}`} className="run-target-review">
+                    Review →
+                  </Link>
+                )}
+              </li>
+            );
           })}
         </ul>
       )}
