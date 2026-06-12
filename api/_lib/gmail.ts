@@ -161,6 +161,27 @@ export async function getActiveAccessToken(uid: string): Promise<{ accessToken: 
 
 // === Gmail API operations === (unchanged from old implementation)
 
+/**
+ * Strip CR/LF (and other control chars) from a value destined for an email
+ * header. Without this, a newline in `toEmail`/`subject`/etc. (e.g. a
+ * client-supplied `to_override`) would let the caller inject arbitrary headers
+ * — Bcc, Reply-To — into the message Gmail sends on the user's behalf.
+ */
+function sanitizeHeader(s: string): string {
+  // Collapse CR, LF, and any other C0/C1 control char to a single space.
+  // eslint-disable-next-line no-control-regex
+  return s.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').trim();
+}
+
+/** Strict-enough recipient check: a single addr-spec, no header-breaking chars. */
+export function isValidEmailAddress(email: string): boolean {
+  if (email.length > 254) return false;
+  // No control chars (header-breaking), whitespace, or address-list delimiters.
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f\s,<>"]/.test(email)) return false;
+  return /^[^\s@,<>"]+@[^\s@,<>"]+\.[^\s@,<>"]+$/.test(email);
+}
+
 function buildRfc2822(args: {
   fromEmail: string;
   fromName?: string;
@@ -170,17 +191,20 @@ function buildRfc2822(args: {
   inReplyTo?: string;
   references?: string;
 }): string {
-  const fromHeader = args.fromName ? `${quoteIfNeeded(args.fromName)} <${args.fromEmail}>` : args.fromEmail;
+  const fromEmail = sanitizeHeader(args.fromEmail);
+  const toEmail = sanitizeHeader(args.toEmail);
+  const fromName = args.fromName ? sanitizeHeader(args.fromName) : undefined;
+  const fromHeader = fromName ? `${quoteIfNeeded(fromName)} <${fromEmail}>` : fromEmail;
   const headers: string[] = [
     `From: ${fromHeader}`,
-    `To: ${args.toEmail}`,
-    `Subject: ${encodeRfc2047(args.subject)}`,
+    `To: ${toEmail}`,
+    `Subject: ${encodeRfc2047(sanitizeHeader(args.subject))}`,
     'MIME-Version: 1.0',
     'Content-Type: text/plain; charset="UTF-8"',
     'Content-Transfer-Encoding: 7bit',
   ];
-  if (args.inReplyTo) headers.push(`In-Reply-To: ${args.inReplyTo}`);
-  if (args.references) headers.push(`References: ${args.references}`);
+  if (args.inReplyTo) headers.push(`In-Reply-To: ${sanitizeHeader(args.inReplyTo)}`);
+  if (args.references) headers.push(`References: ${sanitizeHeader(args.references)}`);
   const footer = '\r\n\r\n--\r\nTo stop receiving these emails, reply with "UNSUBSCRIBE" in the subject line.';
   return `${headers.join('\r\n')}\r\n\r\n${args.body.replace(/\r?\n/g, '\r\n')}${footer}`;
 }

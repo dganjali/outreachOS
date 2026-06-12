@@ -47,7 +47,15 @@ export function isExcludedName(name: string, exclusions: string[]): boolean {
 export function isValidDomain(domain: string | null | undefined): boolean {
   if (!domain) return false;
   const d = domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
-  return /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/.test(d);
+  if (!/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/.test(d)) return false;
+  // Reject IP literals and internal-only suffixes. A real company web domain
+  // has an alphabetic TLD; `169.254.169.254` (cloud metadata) and friends do
+  // not. This is the first line of an SSRF defense — see web-scrape.ts for the
+  // connection-time guard that is authoritative.
+  const tld = d.slice(d.lastIndexOf('.') + 1);
+  if (!/^[a-z]{2,}$/.test(tld)) return false; // numeric/short TLD → not a real domain
+  if (d === 'localhost' || d.endsWith('.localhost') || d.endsWith('.local') || d.endsWith('.internal')) return false;
+  return true;
 }
 
 export function normalizeDomain(domain: string | null | undefined): string | null {

@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { forUser, newId, type InsertDoc } from '../_lib/db';
-import { getActiveAccessToken, sendNow } from '../_lib/gmail';
+import { getActiveAccessToken, sendNow, isValidEmailAddress } from '../_lib/gmail';
 import { scheduleFollowups, isSuppressed } from '../_lib/sequencing';
 import type {
   ContactDoc,
@@ -40,6 +40,10 @@ export default async function handler(req: Request, res: Response) {
   const toEmail = body.to_override?.trim() || contact.email?.trim();
   if (!toEmail) {
     return res.status(400).json({ error: 'no_recipient_email', message: 'Contact has no email. Provide to_override.' });
+  }
+  // Reject header-injection / malformed recipients before building the message.
+  if (!isValidEmailAddress(toEmail)) {
+    return res.status(400).json({ error: 'invalid_recipient_email' });
   }
 
   // Suppression guard — never send (or draft) to a suppressed address.
