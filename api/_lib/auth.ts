@@ -31,7 +31,18 @@ export interface AuthedUser {
   email: string | null;
 }
 
+// Server-side orchestration (the pipeline runner) needs to invoke an agent
+// handler on behalf of an already-authenticated user without a Firebase token.
+// It attaches the verified user under this symbol on a synthetic in-process
+// request. A symbol key is unforgeable over the wire — it can't appear in JSON
+// body, headers, or query — so a network client can never set it; only the
+// internal invoker does. See api/_lib/internal-invoke.ts.
+export const INTERNAL_USER = Symbol('internalUser');
+
 export async function requireUser(req: Request, res: Response): Promise<AuthedUser | null> {
+  const internal = (req as unknown as Record<symbol, AuthedUser | undefined>)[INTERNAL_USER];
+  if (internal) return internal;
+
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) {
     res.status(401).json({ error: 'missing_authorization' });

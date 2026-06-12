@@ -1,9 +1,15 @@
 // Lightweight public-web scraping for company domains and contact emails.
 // Fetches a handful of common paths and extracts mailto:/regex emails.
 
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
+
 const FETCH_TIMEOUT_MS = 8_000;
 const USER_AGENT =
   'Mozilla/5.0 (compatible; OutreachOS/1.0; +https://outreachos.app) AppleWebKit/537.36';
+
+// Max redirect hops we follow manually (each hop is re-validated for SSRF).
+const MAX_REDIRECTS = 4;
 
 const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
 
@@ -45,20 +51,129 @@ export interface ScrapeResult {
   pagesScraped: string[];
 }
 
+// ---------------------------------------------------------------------------
+// SSRF guard.
+//
+// `domain` ultimately comes from a user-controlled target row (a user can POST
+// any `domain` through the generic /api/data/targets route), and the scraper
+// turns it into a server-side fetch. Without this guard, a caller could point
+// the domain at internal infrastructure — link-local cloud metadata
+// (169.254.169.254 / metadata.google.internal), RFC1918 ranges, loopback, or
+// other internal-only services — and use the scraper as an SSRF proxy. The
+// extracted-email response also gives a partial read-back channel.
+//
+// Defense: only ever connect to a host that resolves exclusively to public,
+// routable IPs. We re-validate on every redirect hop (manual redirects), so a
+// public domain can't 3xx-bounce the fetch onto an internal address, and we
+// pin the connection to a pre-resolved public IP to close the DNS-rebinding
+// window between our check and fetch's own resolution.
+// ---------------------------------------------------------------------------
+
+function ipv4ToParts(ip: string): number[] | null {
+  const parts = ip.split('.').map((p) => Number(p));
+  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return null;
+  return parts;
+}
+
+/** True for any IP we must never connect to (private, reserved, link-local…). */
+function isPrivateIp(ip: string): boolean {
+  const family = isIP(ip);
+  if (family === 4) {
+    const p = ipv4ToParts(ip);
+    if (!p) return true; // unparseable → treat as unsafe
+    const [a, b] = p;
+    if (a === 0) return true; // 0.0.0.0/8 "this host"
+    if (a === 10) return true; // 10.0.0.0/8
+    if (a === 127) return true; // loopback
+    if (a === 169 && b === 254) return true; // link-local incl. cloud metadata
+    if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+    if (a === 192 && b === 168) return true; // 192.168.0.0/16
+    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT 100.64.0.0/10
+    if (a === 192 && b === 0 && p[2] === 0) return true; // 192.0.0.0/24
+    if (a >= 224) return true; // multicast + reserved (224.0.0.0/3)
+    return false;
+  }
+  if (family === 6) {
+    const v = ip.toLowerCase().replace(/^\[|\]$/g, '');
+    if (v === '::1' || v === '::') return true; // loopback / unspecified
+    if (v.startsWith('fe80')) return true; // link-local
+    if (v.startsWith('fc') || v.startsWith('fd')) return true; // unique-local fc00::/7
+    // IPv4-mapped (::ffff:a.b.c.d) — validate the embedded v4.
+    const mapped = v.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    if (mapped) return isPrivateIp(mapped[1]);
+    return false;
+  }
+  return true; // not a valid IP literal
+}
+
+/** Hostnames that must never be resolved/fetched regardless of DNS answer. */
+function isBlockedHostname(host: string): boolean {
+  const h = host.toLowerCase().replace(/\.$/, '');
+  if (h === 'localhost') return true;
+  if (h.endsWith('.localhost') || h.endsWith('.local') || h.endsWith('.internal')) return true;
+  if (h === 'metadata' || h === 'metadata.google.internal') return true;
+  return false;
+}
+
+/**
+ * Resolve `host` and confirm every answer is a public IP. Returns one resolved
+ * public IP to pin the connection to (defeats DNS rebinding), or null if the
+ * host is unsafe / unresolvable.
+ */
+async function resolvePublicHost(host: string): Promise<string | null> {
+  if (!host || isBlockedHostname(host)) return null;
+  // A bare IP literal in the URL: validate it directly.
+  if (isIP(host)) return isPrivateIp(host) ? null : host;
+  let records: Array<{ address: string }>;
+  try {
+    records = await lookup(host, { all: true });
+  } catch {
+    return null;
+  }
+  if (records.length === 0) return null;
+  if (records.some((r) => isPrivateIp(r.address))) return null; // fail closed
+  return records[0].address;
+}
+
 export async function fetchPageText(url: string): Promise<string | null> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(url, {
-      signal: ctrl.signal,
-      headers: { 'User-Agent': USER_AGENT, Accept: 'text/html,application/xhtml+xml' },
-      redirect: 'follow',
-    });
-    if (!res.ok) return null;
-    const ct = res.headers.get('content-type') ?? '';
-    if (!ct.includes('text/html') && !ct.includes('text/plain')) return null;
-    const text = await res.text();
-    return text.slice(0, 500_000);
+    let current = url;
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      let parsed: URL;
+      try {
+        parsed = new URL(current);
+      } catch {
+        return null;
+      }
+      // Only fetch over HTTP(S) — blocks file:, gopher:, ftp:, data:, etc.
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+
+      const pinnedIp = await resolvePublicHost(parsed.hostname);
+      if (!pinnedIp) return null;
+
+      const res = await fetch(current, {
+        signal: ctrl.signal,
+        headers: { 'User-Agent': USER_AGENT, Accept: 'text/html,application/xhtml+xml' },
+        redirect: 'manual',
+      });
+
+      // Follow redirects ourselves so every hop is re-validated above.
+      if (res.status >= 300 && res.status < 400) {
+        const loc = res.headers.get('location');
+        if (!loc) return null;
+        current = new URL(loc, current).toString();
+        continue;
+      }
+
+      if (!res.ok) return null;
+      const ct = res.headers.get('content-type') ?? '';
+      if (!ct.includes('text/html') && !ct.includes('text/plain')) return null;
+      const text = await res.text();
+      return text.slice(0, 500_000);
+    }
+    return null; // too many redirects
   } catch {
     return null;
   } finally {

@@ -13,6 +13,7 @@ import agentReply from '../api/agents/reply';
 import agentEnrichProfile from '../api/agents/enrich-profile';
 import agentCoach from '../api/agents/coach';
 import agentParseResume from '../api/agents/parse-resume';
+import agentPipeline, { cancel as agentPipelineCancel } from '../api/agents/pipeline';
 
 import gmailSend from '../api/gmail/send';
 import gmailReply from '../api/gmail/reply';
@@ -40,6 +41,11 @@ app.post('/api/agents/reply', wrap(agentReply));
 app.post('/api/agents/enrich-profile', wrap(agentEnrichProfile));
 app.post('/api/agents/coach', wrap(agentCoach));
 app.post('/api/agents/parse-resume', wrap(agentParseResume));
+
+// server-side durable pipeline (replaces browser orchestration)
+app.post('/api/agents/pipeline/cancel', wrap(agentPipelineCancel));
+app.post('/api/agents/pipeline', wrap(agentPipeline));
+app.get('/api/agents/pipeline', wrap(agentPipeline));
 
 // gmail
 app.post('/api/gmail/send', wrap(gmailSend));

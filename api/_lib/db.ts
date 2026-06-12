@@ -51,6 +51,7 @@ export const COL = {
   agentRuns: 'agent_runs',
   userIntegrations: 'user_integrations',
   suppressions: 'suppressions',
+  pipelineRuns: 'pipeline_runs',
 } as const;
 
 export type CollectionName = (typeof COL)[keyof typeof COL];
@@ -79,6 +80,7 @@ const OWNERSHIP: Record<CollectionName, OwnershipMode> = {
   agent_runs: 'userId',
   user_integrations: 'userId',
   suppressions: 'userId',
+  pipeline_runs: 'userId',
 };
 
 // ---------------------------------------------------------------------------

@@ -4,7 +4,7 @@
 import type { Request, Response } from 'express';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { forUser } from '../_lib/db';
-import { getActiveAccessToken, sendNow } from '../_lib/gmail';
+import { getActiveAccessToken, sendNow, isValidEmailAddress } from '../_lib/gmail';
 import type { ProfileDoc, ReplyDoc } from '../../shared/schemas';
 
 interface ReplyBody {
@@ -27,6 +27,7 @@ export default async function handler(req: Request, res: Response) {
 
   const toEmail = reply.fromEmail?.trim();
   if (!toEmail) return res.status(400).json({ error: 'no_recipient', message: 'This reply has no sender address to reply to.' });
+  if (!isValidEmailAddress(toEmail)) return res.status(400).json({ error: 'invalid_recipient_email' });
 
   const tok = await getActiveAccessToken(user.id);
   if (!tok) return res.status(412).json({ error: 'gmail_not_connected', message: 'Connect Gmail in Settings first.' });

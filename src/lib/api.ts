@@ -132,4 +132,55 @@ export const gmail = {
     }),
 };
 
+// ---------------------------------------------------------------------------
+// Server-side durable pipeline. The client starts a run and polls its state;
+// progress survives a closed tab because the server owns the run.
+// ---------------------------------------------------------------------------
+export type PipelineRunStatus = 'pending' | 'running' | 'paused' | 'done' | 'error' | 'canceled';
+export type PipelineStep = 'evidence' | 'contacts' | 'sequence';
+export type PipelineStepStatus = 'queued' | 'running' | 'done' | 'failed';
+
+export interface PipelineTargetView {
+  target_id: string;
+  name: string;
+  score: number | null;
+  evidence: PipelineStepStatus;
+  contacts: PipelineStepStatus;
+  sequence: PipelineStepStatus;
+  best_contact_id: string | null;
+}
+
+export interface PipelineRunView {
+  id: string;
+  mission_id: string;
+  status: PipelineRunStatus;
+  phase: 'targeting' | 'processing' | 'done';
+  note: string | null;
+  error: string | null;
+  config: { target_count: number; top_n: number };
+  cursor: { target_index: number; step: PipelineStep } | null;
+  targets: PipelineTargetView[];
+  started_at: string;
+  completed_at: string | null;
+}
+
+export const pipeline = {
+  start: (mission_id: string, count?: number, top_n?: number) =>
+    authedFetch<{ data: PipelineRunView; already_running?: boolean }>('/api/agents/pipeline', {
+      mission_id,
+      count,
+      top_n,
+    }),
+  status: (run_id: string) =>
+    authedFetch<{ data: PipelineRunView }>(`/api/agents/pipeline?run_id=${encodeURIComponent(run_id)}`, null, 'GET'),
+  latestForMission: (mission_id: string) =>
+    authedFetch<{ data: PipelineRunView }>(
+      `/api/agents/pipeline?mission_id=${encodeURIComponent(mission_id)}`,
+      null,
+      'GET'
+    ),
+  cancel: (run_id: string) =>
+    authedFetch<{ ok: boolean }>('/api/agents/pipeline/cancel', { run_id }),
+};
+
 export type { AgentRun };
