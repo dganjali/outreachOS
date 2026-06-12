@@ -24,24 +24,24 @@ up to that one sentence.
 ## Act 1 — Make it actually autonomous (the credibility floor)
 
 You cannot be impressive on a foundation that evaporates when a tab closes. This
-act is the highest-leverage work in the repo and is **in progress**.
+act is the highest-leverage work in the repo.
 
-1. **Durable, server-run pipeline.** Move orchestration out of the browser into
-   a resumable server job that survives disconnects and streams/polls progress.
-   The run is a first-class, persisted record (`pipeline_runs`) — the source of
-   truth — driven by a step machine that can resume from where it stopped.
-   *(This is the keystone everything else stands on.)*
-2. **Campaign Autopilot.** Flip the unit of control from *per-email approval* to
-   *per-policy approval*: "find 10 new targets/week matching this ICP, research,
-   draft, and send ≤15/day within these guardrails; pause and ask me only when
-   confidence is low or a reply needs a human." The primitives exist
-   (`cron/send-due-touches.ts`, `sequencing.ts`, the reply classifier,
-   suppression) — what's missing is the **policy object** + a confidence gate.
-3. **Reply → action, autonomously.** `reply.ts` already classifies replies.
-   Close the loop: positive reply → draft the response → **propose times and
-   book the meeting on the user's calendar.** Owning *reply → meeting booked* is
-   the single most pay-worthy outcome, and becomes the north-star metric and the
-   pricing unit.
+1. **Durable, server-run pipeline. ✅ Done (Act 1.1).** Orchestration moved out
+   of the browser into a resumable server job that survives disconnects. The run
+   is a first-class, persisted record (`pipeline_runs`) — the source of truth —
+   driven by a pure step machine (`advancePipeline`) that resumes from where it
+   stopped. See `api/_lib/pipeline.ts`.
+2. **Campaign Autopilot. ✅ Done (Act 1.2).** The unit of control is now a
+   *policy*, not a per-email click: an `autopilot_policies` doc per mission
+   (discover N targets/week, auto-send only drafts that clear a confidence gate,
+   within a daily cap + send window). A cron (`api/cron/autopilot.ts`) tops up
+   discovery via the Act 1.1 pipeline and auto-sends gate-cleared drafts through
+   the existing send path (suppression, idempotency, follow-ups, reply-stop all
+   reused). Drafts that fail the gate are held for human review. Engine +
+   pure-function gate/window/budget logic in `api/_lib/autopilot.ts`, unit-tested.
+3. **Reply → action, autonomously. ⏸ Deferred.** Closing the loop into
+   meeting-booking is intentionally out of scope for now (too specific); the
+   reply classifier already exists to build on when we return to it.
 
 ## Act 2 — Build the compounding moat (why they can't churn or copy you)
 

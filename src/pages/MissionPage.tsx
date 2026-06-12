@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { agents, gmail } from '../lib/api';
 import { asScore } from '../lib/score';
 import { CsvImport } from '../components/CsvImport';
+import { AutopilotPanel } from '../components/AutopilotPanel';
 import type {
   Mission,
   Target,
@@ -294,6 +295,8 @@ export function MissionPage() {
           <span>{mission.target_description}</span>
         </div>
       </section>
+
+      <AutopilotPanel missionId={mission.id} />
 
       {error && (
         <div className="banner-error" role="alert">

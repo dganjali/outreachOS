@@ -280,6 +280,35 @@ export interface PipelineRunDoc extends BaseDoc {
 }
 
 // ---------------------------------------------------------------------------
+// Campaign Autopilot — per-mission policy that lets the user approve a *policy*
+// instead of every email. The autopilot cron keeps the pipeline topped up
+// (discovery) and auto-sends only the drafts that clear the confidence gate and
+// the sending guardrails; everything else is held as a draft for human review.
+// ---------------------------------------------------------------------------
+export interface AutopilotPolicyDoc extends BaseDoc {
+  missionId: string;
+  enabled: boolean;
+
+  // Discovery — keep researching new targets until this many exist for the week.
+  targetsPerWeek: number;
+
+  // Sending guardrails.
+  autoSend: boolean;            // false ⇒ autopilot only drafts; never sends
+  maxSendsPerDay: number;       // hard daily cap (counted from sent_messages)
+  sendWindowStartHour: number;  // 0–23, UTC, inclusive
+  sendWindowEndHour: number;    // 0–23, UTC, exclusive (== start ⇒ 24h)
+  sendDays: number[];           // allowed weekdays, 0=Sun … 6=Sat
+
+  // Confidence gate — only auto-send when the draft clears all of these.
+  minContactConfidence: number; // 0..1, against contact.confidence
+  requireVerifiedEmail: boolean; // require emailStatus verified|likely (not guessed)
+
+  // Telemetry.
+  lastDiscoveryAt: Date | null;
+  lastSweepAt: Date | null;
+}
+
+// ---------------------------------------------------------------------------
 // Index spec — read by scripts/init-mongo.ts. Plain JS so the script doesn't
 // need to import any types.
 // ---------------------------------------------------------------------------
@@ -343,6 +372,11 @@ export const INDEX_SPEC: Record<string, Array<{ keys: Record<string, 1 | -1>; op
     { keys: { status: 1, heartbeatAt: 1 } },
     // TTL: drop finished run records after 30 days.
     { keys: { createdAt: 1 }, options: { expireAfterSeconds: 60 * 60 * 24 * 30 } },
+  ],
+  autopilot_policies: [
+    { keys: { userId: 1, missionId: 1 }, options: { unique: true } },
+    // Cron sweep: find every enabled policy across all users.
+    { keys: { enabled: 1 } },
   ],
 };
 

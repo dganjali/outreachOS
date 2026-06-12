@@ -14,6 +14,7 @@ import agentEnrichProfile from '../api/agents/enrich-profile';
 import agentCoach from '../api/agents/coach';
 import agentParseResume from '../api/agents/parse-resume';
 import agentPipeline, { cancel as agentPipelineCancel } from '../api/agents/pipeline';
+import agentAutopilot from '../api/agents/autopilot';
 
 import gmailSend from '../api/gmail/send';
 import gmailReply from '../api/gmail/reply';
@@ -25,6 +26,7 @@ import gmailDisconnect from '../api/integrations/gmail/disconnect';
 import cronPollGmail from '../api/cron/poll-gmail';
 import cronSendDueTouches from '../api/cron/send-due-touches';
 import cronWeeklyDigest from '../api/cron/weekly-digest';
+import cronAutopilot from '../api/cron/autopilot';
 import dataRouter from '../api/data/router';
 
 const app = express();
@@ -47,6 +49,10 @@ app.post('/api/agents/pipeline/cancel', wrap(agentPipelineCancel));
 app.post('/api/agents/pipeline', wrap(agentPipeline));
 app.get('/api/agents/pipeline', wrap(agentPipeline));
 
+// campaign autopilot — per-mission policy management
+app.get('/api/agents/autopilot', wrap(agentAutopilot));
+app.post('/api/agents/autopilot', wrap(agentAutopilot));
+
 // gmail
 app.post('/api/gmail/send', wrap(gmailSend));
 app.post('/api/gmail/reply', wrap(gmailReply));
@@ -58,6 +64,7 @@ app.post('/api/integrations/gmail/disconnect', wrap(gmailDisconnect));
 // cron
 app.post('/api/cron/poll-gmail', wrap(cronPollGmail));
 app.post('/api/cron/send-due-touches', wrap(cronSendDueTouches));
+app.post('/api/cron/autopilot', wrap(cronAutopilot));
 app.post('/api/cron/weekly-digest', wrap(cronWeeklyDigest));
 
 // generic CRUD for the frontend (replaces direct Supabase queries)

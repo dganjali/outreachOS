@@ -183,4 +183,35 @@ export const pipeline = {
     authedFetch<{ ok: boolean }>('/api/agents/pipeline/cancel', { run_id }),
 };
 
+// ---------------------------------------------------------------------------
+// Campaign Autopilot — per-mission policy (Act 1.2).
+// ---------------------------------------------------------------------------
+export interface AutopilotPolicyView {
+  mission_id: string;
+  enabled: boolean;
+  targets_per_week: number;
+  auto_send: boolean;
+  max_sends_per_day: number;
+  send_window_start_hour: number;
+  send_window_end_hour: number;
+  send_days: number[];
+  min_contact_confidence: number;
+  require_verified_email: boolean;
+  last_discovery_at: string | null;
+  last_sweep_at: string | null;
+}
+
+export type AutopilotPatch = Partial<Omit<AutopilotPolicyView, 'mission_id' | 'last_discovery_at' | 'last_sweep_at'>>;
+
+export const autopilot = {
+  get: (mission_id: string) =>
+    authedFetch<{ data: AutopilotPolicyView }>(
+      `/api/agents/autopilot?mission_id=${encodeURIComponent(mission_id)}`,
+      null,
+      'GET'
+    ),
+  save: (mission_id: string, patch: AutopilotPatch) =>
+    authedFetch<{ data: AutopilotPolicyView }>('/api/agents/autopilot', { mission_id, ...patch }),
+};
+
 export type { AgentRun };

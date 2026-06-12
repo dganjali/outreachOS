@@ -52,6 +52,7 @@ export const COL = {
   userIntegrations: 'user_integrations',
   suppressions: 'suppressions',
   pipelineRuns: 'pipeline_runs',
+  autopilotPolicies: 'autopilot_policies',
 } as const;
 
 export type CollectionName = (typeof COL)[keyof typeof COL];
@@ -81,6 +82,7 @@ const OWNERSHIP: Record<CollectionName, OwnershipMode> = {
   user_integrations: 'userId',
   suppressions: 'userId',
   pipeline_runs: 'userId',
+  autopilot_policies: 'userId',
 };
 
 // ---------------------------------------------------------------------------
