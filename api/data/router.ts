@@ -8,6 +8,7 @@ import type { Request, Response, NextFunction } from 'express';
 import { requireUser } from '../_lib/auth';
 import { forUser, newId, COL, type CollectionName } from '../_lib/db';
 import { signedUploadUrl, signedDownloadUrl, deleteObject } from '../_lib/storage';
+import { checkMissionQuota } from '../_lib/runs';
 
 // Module augmentation so `req.uid` is typed (set by the middleware below).
 declare module 'express-serve-static-core' {
@@ -156,9 +157,14 @@ router.post('/:collection', async (req, res) => {
   const collection = req.params.collection;
   if (!ALLOWED.has(collection)) return res.status(404).json({ error: 'unknown_collection' });
   const uid = uidOf(req);
+  const scope = forUser(uid);
+  // Headline plan limit: cap mission launches per month. Enforced here so it
+  // covers every code path that creates a mission (the app inserts via this
+  // generic route). 429s with mission_quota_exceeded when over.
+  if (collection === COL.missions && !(await checkMissionQuota(scope, res))) return;
   const body = req.body ?? {};
   const doc = { _id: newId(), ...stripOwnership(body) };
-  const created = await forUser(uid).collection(collection as CollectionName).insertOne(doc as any);
+  const created = await scope.collection(collection as CollectionName).insertOne(doc as any);
   res.status(201).json({ data: created });
 });
 

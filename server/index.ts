@@ -26,10 +26,25 @@ import cronSendDueTouches from '../api/cron/send-due-touches';
 import cronWeeklyDigest from '../api/cron/weekly-digest';
 import dataRouter from '../api/data/router';
 
+import billingCheckout from '../api/billing/checkout';
+import billingPortal from '../api/billing/portal';
+import billingWebhook from '../api/billing/webhook';
+import billingMe from '../api/billing/me';
+
 const app = express();
+
+// Stripe webhook MUST receive the raw body for signature verification, so it is
+// registered with express.raw BEFORE the global JSON parser below.
+app.post('/api/billing/webhook', express.raw({ type: 'application/json' }), wrap(billingWebhook));
+
 app.use(express.json({ limit: '4mb' }));
 
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
+
+// billing
+app.post('/api/billing/checkout', wrap(billingCheckout));
+app.post('/api/billing/portal', wrap(billingPortal));
+app.get('/api/billing/me', wrap(billingMe));
 
 // agents
 app.post('/api/agents/target', wrap(agentTarget));

@@ -15,6 +15,7 @@
 // These are stamped by the `forUser(uid).collection().insertOne()` wrapper.
 
 import type { EmbedInputType } from '../api/_lib/embeddings';
+import type { PlanId, PlanStatus } from './plans';
 
 void ({} as EmbedInputType); // keep the import live for downstream consumers
 
@@ -52,6 +53,18 @@ export interface ProfileDoc extends BaseDoc {
   onboardingCompletedAt: Date | null;
   // When true, the follow-up sweeper skips this user's scheduled touches.
   pauseFollowups?: boolean;
+
+  // --- Billing / monetization (Stripe). All optional; absence == free tier. ---
+  // The plan the user purchased. Effective limits also depend on planStatus —
+  // see resolvePlan() in shared/plans.ts. Defaults to 'free' when unset.
+  plan?: PlanId;
+  planStatus?: PlanStatus;
+  // Stripe identifiers. customerId is created on first checkout and reused.
+  stripeCustomerId?: string | null;
+  stripeSubscriptionId?: string | null;
+  // End of the current paid period (subscription renews/expires here).
+  planRenewsAt?: Date | null;
+  planUpdatedAt?: Date | null;
 }
 
 // Email addresses that must never be contacted (unsubscribe, bounce, manual).
