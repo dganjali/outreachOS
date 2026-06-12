@@ -3,6 +3,7 @@
 // the mission pipeline, the draft editor, and the reply inbox. Dark theme.
 
 import { useEffect, useRef, useState } from 'react';
+import { LogoMark } from './Logo';
 import {
   Search,
   PenSquare,
@@ -75,7 +76,7 @@ const EMAIL = {
   subject: 'Sponsoring our 2026 developer conference?',
   sources: ['Series B — Mar 2026', 'Hiring first DevRel', 'Shipped Vue support'],
   body:
-    'Hey Jess,\n\nSaw Resend «closed Series B this March» and is «hiring its first DevRel lead» — the same week you «shipped Vue support», the exact crowd we host.\n\nOur conference drew 1,400+ engineers last year. Worth 15 minutes next week?',
+    'Hey Jess,\n\nSaw Resend «closed Series B this March» and is «hiring its first DevRel lead», the same week you «shipped Vue support». That is exactly the crowd we host.\n\nOur conference drew 1,400+ engineers last year. Worth 15 minutes next week?',
 };
 const EMAIL_PLAIN = EMAIL.body.replace(/[«»]/g, '');
 
@@ -130,6 +131,7 @@ export function HeroAppMock() {
   const [phase, setPhase] = useState<Phase>('idle');
   const [revealed, setRevealed] = useState(0);
   const [typed, setTyped] = useState('');
+  const [tab, setTab] = useState<'targets' | 'drafts' | 'replies'>('targets');
   const interacted = useRef(false);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
@@ -149,6 +151,7 @@ export function HeroAppMock() {
     setPrompt(p);
     setTyped('');
     setRevealed(0);
+    setTab('targets');
 
     if (reduceMotion) {
       setPhase('done');
@@ -217,13 +220,11 @@ export function HeroAppMock() {
   const sourcesUsed = Math.floor((typed.length / EMAIL_PLAIN.length) * (EMAIL.sources.length + 0.5));
 
   return (
-    <div className="flex min-h-[452px] text-left">
+    <div className="flex h-[468px] text-left">
       {/* Sidebar */}
       <aside className="hidden w-48 shrink-0 flex-col gap-4 border-r border-border/70 bg-background/40 p-3 sm:flex">
         <div className="flex items-center gap-2">
-          <span className="flex h-5 w-5 items-center justify-center rounded-md bg-primary/15 text-primary">
-            <Sparkles className="h-3 w-3" />
-          </span>
+          <LogoMark size={18} variant="default" />
           <span className="text-[13px] font-semibold text-foreground">OutreachOS</span>
           <ChevronDown className="h-3 w-3 text-muted-foreground" />
         </div>
@@ -313,21 +314,51 @@ export function HeroAppMock() {
           )}
         </div>
 
-        {/* Targets header */}
-        <div className="flex items-center justify-between px-4 py-2 text-[11px] text-muted-foreground">
-          <span className="font-medium uppercase tracking-wider">Targets</span>
-          <span className="tabular-nums">
+        {/* Tabs — interactive */}
+        <div className="flex items-center gap-4 border-b border-border/70 px-4 text-[12px]">
+          {(['targets', 'drafts', 'replies'] as const).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setTab(t)}
+              className={`-mb-px border-b-2 py-2 capitalize transition-colors ${
+                tab === t
+                  ? 'border-primary font-medium text-foreground'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {t}
+            </button>
+          ))}
+          <span className="ml-auto tabular-nums text-[11px] text-muted-foreground">
             {rows} found · {draftsReady} drafted
           </span>
         </div>
 
-        {/* Streaming target list */}
-        <ul className="flex flex-1 flex-col">
-          {LEADS.slice(0, rows).map((t, i) => {
-            const isDrafting = phase === 'drafting' && i === 0 && typed.length < EMAIL_PLAIN.length;
-            const isDrafted = (phase === 'drafting' || phase === 'done') && (i === 0 ? phase === 'done' : false);
+        {tab === 'drafts' ? (
+          <DraftsView />
+        ) : tab === 'replies' ? (
+          <RepliesView />
+        ) : (
+        /* Target list — fixed 5 slots that populate in place (no reflow) */
+        <ul className="flex flex-1 flex-col overflow-hidden">
+          {LEADS.map((t, i) => {
+            const filled = i < rows;
+            if (!filled) {
+              return (
+                <li key={t.name} className="flex flex-1 items-center gap-3 border-b border-border/40 px-4">
+                  <span className="h-7 w-7 shrink-0 animate-pulse rounded-full bg-secondary/60" />
+                  <div className="flex flex-1 flex-col gap-1.5">
+                    <span className="h-2 w-24 animate-pulse rounded bg-secondary/60" />
+                    <span className="h-2 w-36 animate-pulse rounded bg-secondary/40" />
+                  </div>
+                  <span className="h-2 w-12 animate-pulse rounded-full bg-secondary/40" />
+                </li>
+              );
+            }
             const allDone = phase === 'done';
-            const status = allDone || isDrafted ? 'drafted' : isDrafting ? 'drafting' : phase === 'researching' ? 'scoring' : 'queued';
+            const isDrafting = phase === 'drafting' && i === 0 && typed.length < EMAIL_PLAIN.length;
+            const status = allDone ? 'drafted' : isDrafting ? 'drafting' : phase === 'researching' ? 'scoring' : 'queued';
             const meta =
               status === 'drafted'
                 ? { label: 'Drafted', cls: 'border-primary/30 bg-primary/10 text-primary', dot: 'bg-primary', pulse: false }
@@ -339,7 +370,7 @@ export function HeroAppMock() {
             return (
               <li
                 key={t.name}
-                className="flex animate-fade-in items-center gap-3 border-b border-border/40 px-4 py-2.5"
+                className="flex flex-1 animate-fade-in items-center gap-3 border-b border-border/40 px-4"
               >
                 <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-secondary text-[10px] font-semibold text-foreground/70 ring-1 ring-border">
                   {t.initials}
@@ -364,12 +395,8 @@ export function HeroAppMock() {
               </li>
             );
           })}
-          {rows === 0 && (
-            <li className="flex flex-1 items-center justify-center px-4 py-10 text-center text-[12px] text-muted-foreground/70">
-              {phase === 'thinking' ? 'Planning the mission…' : 'Run a mission to see the agents work.'}
-            </li>
-          )}
         </ul>
+        )}
       </section>
 
       {/* Agent panel — the email writing itself */}
@@ -405,7 +432,7 @@ export function HeroAppMock() {
                       <Check className="h-2.5 w-2.5" />
                     </span>
                     <span>
-                      <span className="text-foreground">{l.name}</span> — {l.why}
+                      <span className="text-foreground">{l.name}</span> · {l.why}
                     </span>
                   </li>
                 ))}
@@ -435,7 +462,7 @@ export function HeroAppMock() {
                 })}
               </div>
 
-              <div className="rounded-lg border border-border/70 bg-card/80 p-2.5 text-[11px] leading-relaxed text-muted-foreground">
+              <div className="h-[168px] overflow-hidden rounded-lg border border-border/70 bg-card/80 p-2.5 text-[11px] leading-relaxed text-muted-foreground">
                 <div className="mb-1.5 flex flex-col gap-0.5 border-b border-border/50 pb-1.5 text-[10px]">
                   <span><span className="text-muted-foreground/60">To</span> <span className="text-foreground">{EMAIL.to}</span></span>
                   <span className="truncate"><span className="text-muted-foreground/60">Re</span> <span className="text-foreground">{EMAIL.subject}</span></span>
@@ -470,6 +497,59 @@ export function HeroAppMock() {
         </div>
       </aside>
     </div>
+  );
+}
+
+// Drafts tab — the composed email, reviewable and ready to send.
+function DraftsView() {
+  return (
+    <div className="flex flex-1 flex-col gap-3 overflow-hidden p-4 text-[12px]">
+      <div className="flex flex-col gap-1 border-b border-border/60 pb-2 text-[11px]">
+        <span><span className="text-muted-foreground/60">To</span> <span className="text-foreground">{EMAIL.to}</span></span>
+        <span className="truncate"><span className="text-muted-foreground/60">Subject</span> <span className="text-foreground">{EMAIL.subject}</span></span>
+      </div>
+      <p className="overflow-hidden whitespace-pre-wrap leading-relaxed text-muted-foreground">
+        {renderRich(EMAIL.body)}
+      </p>
+      <div className="mt-auto flex items-center justify-between border-t border-border/60 pt-3">
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
+          3 sources cited
+        </span>
+        <span className="rounded-md bg-primary px-3 py-1 text-[11px] font-semibold text-primary-foreground">Send</span>
+      </div>
+    </div>
+  );
+}
+
+// Replies tab — incoming replies, auto-classified.
+const HERO_REPLIES: { from: string; initials: string; snippet: string; tag: string; ok?: boolean }[] = [
+  { from: 'Jess at Resend', initials: 'JR', snippet: 'Interesting, can you send tiers?', tag: 'Interested', ok: true },
+  { from: 'Marco at Linear', initials: 'ML', snippet: 'Not this quarter, ping me in Q3.', tag: 'Not now' },
+  { from: 'Dana at Clerk', initials: 'DC', snippet: 'I am not the right person for this.', tag: 'Wrong person' },
+];
+
+function RepliesView() {
+  return (
+    <ul className="flex flex-1 flex-col overflow-hidden">
+      {HERO_REPLIES.map((r) => (
+        <li key={r.from} className="flex flex-1 items-center gap-3 border-b border-border/40 px-4">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-secondary text-[10px] font-semibold text-foreground/70 ring-1 ring-border">
+            {r.initials}
+          </span>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate text-[13px] font-medium text-foreground">{r.from}</span>
+            <span className="truncate text-[11px] text-muted-foreground">{r.snippet}</span>
+          </div>
+          <span
+            className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+              r.ok ? 'border-primary/30 bg-primary/10 text-primary' : 'border-border bg-secondary text-muted-foreground'
+            }`}
+          >
+            {r.tag}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 

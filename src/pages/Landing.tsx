@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, Sparkles, Target, FileText, Inbox as InboxIcon, Check } from 'lucide-react';
+import { ArrowRight, Target, FileText, Inbox as InboxIcon, Check } from 'lucide-react';
 import { Logo } from '../components/Logo';
 import { BrowserFrame, HeroAppMock, PipelineMock, DraftMock, InboxMock } from '../components/AppMockups';
 import { GenerativeMountains } from '../components/GenerativeMountains';
@@ -113,7 +113,7 @@ export function Landing() {
 
       <main>
         {/* Hero */}
-        <section className="relative isolate overflow-hidden px-5 pb-12 pt-20 md:pt-24">
+        <section className="relative isolate overflow-hidden px-5 pb-12 pt-16 md:pt-20">
           {/* atmospheric background — near-black with a restrained green, particle terrain below */}
           <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
             {/* base gradient: black at the top, easing to a very dark green-slate near the terrain */}
@@ -150,16 +150,12 @@ export function Landing() {
           </div>
 
           <div className="mx-auto max-w-3xl text-center animate-fade-in">
-            <span className="inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/10 px-3.5 py-1.5 text-xs font-medium text-primary">
-              <Sparkles className="h-3.5 w-3.5" />
-              Agentic cold outreach
-            </span>
-            <h1 className="mt-5 text-balance font-display text-5xl font-bold leading-[1.05] tracking-tight text-wash md:text-7xl">
+            <h1 className="text-balance font-display text-5xl font-bold leading-[1.05] tracking-tight text-wash md:text-7xl">
               Cold outreach that writes and sends itself.
             </h1>
-            <p className="mx-auto mt-4 max-w-2xl text-pretty text-lg leading-relaxed text-muted-foreground">
-              One mission in — a mode, an offer, an audience. OutreachOS researches the targets and
-              drafts personalized emails, sent from your Gmail.
+            <p className="mx-auto mt-5 max-w-3xl text-pretty text-lg leading-relaxed text-muted-foreground">
+              Agentic cold outreach: OutreachOS finds the right companies, writes personalized emails
+              backed by real buying signals, and sends them from your Gmail.
             </p>
             <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
               <Button asChild size="lg" className="btn-glow gap-2 border-0 px-6 font-semibold text-primary-foreground">
@@ -175,33 +171,13 @@ export function Landing() {
           </div>
 
           {/* hero product shot */}
-          <div className="relative mx-auto mt-8 max-w-5xl animate-fade-in">
+          <div className="relative mx-auto mt-5 max-w-5xl animate-fade-in">
             <div aria-hidden className="pointer-events-none absolute -inset-x-10 -top-8 bottom-0 -z-10 rounded-[2rem] bg-primary/10 blur-[80px]" />
             {/* gradient ring frame */}
             <div className="rounded-2xl bg-gradient-to-b from-primary/30 via-border/50 to-transparent p-px shadow-[0_50px_140px_-40px_rgba(0,0,0,0.95)]">
               <BrowserFrame url="app.outreachos.com/missions" bodyClassName="p-0">
                 <HeroAppMock />
               </BrowserFrame>
-            </div>
-
-            {/* floating accents — parked fully beside the frame, no content overlap */}
-            <div className="absolute right-full top-12 mr-5 hidden animate-fade-in items-center gap-2 rounded-xl border border-border/70 bg-card/90 px-3 py-2 shadow-2xl backdrop-blur xl:flex">
-              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/15 text-primary">
-                <Target className="h-3.5 w-3.5" />
-              </span>
-              <div className="leading-tight">
-                <div className="text-xs font-semibold text-foreground">92 fit score</div>
-                <div className="text-[11px] text-muted-foreground">why-now verified</div>
-              </div>
-            </div>
-            <div className="absolute left-full bottom-16 ml-5 hidden animate-fade-in items-center gap-2 rounded-xl border border-border/70 bg-card/90 px-3 py-2 shadow-2xl backdrop-blur xl:flex">
-              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/15 text-primary">
-                <Check className="h-3.5 w-3.5" />
-              </span>
-              <div className="leading-tight">
-                <div className="text-xs font-semibold text-foreground">Reply in 2h</div>
-                <div className="text-[11px] text-muted-foreground">classified: interested</div>
-              </div>
             </div>
           </div>
         </section>
