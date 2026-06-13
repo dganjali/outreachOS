@@ -102,6 +102,94 @@ export interface ProfileAssetDoc extends BaseDoc {
   embedding?: number[];
 }
 
+// ---------------------------------------------------------------------------
+// Personalization layer — the persona/taste model. Layered design:
+//   • Person-level identity + shared proof live on ProfileDoc + ContextFacts
+//     (scope:'person'), entered once and reused across personas.
+//   • Each PersonaDoc is a reusable, use-case-scoped *voice* (selected/created
+//     at mission creation) carrying its own StyleProfile + offer/audience and
+//     its own ContextFacts (scope:'persona') + StyleExemplars.
+// The StyleProfile is the structured taste model: the engine READS it at
+// generation; the learning loop WRITES it (confidence-weighted). This is what
+// makes personalization "memory", not a one-shot prompt blob.
+// ---------------------------------------------------------------------------
+
+export interface StyleDimension {
+  // Normalized scalar (most dims 0..1; sentenceLenTarget is a word count).
+  value: number;
+  // 0..1 — how trustworthy this value is. The learning-loop merge refuses to
+  // overwrite a high-confidence dimension with a single noisy signal.
+  confidence: number;
+  // Where the value came from: 'onboarding' | 'edit-delta' | 'chat-instruction'
+  // | 'reply-win' | 'manual' | 'default'.
+  source: string;
+}
+
+export interface StyleProfile {
+  // Structured voice/taste dimensions: formality, warmth, sentenceLenTarget,
+  // hedging, emoji, jargon, directness, ctaStyle, ...
+  dimensions: Record<string, StyleDimension>;
+  // Extracted hard do/don'ts (e.g. "first paragraph ≤ 2 sentences").
+  rules: Array<{ rule: string; source: string; confidence: number }>;
+  // The user's PERSONAL slop list — hard constraints + critique input.
+  bannedPhrases: string[];
+  // Short prose summary regenerated from the above, injected into the prompt.
+  voiceSummary: string;
+}
+
+/** A fresh, empty StyleProfile (persona v1 before any calibration). */
+export function emptyStyleProfile(): StyleProfile {
+  return { dimensions: {}, rules: [], bannedPhrases: [], voiceSummary: '' };
+}
+
+export interface PersonaDoc extends BaseDoc {
+  name: string;                          // "Sponsorship voice", "Recruiting voice"
+  mode: MissionDoc['mode'] | null;
+  offer: string | null;                  // per-persona defaults (prefilled from mission)
+  audience: string | null;
+  styleProfile: StyleProfile;            // embedded current version
+  styleProfileVersion: number;           // monotonically increments on each calibration
+  onboardingCompletedAt: Date | null;
+  archivedAt: Date | null;
+}
+
+// Immutable per-calibration snapshots — audit + rollback for a persona's voice.
+export interface PersonaVersionDoc extends BaseDoc {
+  personaId: string;
+  snapshot: Record<string, unknown>;     // a StyleProfile at a point in time
+  source: 'onboarding' | 'edit-delta' | 'chat-instruction' | 'reply-win' | 'manual' | 'restore';
+  version: number;
+}
+
+// Atomic, citable substance = the "allowed facts" universe the grounding
+// contract draws from. The generator may only assert facts that appear here.
+export interface ContextFactDoc extends BaseDoc {
+  scope: 'person' | 'persona';           // person-level facts reused across personas
+  personaId: string | null;              // set when scope==='persona'
+  type: 'proof' | 'metric' | 'offer' | 'audience' | 'credential' | 'constraint';
+  claim: string;                         // atomic, self-contained
+  date: string | null;                   // recency/decay
+  evidenceUrl: string | null;
+  provenance: 'resume' | 'dictation' | 'answer' | 'manual' | 'enrich';
+  confidence: number;
+  embedding?: number[];                  // context_fact_vector_idx (relevance retrieval)
+  // Generalizes coach.ts per-field stats to per-fact: which facts get replies.
+  replyStats?: { sent: number; replied: number };
+}
+
+// Gold-standard emails as first-class objects (replaces the exampleEmails blob).
+// Carry the persona's voice for few-shot retrieval; works at cold-start because
+// they're user-provided, then earned winners accrue over time.
+export interface StyleExemplarDoc extends BaseDoc {
+  personaId: string;
+  subject: string | null;
+  body: string;
+  mode: MissionDoc['mode'] | null;
+  source: 'user-provided' | 'stage4-confirmed' | 'earned-winner';
+  outcome: 'replied' | 'unknown';
+  embedding?: number[];                  // style_exemplar_vector_idx (filter userId, personaId)
+}
+
 export interface MissionDoc extends BaseDoc {
   name: string;
   goal: string;
@@ -110,6 +198,9 @@ export interface MissionDoc extends BaseDoc {
   offerDetails: string | null;
   status: string;
   archivedAt: Date | null;
+  // The persona (reusable voice) this mission drafts as. Required for new
+  // missions; null on pre-personalization missions until backfilled.
+  personaId: string | null;
 }
 
 export interface TargetDoc extends BaseDoc {
@@ -366,6 +457,19 @@ export const INDEX_SPEC: Record<string, Array<{ keys: Record<string, 1 | -1>; op
     // TTL: drop finished run records after 30 days.
     { keys: { createdAt: 1 }, options: { expireAfterSeconds: 60 * 60 * 24 * 30 } },
   ],
+  personas: [
+    { keys: { userId: 1, createdAt: -1 } },
+    { keys: { userId: 1, archivedAt: 1 } },
+  ],
+  persona_versions: [
+    { keys: { userId: 1, personaId: 1, version: -1 } },
+  ],
+  context_facts: [
+    { keys: { userId: 1, scope: 1, personaId: 1 } },
+  ],
+  style_exemplars: [
+    { keys: { userId: 1, personaId: 1, createdAt: -1 } },
+  ],
 };
 
 /**
@@ -404,6 +508,34 @@ export const VECTOR_INDEX_SPEC = [
         { type: 'vector', path: 'embedding', numDimensions: 1024, similarity: 'cosine' },
         { type: 'filter', path: 'userId' },
         { type: 'filter', path: 'kind' },
+      ],
+    },
+  },
+  {
+    // Gold exemplar retrieval — the engine pulls the persona's most relevant
+    // past emails as few-shot voice anchors. Cold-start works because exemplars
+    // are user-provided at onboarding (not dependent on earned replies).
+    collection: 'style_exemplars',
+    name: 'style_exemplar_vector_idx',
+    definition: {
+      fields: [
+        { type: 'vector', path: 'embedding', numDimensions: 1024, similarity: 'cosine' },
+        { type: 'filter', path: 'userId' },
+        { type: 'filter', path: 'personaId' },
+      ],
+    },
+  },
+  {
+    // Relevance retrieval over the context bank — select the facts worth citing
+    // for a given target instead of dumping the whole bank into the prompt.
+    collection: 'context_facts',
+    name: 'context_fact_vector_idx',
+    definition: {
+      fields: [
+        { type: 'vector', path: 'embedding', numDimensions: 1024, similarity: 'cosine' },
+        { type: 'filter', path: 'userId' },
+        { type: 'filter', path: 'scope' },
+        { type: 'filter', path: 'personaId' },
       ],
     },
   },

@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { forUser } from '../_lib/db';
-import { createMessageWithRetry, MODEL, extractJson } from '../_lib/anthropic';
+import { createMessageWithRetry, MODEL, extractJson } from '../_lib/llm';
 import { REPLY_ROUTER_SYSTEM } from '../_lib/prompts';
 import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
 import { cancelQueuedForContact, addSuppression, scheduleRetouch } from '../_lib/sequencing';

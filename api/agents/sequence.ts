@@ -8,7 +8,7 @@
 import type { Request, Response } from 'express';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { adminDb, forUser, newId, type InsertDoc } from '../_lib/db';
-import { createMessageWithRetry, MODEL, extractJson } from '../_lib/anthropic';
+import { createMessageWithRetry, MODEL, extractJson } from '../_lib/llm';
 import { sequenceSystem, type MissionMode } from '../_lib/prompts';
 import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
 import { embedOne } from '../_lib/embeddings';

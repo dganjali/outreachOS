@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { forUser } from '../_lib/db';
-import { createMessageWithRetry, MODEL, WEB_SEARCH_TOOL, extractJson } from '../_lib/anthropic';
+import { createMessageWithRetry, MODEL, WEB_SEARCH_TOOL, extractJson } from '../_lib/llm';
 import { PROFILE_ENRICH_SYSTEM } from '../_lib/prompts';
 import { startRun, completeRun, failRun } from '../_lib/runs';
 import { apolloEnabled, matchPerson, fullName, type ApolloPerson } from '../_lib/apollo';

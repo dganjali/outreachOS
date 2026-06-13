@@ -6,7 +6,7 @@ import pdfParse from 'pdf-parse/lib/pdf-parse.js';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { forUser } from '../_lib/db';
 import { downloadObject } from '../_lib/storage';
-import { MODEL, createMessageWithRetry, extractJson } from '../_lib/anthropic';
+import { MODEL, createMessageWithRetry, extractJson } from '../_lib/llm';
 import { PARSE_RESUME_SYSTEM } from '../_lib/prompts';
 import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
 import type { ProfileAssetDoc } from '../../shared/schemas';

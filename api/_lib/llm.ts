@@ -1,13 +1,17 @@
 // LLM adapter — Gemini on Vertex AI.
 //
-// NOTE: file name is historical. It used to wrap the Anthropic SDK; it now
-// wraps Google Gemini via Vertex AI. The public surface is intentionally
-// UNCHANGED (createMessageWithRetry / extractJson / WEB_SEARCH_TOOL / MODEL)
-// so the 8 agent handlers and the pipeline orchestrator did not have to change.
+// (Formerly api/_lib/anthropic.ts — the name was historical and misleading; the
+// app runs Gemini, not Anthropic. Renamed to api/_lib/llm.ts.)
 //
 // Auth: Application Default Credentials. On Cloud Run this is the runtime
 // service account (needs roles/aiplatform.user). Locally, `gcloud auth
 // application-default login` or GOOGLE_APPLICATION_CREDENTIALS.
+//
+// Two model tiers (env.ts): MODEL() = gemini-2.5-flash (cheap — research,
+// judging, extraction); MODEL_PRO() = gemini-2.5-pro (quality-critical draft
+// generation). Structured output is opt-in via `responseJsonSchema` — when set,
+// Gemini is constrained to emit JSON matching the schema (no fences, no prose),
+// so extractJson parses cleanly and the parse_failed path disappears.
 
 import { GoogleGenAI } from '@google/genai';
 import { env } from './env';
@@ -24,13 +28,17 @@ function client(): GoogleGenAI {
   return _client;
 }
 
+// Cheap default tier (flash) and quality tier (pro). Callers choose per-call:
+// the draft generator uses MODEL_PRO(); judges/extractors/research use MODEL().
 export const MODEL = () => env.GEMINI_MODEL();
+export const MODEL_PRO = () => env.GEMINI_PRO_MODEL();
 
 // Google Search grounding — Gemini's equivalent of Anthropic's web_search tool.
-// Agents spread this straight into `tools: [WEB_SEARCH_TOOL]`.
+// Agents spread this straight into `tools: [WEB_SEARCH_TOOL]`. Mutually
+// exclusive with responseJsonSchema (structured output can't run search).
 export const WEB_SEARCH_TOOL = { googleSearch: {} } as const;
 
-// ---- Param + result shapes (mirror the old Anthropic call sites) ----
+// ---- Param + result shapes ----
 
 export interface CreateMessageParams {
   model: string;
@@ -38,6 +46,17 @@ export interface CreateMessageParams {
   system?: string;
   tools?: Array<Record<string, unknown>>;
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  // When set, Gemini is constrained to emit JSON matching this (flat) JSON
+  // Schema. Do NOT combine with `tools` (web search). Recursive schemas are not
+  // supported — keep them flat.
+  responseJsonSchema?: unknown;
+  // Override the default sampling temperature (0.4). Generation wants more
+  // variance (~0.7); judges/extractors want determinism (~0.2).
+  temperature?: number;
+  // Vertex CachedContent resource name. When set, the cached prefix (static
+  // system prompt + exemplars) is reused instead of re-sent. Created via a
+  // helper wired in Phase 3; this passthrough lets callers opt in early.
+  cachedContent?: string;
 }
 
 interface Citation {
@@ -86,10 +105,17 @@ async function createMessage(params: CreateMessageParams): Promise<LlmMessage> {
   const isFlash = /flash/i.test(model);
   const config: Record<string, unknown> = {
     maxOutputTokens: Math.max(params.max_tokens ?? 2048, 1024),
-    temperature: 0.4,
+    temperature: params.temperature ?? 0.4,
   };
   if (params.system) config.systemInstruction = params.system;
-  if (params.tools && params.tools.length) config.tools = params.tools;
+  // Structured output and web search are mutually exclusive; prefer structure.
+  if (params.responseJsonSchema) {
+    config.responseMimeType = 'application/json';
+    config.responseJsonSchema = params.responseJsonSchema;
+  } else if (params.tools && params.tools.length) {
+    config.tools = params.tools;
+  }
+  if (params.cachedContent) config.cachedContent = params.cachedContent;
   if (isThinkingModel(model)) {
     config.thinkingConfig = { thinkingBudget: isFlash ? 0 : 1024 };
     if (!isFlash) config.maxOutputTokens = Math.max(params.max_tokens ?? 2048, 4096) + 1024;
@@ -124,7 +150,7 @@ function errStatus(err: unknown): number | undefined {
   return m ? Number(m[1]) : undefined;
 }
 
-// ---- JSON extraction (unchanged public behavior) ----
+// ---- JSON extraction ----
 
 export interface JsonExtraction<T> {
   ok: boolean;
@@ -176,6 +202,19 @@ export function extractJson<T>(message: LlmMessage): JsonExtraction<T> {
     raw: textOut,
     citations: dedupeCitations(citations),
   };
+}
+
+/**
+ * Structured-output convenience: run a call with a JSON Schema constraint and
+ * return the parsed, typed result. Preferred over raw createMessageWithRetry +
+ * extractJson for all new agents (draft, critique, extract-style, etc.) — the
+ * schema both shapes the output and removes the brittle prose-scraping path.
+ */
+export async function generateJson<T>(
+  params: Omit<CreateMessageParams, 'responseJsonSchema'> & { responseJsonSchema: unknown }
+): Promise<JsonExtraction<T>> {
+  const message = await createMessageWithRetry(params);
+  return extractJson<T>(message);
 }
 
 function dedupeCitations(items: Citation[]): Citation[] {

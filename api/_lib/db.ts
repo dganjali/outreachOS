@@ -52,6 +52,11 @@ export const COL = {
   userIntegrations: 'user_integrations',
   suppressions: 'suppressions',
   pipelineRuns: 'pipeline_runs',
+  // Personalization layer (the persona/taste model). See shared/schemas.ts.
+  personas: 'personas',
+  personaVersions: 'persona_versions',
+  contextFacts: 'context_facts',
+  styleExemplars: 'style_exemplars',
 } as const;
 
 export type CollectionName = (typeof COL)[keyof typeof COL];
@@ -81,6 +86,10 @@ const OWNERSHIP: Record<CollectionName, OwnershipMode> = {
   user_integrations: 'userId',
   suppressions: 'userId',
   pipeline_runs: 'userId',
+  personas: 'userId',
+  persona_versions: 'userId',
+  context_facts: 'userId',
+  style_exemplars: 'userId',
 };
 
 // ---------------------------------------------------------------------------
