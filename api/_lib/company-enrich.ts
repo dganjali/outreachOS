@@ -2,12 +2,6 @@
 
 import { createMessageWithRetry, MODEL, WEB_SEARCH_TOOL, extractJson } from './anthropic';
 import { normalizeDomain } from './sender-context';
-import {
-  scrapeCompanyEmails,
-  matchEmailForPerson,
-  emailFromPattern,
-  type ScrapeResult,
-} from './web-scrape';
 
 interface DomainLookupRow {
   company_name: string;
@@ -64,44 +58,4 @@ export async function resolveCompanyDomain(
 ): Promise<string | null> {
   const map = await resolveCompanyDomains([{ name: companyName, hint }]);
   return map.get(companyName.trim()) ?? [...map.values()][0] ?? null;
-}
-
-export interface ContactEmailFields {
-  email: string | null;
-  emailStatus: 'verified' | 'likely' | 'guessed' | 'none';
-  likelyEmailPattern: string | null;
-}
-
-export function enrichContactEmail(
-  name: string,
-  existing: ContactEmailFields,
-  domain: string,
-  scraped: ScrapeResult
-): ContactEmailFields {
-  if (existing.email) return existing;
-
-  const match = matchEmailForPerson(name, scraped.emails, domain);
-  if (match.email) {
-    const pattern = scraped.pattern ? `${scraped.pattern}@${domain}` : existing.likelyEmailPattern;
-    return {
-      email: match.email,
-      emailStatus: match.status,
-      likelyEmailPattern: pattern,
-    };
-  }
-
-  const patternStr = scraped.pattern
-    ? `${scraped.pattern}@${domain}`
-    : existing.likelyEmailPattern ?? `first.last@${domain}`;
-
-  const guessed = emailFromPattern(scraped.pattern ?? 'first.last', name, domain);
-  if (guessed) {
-    return { email: guessed, emailStatus: 'guessed', likelyEmailPattern: patternStr };
-  }
-
-  return {
-    email: null,
-    emailStatus: 'none',
-    likelyEmailPattern: patternStr,
-  };
 }

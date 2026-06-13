@@ -7,7 +7,7 @@ Agent-powered cold outreach. Runs on **MongoDB Atlas + Firebase Auth + Google Cl
 End-to-end agent pipeline per mission:
 
 1. **Targeting Agent** — pulls high-fit organizations. With `APOLLO_API_KEY`, derives Apollo filters and re-ranks with web_search "why now" signals. Without Apollo, pure web_search.
-2. **Contact Graph Agent** — 2–4 decision-makers per target with verified emails (Apollo) or likely-email patterns (web_search fallback).
+2. **Contact Graph Agent** — 2–4 decision-makers per target. Discovery via Apollo, **Serper** (LinkedIn-scoped search, with `SERPER_API_KEY`), or web_search fallback. Emails are resolved (not guessed) via **emailfinder.dev** SMTP verification (with `EMAILFINDER_API_KEY`) or a real address scraped from the company site; unresolved contacts keep a display-only likely-email pattern, never a shipped guess.
 3. **Evidence Agent** — 4–6 sourced bullets per target. Embedded with Voyage AI for downstream vector retrieval.
 4. **Sequence Agent** — mode-aware initial email + 2 follow-ups, anchored in evidence. Retrieves your own past sequences-that-got-replies via Atlas Vector Search and feeds them in as exemplars.
 5. **Profile Enrichment Agent** — reads sender LinkedIn URL → auto-fills bio, proof points, metrics, tone.
@@ -100,6 +100,12 @@ See `.env.example`. Headline secrets:
 - `VOYAGE_API_KEY`
 - `GCP_PROJECT_ID` + `GCS_BUCKET` + `CLOUD_TASKS_*`
 - `ANTHROPIC_API_KEY`, `ENCRYPTION_KEY`, `CRON_SECRET`, `GOOGLE_CLIENT_ID/SECRET`
+
+Optional contact-data providers (each feature is off unless its key is set):
+
+- `APOLLO_API_KEY` — Apollo.io discovery + verified emails
+- `SERPER_API_KEY` — Serper SERP API for person discovery (deterministic, replaces the flaky LLM web_search)
+- `EMAILFINDER_API_KEY` — emailfinder.dev SMTP-verified email resolution
 
 In prod these all come from Secret Manager (see `cloudbuild.yaml`).
 
