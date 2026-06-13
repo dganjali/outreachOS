@@ -11,6 +11,8 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from '@/components/ui/accordion';
+import { cn } from '@/lib/utils';
+import { PLANS, PLAN_ORDER } from '../../shared/plans';
 
 const HOW = [
   { step: '01', title: 'Tell us the mission', body: 'Pick a mode, describe what you are sending, and who you want to reach. Add your LinkedIn and we auto-fill your bio, proof points, and tone.' },
@@ -98,6 +100,7 @@ export function Landing() {
             <a href="#features" className="transition-colors hover:text-foreground">Features</a>
             <a href="#how" className="transition-colors hover:text-foreground">How it works</a>
             <a href="#modes" className="transition-colors hover:text-foreground">Modes</a>
+            <a href="#pricing" className="transition-colors hover:text-foreground">Pricing</a>
             <a href="#faq" className="transition-colors hover:text-foreground">FAQ</a>
           </nav>
           <div className="flex items-center gap-2">
@@ -252,6 +255,71 @@ export function Landing() {
           </div>
         </section>
 
+        {/* Pricing */}
+        <section id="pricing" className="mx-auto max-w-6xl px-5 py-24 md:px-8">
+          <SectionHead eyebrow="Pricing" title="Start free. Scale when it works." />
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+            {PLAN_ORDER.map((id) => {
+              const plan = PLANS[id];
+              const featured = id === 'pro';
+              return (
+                <div
+                  key={id}
+                  className={cn(
+                    'relative flex flex-col rounded-2xl border p-6',
+                    featured
+                      ? 'border-primary/60 bg-primary/[0.06] shadow-[0_0_70px_-25px_hsl(var(--primary)/0.6)]'
+                      : 'border-border bg-card'
+                  )}
+                >
+                  {featured && (
+                    <span className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-primary px-3 py-0.5 text-[11px] font-semibold text-primary-foreground">
+                      Most popular
+                    </span>
+                  )}
+                  <h3 className="text-base font-semibold text-foreground">{plan.name}</h3>
+                  <div className="mt-3 flex items-baseline gap-1">
+                    {plan.priceMonthly === 0 ? (
+                      <span className="font-display text-4xl font-bold text-wash">Free</span>
+                    ) : (
+                      <>
+                        <span className="font-display text-4xl font-bold text-wash">${plan.priceMonthly}</span>
+                        <span className="text-sm text-muted-foreground">/mo</span>
+                      </>
+                    )}
+                  </div>
+                  <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{plan.blurb}</p>
+                  <ul className="mb-8 mt-6 flex flex-col gap-3">
+                    {plan.features.map((feat) => (
+                      <li key={feat} className="flex items-start gap-2.5 text-sm text-foreground/90">
+                        <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
+                          <Check className="h-2.5 w-2.5" />
+                        </span>
+                        {feat}
+                      </li>
+                    ))}
+                  </ul>
+                  <Button
+                    asChild
+                    size="sm"
+                    variant={featured ? 'default' : 'outline'}
+                    className={cn(
+                      'mt-auto w-full font-semibold',
+                      featured ? 'btn-glow border-0 text-primary-foreground' : 'border-border'
+                    )}
+                  >
+                    <Link to="/sign-up">{plan.priceMonthly === 0 ? 'Start free' : `Choose ${plan.name}`}</Link>
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+          <p className="mx-auto mt-8 max-w-xl text-center text-sm text-muted-foreground/80">
+            Every plan runs the full agent pipeline. Pick a plan after you sign up — upgrade, downgrade, or cancel
+            anytime from Settings.
+          </p>
+        </section>
+
         {/* FAQ */}
         <section id="faq" className="mx-auto max-w-3xl px-5 py-24 md:px-8">
           <SectionHead eyebrow="FAQ" title="Questions, answered." />
@@ -302,6 +370,7 @@ export function Landing() {
               <a href="#features" className="text-muted-foreground transition-colors hover:text-foreground">Features</a>
               <a href="#how" className="text-muted-foreground transition-colors hover:text-foreground">How it works</a>
               <a href="#modes" className="text-muted-foreground transition-colors hover:text-foreground">Modes</a>
+              <a href="#pricing" className="text-muted-foreground transition-colors hover:text-foreground">Pricing</a>
               <a href="#faq" className="text-muted-foreground transition-colors hover:text-foreground">FAQ</a>
             </div>
             <div className="flex flex-col gap-3 text-sm">
