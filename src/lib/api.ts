@@ -13,6 +13,7 @@ import type {
   ReplyClassification,
   ParsedResumeFields,
 } from '../types';
+import type { PlanId, PlanStatus } from '../../shared/plans';
 
 // Mongo stores docs in camelCase + `_id`; frontend types use snake_case + `id`.
 // Convert response payloads in place so agent endpoints look identical to data
@@ -181,6 +182,31 @@ export const pipeline = {
     ),
   cancel: (run_id: string) =>
     authedFetch<{ ok: boolean }>('/api/agents/pipeline/cancel', { run_id }),
+};
+
+// Billing / monetization. Note: authedFetch() snake-cases response keys, so the
+// camelCase server payload arrives here as snake_case (values are untouched).
+export interface BillingMe {
+  plan: PlanId; // effective plan (free if canceled)
+  purchased_plan: PlanId;
+  plan_status: PlanStatus | null;
+  plan_renews_at: string | null;
+  has_billing_account: boolean;
+  limits: {
+    missions_per_month: number;
+    agent_runs_per_day: number;
+    agent_runs_per_minute: number;
+  };
+  usage: {
+    missions_this_month: number;
+    runs_today: number;
+  };
+}
+
+export const billing = {
+  me: () => authedFetch<BillingMe>('/api/billing/me', null, 'GET'),
+  checkout: (plan: PlanId) => authedFetch<{ url: string }>('/api/billing/checkout', { plan }),
+  portal: () => authedFetch<{ url: string }>('/api/billing/portal', {}),
 };
 
 export type { AgentRun };

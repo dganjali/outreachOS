@@ -28,6 +28,10 @@ import cronWeeklyDigest from '../api/cron/weekly-digest';
 import dataRouter from '../api/data/router';
 
 import { globalRateLimit, authRateLimit } from '../api/_lib/rate-limit';
+import billingCheckout from '../api/billing/checkout';
+import billingPortal from '../api/billing/portal';
+import billingWebhook from '../api/billing/webhook';
+import billingMe from '../api/billing/me';
 
 const app = express();
 
@@ -36,6 +40,11 @@ const app = express();
 // the real caller rather than the proxy hop.
 app.set('trust proxy', true);
 app.disable('x-powered-by');
+
+// Stripe webhook MUST receive the raw body for signature verification, so it is
+// registered with express.raw BEFORE the global JSON parser below (and before
+// the global rate limiter — Stripe retries from a small set of IPs).
+app.post('/api/billing/webhook', express.raw({ type: 'application/json' }), wrap(billingWebhook));
 
 // Body parsing. File uploads go straight to GCS via signed URLs, so every JSON
 // body here is small (ids + short text). Cap at 256kb to reject oversized
@@ -84,6 +93,11 @@ app.use((_req: Request, res: Response, next: NextFunction) => {
 app.use(globalRateLimit);
 
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
+
+// billing
+app.post('/api/billing/checkout', wrap(billingCheckout));
+app.post('/api/billing/portal', wrap(billingPortal));
+app.get('/api/billing/me', wrap(billingMe));
 
 // agents
 app.post('/api/agents/target', wrap(agentTarget));

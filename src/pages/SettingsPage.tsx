@@ -6,6 +6,7 @@ import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { useConfirm } from '../context/ConfirmContext';
 import { gmail } from '../lib/api';
+import { PlanBilling } from '../components/PlanBilling';
 import type { Integration } from '../types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -206,6 +207,13 @@ export function SettingsPage() {
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Settings</h1>
         <p className="mt-1 text-sm text-muted-foreground">Account, integrations, and security.</p>
       </header>
+
+      <SettingsSection
+        title="Plan & billing"
+        hint="Your plan sets how many missions you can launch each month and how many agent runs you get per day. Upgrade any time — changes take effect immediately."
+      >
+        <PlanBilling />
+      </SettingsSection>
 
       <SettingsSection
         title="Integrations"

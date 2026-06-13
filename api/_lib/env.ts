@@ -65,4 +65,17 @@ export const env = {
   // finder hit on a catch-all/unknown domain is downgraded to 'likely' and
   // 'invalid' addresses are discarded instead of shipped as 'verified'.
   MILLIONVERIFIER_API_KEY: () => process.env.MILLIONVERIFIER_API_KEY || null,
+
+  // Stripe (monetization). Optional so the service boots without billing
+  // configured; the billing endpoints fail with a clear error if unset.
+  STRIPE_SECRET_KEY: () => optional('STRIPE_SECRET_KEY'),
+  STRIPE_WEBHOOK_SECRET: () => optional('STRIPE_WEBHOOK_SECRET'),
+  // Stripe Price ids (recurring monthly) for each paid plan.
+  STRIPE_PRICE_STARTER: () => optional('STRIPE_PRICE_STARTER'),
+  STRIPE_PRICE_PRO: () => optional('STRIPE_PRICE_PRO'),
+  STRIPE_PRICE_SCALE: () => optional('STRIPE_PRICE_SCALE'),
+  // Public app origin used to build Checkout success/cancel + portal return
+  // URLs. Defaults to the custom domain (must be connected to Firebase Hosting
+  // with the /api/** -> Cloud Run rewrite, same as the Stripe webhook).
+  APP_URL: () => optional('APP_URL', 'https://outreach-os.ca'),
 };

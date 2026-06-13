@@ -13,6 +13,7 @@ export type {
   EmailSequence,
 } from '../shared/types';
 import type { MissionMode } from '../shared/types';
+import type { PlanId, PlanStatus } from '../shared/plans';
 
 export type OnboardingStep = 1 | 2 | 3 | 4;
 
@@ -37,6 +38,12 @@ export interface Profile {
   linkedin_source: 'apollo' | 'web_search' | null;
   onboarding_step: number;
   onboarding_completed_at: string | null;
+  // Billing (Stripe). Absent == free tier.
+  plan?: PlanId;
+  plan_status?: PlanStatus;
+  stripe_customer_id?: string | null;
+  stripe_subscription_id?: string | null;
+  plan_renews_at?: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -53,9 +53,18 @@ export interface ProfileDoc extends BaseDoc {
   onboardingCompletedAt: Date | null;
   // When true, the follow-up sweeper skips this user's scheduled touches.
   pauseFollowups?: boolean;
-  // Billing plan (absent == free tier). See shared/plans.ts.
+
+  // --- Billing / monetization (Stripe). All optional; absence == free tier. ---
+  // The plan the user purchased. Effective limits also depend on planStatus —
+  // see resolvePlan() in shared/plans.ts. Defaults to 'free' when unset.
   plan?: PlanId | null;
   planStatus?: PlanStatus | null;
+  // Stripe identifiers. customerId is created on first checkout and reused.
+  stripeCustomerId?: string | null;
+  stripeSubscriptionId?: string | null;
+  // End of the current paid period (subscription renews/expires here).
+  planRenewsAt?: Date | null;
+  planUpdatedAt?: Date | null;
   // Monotonic monthly mission-launch counter, the source of truth for the
   // monthly cap. `period` is the UTC 'YYYY-MM' the count applies to; a new month
   // lazily resets `used` to 0. NEVER decremented on mission delete — counting
