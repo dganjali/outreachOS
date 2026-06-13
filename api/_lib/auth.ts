@@ -1,6 +1,7 @@
 // Firebase Auth JWT verification.
 // Replaces the old Supabase `admin.auth.getUser(token)` flow.
 
+import { timingSafeEqual } from 'node:crypto';
 import type { Request, Response } from 'express';
 import { initializeApp, cert, getApps, type App } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
@@ -73,10 +74,19 @@ export function requireCronSecret(req: Request, res: Response): boolean {
     res.status(500).json({ error: 'cron_secret_not_configured' });
     return false;
   }
-  const got = req.headers.authorization?.replace(/^Bearer\s+/, '');
-  if (got !== expected) {
+  const got = req.headers.authorization?.replace(/^Bearer\s+/, '') ?? '';
+  if (!constantTimeEqual(got, expected)) {
     res.status(401).json({ error: 'invalid_cron_secret' });
     return false;
   }
   return true;
+}
+
+/** Length-safe, constant-time string comparison — avoids leaking the secret via
+ *  early-exit timing on `!==`. Returns false on any length mismatch. */
+function constantTimeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a, 'utf8');
+  const bb = Buffer.from(b, 'utf8');
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
 }
