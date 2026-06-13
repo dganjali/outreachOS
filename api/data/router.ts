@@ -8,6 +8,7 @@ import type { Request, Response, NextFunction } from 'express';
 import { requireUser } from '../_lib/auth';
 import { forUser, newId, COL, type CollectionName } from '../_lib/db';
 import { signedUploadUrl, signedDownloadUrl, deleteObject } from '../_lib/storage';
+import { assertSafeWriteBody, UnsafePayloadError } from '../_lib/sanitize';
 
 // Module augmentation so `req.uid` is typed (set by the middleware below).
 declare module 'express-serve-static-core' {
@@ -157,6 +158,12 @@ router.post('/:collection', async (req, res) => {
   if (!ALLOWED.has(collection)) return res.status(404).json({ error: 'unknown_collection' });
   const uid = uidOf(req);
   const body = req.body ?? {};
+  try {
+    assertSafeWriteBody(body);
+  } catch (err) {
+    if (err instanceof UnsafePayloadError) return res.status(400).json({ error: 'invalid_payload', detail: err.message });
+    throw err;
+  }
   const doc = { _id: newId(), ...stripOwnership(body) };
   const created = await forUser(uid).collection(collection as CollectionName).insertOne(doc as any);
   res.status(201).json({ data: created });
@@ -166,7 +173,14 @@ router.patch('/:collection/:id', async (req, res) => {
   const collection = req.params.collection;
   if (!ALLOWED.has(collection)) return res.status(404).json({ error: 'unknown_collection' });
   const uid = uidOf(req);
-  const n = await forUser(uid).collection(collection as CollectionName).updateById(req.params.id, stripOwnership(req.body ?? {}));
+  const body = req.body ?? {};
+  try {
+    assertSafeWriteBody(body);
+  } catch (err) {
+    if (err instanceof UnsafePayloadError) return res.status(400).json({ error: 'invalid_payload', detail: err.message });
+    throw err;
+  }
+  const n = await forUser(uid).collection(collection as CollectionName).updateById(req.params.id, stripOwnership(body));
   if (n === 0) return res.status(404).json({ error: 'not_found' });
   res.json({ ok: true, data: { _id: req.params.id } });
 });

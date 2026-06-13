@@ -17,6 +17,8 @@ dist-ssr
 .env.*
 /env
 /env.*
+# ...but keep the committed, secret-free template.
+!.env.example
 
 # Secrets / service-account keys — never commit these
 /secrets/
