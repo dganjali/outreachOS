@@ -116,6 +116,9 @@ export interface ContactDoc extends BaseDoc {
   role: string;
   email: string | null;
   emailStatus: 'verified' | 'likely' | 'guessed' | 'none';
+  // Which rung of the resolution cascade produced the email (analytics only).
+  // Optional — pre-existing docs read as undefined; no migration needed.
+  emailResolver?: 'apollo' | 'email_finder' | 'scrape' | 'verifier' | 'none' | null;
   linkedinUrl: string | null;
   likelyEmailPattern: string | null;
   confidence: number | null;

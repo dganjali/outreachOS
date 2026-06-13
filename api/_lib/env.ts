@@ -51,4 +51,18 @@ export const env = {
 
   // Apollo (optional)
   APOLLO_API_KEY: () => process.env.APOLLO_API_KEY || null,
+
+  // Serper (optional) — Google SERP API for person discovery. When set, the
+  // contacts agent uses deterministic search results instead of the LLM's
+  // built-in web_search grounding.
+  SERPER_API_KEY: () => process.env.SERPER_API_KEY || null,
+
+  // emailfinder.dev (optional) — SMTP-verified email resolution. When set, the
+  // contacts agent resolves a real, deliverable email instead of guessing.
+  EMAILFINDER_API_KEY: () => process.env.EMAILFINDER_API_KEY || null,
+
+  // MillionVerifier (optional) — catch-all gate after resolution. When set, a
+  // finder hit on a catch-all/unknown domain is downgraded to 'likely' and
+  // 'invalid' addresses are discarded instead of shipped as 'verified'.
+  MILLIONVERIFIER_API_KEY: () => process.env.MILLIONVERIFIER_API_KEY || null,
 };

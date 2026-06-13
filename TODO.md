@@ -19,7 +19,7 @@ The one list. Do it top to bottom and you go from "branch on disk" to "an app yo
 > Goal: the real app reachable at a URL. ~½ day of cloud setup.
 
 - [ ] **Provision the cloud** (one-time): GCP project + enable APIs (run, cloudbuild, artifactregistry, secretmanager, cloudtasks, cloudscheduler, storage, identitytoolkit, firebase) → Firebase Auth (Email/Password + Google) → MongoDB Atlas (M0 to start; **M10 ~$57/mo when you need vector search to actually work**) → Voyage AI key.
-- [ ] **Secrets → Secret Manager:** `ANTHROPIC_API_KEY`, `MONGODB_URI`, `VOYAGE_API_KEY`, `ENCRYPTION_KEY` (`openssl rand -base64 32`), `CRON_SECRET` (`openssl rand -hex 32`), `GOOGLE_CLIENT_ID/SECRET`, `FIREBASE_SERVICE_ACCOUNT_JSON`, optional `APOLLO_API_KEY`.
+- [ ] **Secrets → Secret Manager:** `ANTHROPIC_API_KEY`, `MONGODB_URI`, `VOYAGE_API_KEY`, `ENCRYPTION_KEY` (`openssl rand -base64 32`), `CRON_SECRET` (`openssl rand -hex 32`), `GOOGLE_CLIENT_ID/SECRET`, `FIREBASE_SERVICE_ACCOUNT_JSON`, optional `APOLLO_API_KEY`, `SERPER_API_KEY`, `EMAILFINDER_API_KEY`, `MILLIONVERIFIER_API_KEY`.
 - [ ] **Init the DB:** `MONGODB_URI=… npm run mongo:init` (creates collections, indexes, vector indexes).
 - [ ] **GCS bucket** + **Cloud Tasks queue** (`outreach-jobs`) + **cloud-tasks-invoker** service account.
 - [ ] **Deploy Cloud Run:** `gcloud builds submit --config=cloudbuild.yaml`, then grab the service URL.
@@ -46,6 +46,11 @@ The one list. Do it top to bottom and you go from "branch on disk" to "an app yo
 - [ ] **Surface the rate-limit budget.** A "full pipeline" burns ~16 of the 50/day cap (`api/_lib/runs.ts`) → users get ~3 runs/day with no warning. Show remaining budget in the UI; raise/segment the limit by plan.
 - [ ] **Error monitoring + structured logs** (Sentry or Cloud Logging). Right now it's `console.error` — you'll be blind the first time something breaks in prod.
 - [ ] **One test on `forUser()` ownership.** The entire multi-tenant security model rests on it and has zero coverage.
+- [x] **Contact-pipeline follow-ups** (Serper + emailfinder.dev landed this branch — discovery + SMTP-verified resolution, no more shipped email guesses):
+  - [x] Add a dedicated verifier gate (MillionVerifier, `MILLIONVERIFIER_API_KEY`) after resolution, downgrade catch-all/unknown to `emailStatus: 'likely'`, discard `invalid`. (`api/_lib/email-verifier.ts` + cascade in `email-resolver.ts`.)
+  - [x] Migrate domain resolution (`resolveCompanyDomain`) onto Serper, with LLM web_search as fallback when Serper is off/empty. (`api/_lib/company-enrich.ts`.)
+  - [x] `emailResolver` provenance field on `ContactDoc` (which rung resolved each email).
+  - [x] Loop-for-another-contact: discovery hands a ranked pool; resolver keeps deliverable rows until 3 kept or 8 attempts, falls back to top-ranked display-only rows. (`api/agents/contacts.ts` `resolvePoolWithBudget`.)
 
 ---
 

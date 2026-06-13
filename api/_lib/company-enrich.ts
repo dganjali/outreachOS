@@ -1,17 +1,47 @@
-// Resolve missing company domains (Gemini + web search) and scrape public emails.
+// Resolve missing company domains and scrape public emails. Prefers Serper (a
+// cheap, deterministic Google SERP lookup) and falls back to the LLM web_search
+// path when Serper is off or can't find a non-aggregator domain.
 
 import { createMessageWithRetry, MODEL, WEB_SEARCH_TOOL, extractJson } from './anthropic';
 import { normalizeDomain } from './sender-context';
-import {
-  scrapeCompanyEmails,
-  matchEmailForPerson,
-  emailFromPattern,
-  type ScrapeResult,
-} from './web-scrape';
+import { serperEnabled, search, type SerperOrganicResult } from './serper';
 
 interface DomainLookupRow {
   company_name: string;
   domain: string;
+}
+
+// Domains that are never a company's own website — search results love to rank
+// these for a brand query, so we skip them when picking a domain off Serper.
+const AGGREGATOR_DOMAINS = [
+  'linkedin.com', 'twitter.com', 'x.com', 'facebook.com', 'instagram.com',
+  'youtube.com', 'tiktok.com', 'crunchbase.com', 'wikipedia.org', 'github.com',
+  'medium.com', 'bloomberg.com', 'glassdoor.com', 'indeed.com', 'pitchbook.com',
+  'reddit.com', 'yelp.com', 'apple.com', 'google.com',
+];
+
+function isAggregator(domain: string): boolean {
+  return AGGREGATOR_DOMAINS.some((a) => domain === a || domain.endsWith(`.${a}`));
+}
+
+/** Pick the first organic result that normalizes to a non-aggregator domain. */
+export function pickDomainFromResults(results: SerperOrganicResult[]): string | null {
+  for (const r of results) {
+    const d = normalizeDomain(r.link);
+    if (d && !isAggregator(d)) return d;
+  }
+  return null;
+}
+
+/** Resolve one company's domain via a single Serper query. null on miss/error. */
+async function resolveDomainViaSerper(name: string, hint?: string): Promise<string | null> {
+  const q = [`"${name}"`, hint ?? '', 'official website'].filter(Boolean).join(' ');
+  try {
+    return pickDomainFromResults(await search(q, 5));
+  } catch (err) {
+    console.warn('serper_domain_lookup_failed', name, err);
+    return null;
+  }
 }
 
 /** Batch-resolve official website domains for companies missing one. */
@@ -21,7 +51,21 @@ export async function resolveCompanyDomains(
   const out = new Map<string, string>();
   if (companies.length === 0) return out;
 
-  const list = companies.slice(0, 12).map((c, i) => ({
+  // Serper-first: one cheap deterministic query per company. Whatever Serper
+  // can't resolve falls through to the LLM web_search batch below.
+  let pending = companies;
+  if (serperEnabled()) {
+    const unresolved: Array<{ name: string; hint?: string }> = [];
+    for (const c of companies.slice(0, 12)) {
+      const d = await resolveDomainViaSerper(c.name, c.hint);
+      if (d) out.set(c.name.trim(), d);
+      else unresolved.push(c);
+    }
+    pending = unresolved;
+  }
+  if (pending.length === 0) return out;
+
+  const list = pending.slice(0, 12).map((c, i) => ({
     idx: i,
     company_name: c.name,
     context: c.hint ?? '',
@@ -64,44 +108,4 @@ export async function resolveCompanyDomain(
 ): Promise<string | null> {
   const map = await resolveCompanyDomains([{ name: companyName, hint }]);
   return map.get(companyName.trim()) ?? [...map.values()][0] ?? null;
-}
-
-export interface ContactEmailFields {
-  email: string | null;
-  emailStatus: 'verified' | 'likely' | 'guessed' | 'none';
-  likelyEmailPattern: string | null;
-}
-
-export function enrichContactEmail(
-  name: string,
-  existing: ContactEmailFields,
-  domain: string,
-  scraped: ScrapeResult
-): ContactEmailFields {
-  if (existing.email) return existing;
-
-  const match = matchEmailForPerson(name, scraped.emails, domain);
-  if (match.email) {
-    const pattern = scraped.pattern ? `${scraped.pattern}@${domain}` : existing.likelyEmailPattern;
-    return {
-      email: match.email,
-      emailStatus: match.status,
-      likelyEmailPattern: pattern,
-    };
-  }
-
-  const patternStr = scraped.pattern
-    ? `${scraped.pattern}@${domain}`
-    : existing.likelyEmailPattern ?? `first.last@${domain}`;
-
-  const guessed = emailFromPattern(scraped.pattern ?? 'first.last', name, domain);
-  if (guessed) {
-    return { email: guessed, emailStatus: 'guessed', likelyEmailPattern: patternStr };
-  }
-
-  return {
-    email: null,
-    emailStatus: 'none',
-    likelyEmailPattern: patternStr,
-  };
 }

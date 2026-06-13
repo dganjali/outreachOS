@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { forUser, newId, type InsertDoc } from '../_lib/db';
 import { createMessageWithRetry, MODEL, WEB_SEARCH_TOOL, extractJson } from '../_lib/anthropic';
-import { CONTACTS_SYSTEM, CONTACTS_RANK_SYSTEM, type MissionMode } from '../_lib/prompts';
+import { CONTACTS_SYSTEM, CONTACTS_RANK_SYSTEM, CONTACTS_FROM_SERP_SYSTEM, type MissionMode } from '../_lib/prompts';
 import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
 import {
   apolloEnabled,
@@ -11,8 +11,10 @@ import {
   normalizeEmailStatus,
   type ApolloPerson,
 } from '../_lib/apollo';
-import { enrichContactEmail, resolveCompanyDomain } from '../_lib/company-enrich';
-import { scrapeCompanyEmails } from '../_lib/web-scrape';
+import { resolveCompanyDomain } from '../_lib/company-enrich';
+import { serperEnabled, searchPeople as serperSearchPeople } from '../_lib/serper';
+import { resolveEmail, type ContactEmailFields, type ResolvedEmail } from '../_lib/email-resolver';
+import { scrapeCompanyEmails, type ScrapeResult } from '../_lib/web-scrape';
 import {
   isExcludedName,
   normalizeDomain,
@@ -20,7 +22,6 @@ import {
   senderExclusions,
 } from '../_lib/sender-context';
 import type { ContactDoc, MissionDoc, ProfileDoc, TargetDoc } from '../../shared/schemas';
-import type { UserScope } from '../_lib/db';
 
 interface ContactSuggestion {
   name: string;
@@ -45,6 +46,14 @@ interface ApolloContactRanked {
   confidence: number;
   reasoning: string;
 }
+
+// Loop-for-another-contact budget. Discovery hands the resolver a ranked
+// candidate pool; the resolver walks it top-down keeping deliverable rows until
+// it has TARGET_DELIVERABLE of them or has attempted RESOLVE_ATTEMPT_CAP
+// candidates (the per-target cost ceiling — finder/verifier calls cost credits).
+const TARGET_DELIVERABLE = 3;
+const RESOLVE_ATTEMPT_CAP = 8;
+const CANDIDATE_POOL_CAP = 10;
 
 const TITLE_HINTS_BY_MODE: Record<MissionMode, string[]> = {
   sponsorship: ['developer relations', 'devrel', 'community', 'partnerships', 'brand', 'marketing', 'events', 'developer marketing', 'ecosystem'],
@@ -87,23 +96,30 @@ export default async function handler(req: Request, res: Response) {
     }
   }
   const useApollo = apolloEnabled() && !!domain;
+  const useSerper = !useApollo && serperEnabled() && !!domain;
+  // How the people were discovered (for observability). ContactDoc.source stays
+  // 'apollo' | 'web_search' — Serper-discovered people are still web_search.
+  const discoverySource = useApollo ? 'apollo' : useSerper ? 'serper' : 'web_search';
 
   const run = await startRun(scope, {
     agentType: 'contacts',
     missionId: mission._id,
     targetId: target_id,
-    input: { source: useApollo ? 'apollo' : 'web_search' },
+    input: { source: discoverySource },
   });
 
   try {
+    const discoveryArgs = { target: { ...target, domain }, mission, mode, profile };
     let rows: Array<Omit<ContactDoc, '_id' | 'userId' | 'createdAt' | 'updatedAt'>>;
     if (useApollo) {
-      rows = await runApolloHybrid({ target: { ...target, domain }, mission, mode, profile });
+      rows = await runApolloHybrid(discoveryArgs);
+    } else if (useSerper) {
+      rows = await runSerperDiscovery(discoveryArgs);
     } else {
-      rows = await runWebSearchOnly({ target: { ...target, domain }, mission, mode, profile });
+      rows = await runWebSearchOnly(discoveryArgs);
     }
 
-    rows = await enrichRowsWithScrapedEmails(rows, domain, scope, target._id);
+    rows = await resolvePoolWithBudget(rows, domain, target._id);
 
     if (rows.length === 0) {
       await failRun(scope, run._id, 'no_contacts_found');
@@ -116,12 +132,12 @@ export default async function handler(req: Request, res: Response) {
 
     await completeRun(scope, run._id, {
       count: inserted.length,
-      source: useApollo ? 'apollo' : 'web_search',
+      source: discoverySource,
     });
     return res.status(200).json({
       run_id: run._id,
       contacts: inserted,
-      source: useApollo ? 'apollo' : 'web_search',
+      source: discoverySource,
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'unknown_error';
@@ -169,13 +185,90 @@ async function runWebSearchOnly(args: {
     (c) => !isExcludedName(c.name ?? '', senderExclusions(profile))
   );
 
-  return filtered.slice(0, 6).map((c) => ({
+  // Discovery never produces a trusted email — the LLM's `email` field is
+  // ignored and resolution happens later in resolveRowEmails. Keep the pattern
+  // only as a display hint.
+  return filtered.slice(0, CANDIDATE_POOL_CAP).map((c) => ({
     targetId: target._id,
     missionId: mission._id,
     name: c.name,
     role: c.role,
-    email: c.email ?? null,
-    emailStatus: (c.email ? 'guessed' : 'none') as 'guessed' | 'none',
+    email: null,
+    emailStatus: 'none' as const,
+    linkedinUrl: c.linkedin_url,
+    likelyEmailPattern: c.likely_email_pattern,
+    confidence: clamp01(c.confidence),
+    reasoning: c.reasoning,
+    status: 'suggested' as const,
+    source: 'web_search' as const,
+    apolloPersonId: null,
+    seniority: null,
+    headline: null,
+    location: null,
+  }));
+}
+
+async function runSerperDiscovery(args: {
+  target: TargetDoc;
+  mission: MissionDoc;
+  mode: MissionMode;
+  profile: ProfileDoc | null;
+}): Promise<Array<Omit<ContactDoc, '_id' | 'userId' | 'createdAt' | 'updatedAt'>>> {
+  const { target, mission, mode, profile } = args;
+  const titles = TITLE_HINTS_BY_MODE[mode];
+
+  let results;
+  try {
+    results = await serperSearchPeople(target.companyName, titles, 10);
+  } catch (err) {
+    console.error('serper_search_failed', err);
+    return runWebSearchOnly(args);
+  }
+  if (results.length === 0) return runWebSearchOnly(args);
+
+  const exclusions = senderContextLines(profile);
+  const userPrompt = [
+    `Target organization: ${target.companyName}${target.domain ? ` (${target.domain})` : ''}`,
+    `Mission mode: ${mode}`,
+    `What's being offered: ${mission.goal}`,
+    `Why this target: ${target.fitReason ?? mission.targetDescription}`,
+    target.whyNow ? `Why now: ${target.whyNow}` : '',
+    ...exclusions,
+    '',
+    'SEARCH RESULTS (public LinkedIn profiles, via Google):',
+    JSON.stringify(
+      results.map((r) => ({ title: r.title, link: r.link, snippet: r.snippet })),
+      null,
+      2
+    ),
+    '',
+    'From these results, pick the 2-4 best people to contact at THIS company (not the sender). Extract name, role, and LinkedIn URL from each result. Output JSON only.',
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const message = await createMessageWithRetry({
+    model: MODEL(),
+    max_tokens: 2048,
+    system: CONTACTS_FROM_SERP_SYSTEM,
+    messages: [{ role: 'user', content: userPrompt }],
+  });
+
+  const parsed = extractJson<{ contacts: ContactSuggestion[] }>(message);
+  if (!parsed.ok || !parsed.data?.contacts) return runWebSearchOnly(args);
+
+  const filtered = parsed.data.contacts.filter(
+    (c) => !isExcludedName(c.name ?? '', senderExclusions(profile))
+  );
+  if (filtered.length === 0) return runWebSearchOnly(args);
+
+  return filtered.slice(0, CANDIDATE_POOL_CAP).map((c) => ({
+    targetId: target._id,
+    missionId: mission._id,
+    name: c.name,
+    role: c.role,
+    email: null,
+    emailStatus: 'none' as const,
     linkedinUrl: c.linkedin_url,
     likelyEmailPattern: c.likely_email_pattern,
     confidence: clamp01(c.confidence),
@@ -256,7 +349,7 @@ async function runApolloHybrid(args: {
 
   const rankParsed = extractJson<{ contacts: ApolloContactRanked[] }>(rankMsg);
   if (!rankParsed.ok || !rankParsed.data?.contacts) {
-    return list.slice(0, 3).map((p) => ({
+    return list.slice(0, CANDIDATE_POOL_CAP).map((p) => ({
       targetId: target._id,
       missionId: mission._id,
       name: p.name,
@@ -280,7 +373,7 @@ async function runApolloHybrid(args: {
   const exclusions = senderExclusions(profile);
   return rankParsed.data.contacts
     .filter((c) => !isExcludedName(c.name ?? '', exclusions))
-    .slice(0, 4)
+    .slice(0, CANDIDATE_POOL_CAP)
     .map((c) => {
     const apollo = byId.get(c.apollo_person_id ?? '');
     return {
@@ -304,40 +397,76 @@ async function runApolloHybrid(args: {
   });
 }
 
-async function enrichRowsWithScrapedEmails(
-  rows: Array<Omit<ContactDoc, '_id' | 'userId' | 'createdAt' | 'updatedAt'>>,
-  domain: string | null,
-  scope: UserScope,
-  targetId: string
-): Promise<Array<Omit<ContactDoc, '_id' | 'userId' | 'createdAt' | 'updatedAt'>>> {
-  if (!domain || rows.length === 0) return rows;
+type ContactRow = Omit<ContactDoc, '_id' | 'userId' | 'createdAt' | 'updatedAt'>;
 
-  let scraped;
-  try {
-    scraped = await scrapeCompanyEmails(domain);
-  } catch (err) {
-    console.warn('scrape_company_emails_failed', targetId, err);
-    return rows;
+// Injectable so the budget walk is unit-testable without network. Defaults wire
+// the real company-site scrape and the full resolution cascade.
+export interface ResolvePoolDeps {
+  scrape: (domain: string) => Promise<ScrapeResult>;
+  resolve: (name: string, domain: string, existing: ContactEmailFields, scraped: ScrapeResult) => Promise<ResolvedEmail>;
+}
+
+const DEFAULT_RESOLVE_DEPS: ResolvePoolDeps = {
+  scrape: scrapeCompanyEmails,
+  resolve: (name, domain, existing, scraped) => resolveEmail(name, domain, existing, scraped),
+};
+
+// Walk the ranked candidate pool resolving a trustworthy email for each via the
+// cascade (emailfinder.dev → verifier gate → real scraped email → none). Keeps a
+// row only when it yields a deliverable email ('verified'/'likely'); a 'none'
+// candidate is dropped and we try the next one. Stops at TARGET_DELIVERABLE kept
+// or RESOLVE_ATTEMPT_CAP attempts (the per-target cost ceiling). Scrapes the
+// company site once up front and reuses it. Never ships an unverified guess.
+export async function resolvePoolWithBudget(
+  rows: ContactRow[],
+  domain: string | null,
+  targetId: string,
+  deps: ResolvePoolDeps = DEFAULT_RESOLVE_DEPS
+): Promise<ContactRow[]> {
+  if (rows.length === 0) return rows;
+  // No domain → can't resolve emails; surface the top-ranked rows display-only.
+  if (!domain) {
+    return rows.slice(0, TARGET_DELIVERABLE).map((row) => ({ ...row, emailResolver: 'none' as const }));
   }
 
-  return rows.map((row) => {
-    const enriched = enrichContactEmail(
+  let scraped: ScrapeResult;
+  try {
+    scraped = await deps.scrape(domain);
+  } catch (err) {
+    console.warn('scrape_company_emails_failed', targetId, err);
+    scraped = { domain, emails: [], pattern: null, pagesScraped: [] };
+  }
+
+  // Sequential, top-down through the ranked pool. Bounded by both N kept and the
+  // attempt cap so a bad domain can't burn the whole pool of finder credits.
+  const kept: ContactRow[] = [];
+  let attempts = 0;
+  for (const row of rows) {
+    if (kept.length >= TARGET_DELIVERABLE || attempts >= RESOLVE_ATTEMPT_CAP) break;
+    attempts++;
+    const resolved = await deps.resolve(
       row.name,
-      {
-        email: row.email,
-        emailStatus: row.emailStatus,
-        likelyEmailPattern: row.likelyEmailPattern,
-      },
       domain,
+      { email: row.email, emailStatus: row.emailStatus, likelyEmailPattern: row.likelyEmailPattern },
       scraped
     );
-    return {
-      ...row,
-      email: enriched.email,
-      emailStatus: enriched.emailStatus,
-      likelyEmailPattern: enriched.likelyEmailPattern,
-    };
-  });
+    if (resolved.email) {
+      kept.push({
+        ...row,
+        email: resolved.email,
+        emailStatus: resolved.emailStatus,
+        likelyEmailPattern: resolved.likelyEmailPattern,
+        emailResolver: resolved.resolver,
+      });
+    }
+  }
+
+  // Empty-pool fallback: nothing came back deliverable → ship the top-ranked
+  // rows display-only (email stays null, pattern kept) so a target is never empty.
+  if (kept.length === 0) {
+    return rows.slice(0, TARGET_DELIVERABLE).map((row) => ({ ...row, emailResolver: 'none' as const }));
+  }
+  return kept;
 }
 
 function clamp01(n: number) {

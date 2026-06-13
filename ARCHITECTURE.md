@@ -58,7 +58,7 @@ Twelve collections. Most own their data by `userId`; a few (contacts, evidence_p
 | `profile_assets` | userId | Resumes/PDFs in GCS. `embedding` field for vector search. |
 | `missions` | userId | One outreach campaign. Mode (`sales`, `bd`, ...). |
 | `targets` | userId, missionId | Companies. From Apollo + web_search. |
-| `contacts` | userId, missionId, targetId | People at targets. Verified emails when via Apollo. |
+| `contacts` | userId, missionId, targetId | People at targets. Discovery via Apollo / Serper / web_search; emails resolved (not guessed) via emailfinder.dev SMTP verification or a real scraped address. `emailStatus: 'verified'` means verified. |
 | `evidence_packs` | userId, missionId, targetId | 4–6 sourced bullets. **Embedded**. |
 | `email_sequences` | userId, missionId | Initial + follow-ups. **Embedded** when replied. |
 | `sent_messages` | userId | One per actual Gmail send. Idempotent on (sequenceId, touchIndex). |
