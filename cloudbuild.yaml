@@ -38,10 +38,12 @@ steps:
       - --concurrency=40
       # Pull all secrets from Secret Manager. Each secret name should match
       # the env var; create them with `gcloud secrets create <name>`.
-      # APOLLO_API_KEY, SERPER_API_KEY and EMAILFINDER_API_KEY are optional
-      # (each contact-data feature is off unless its key is set) — omit them so a
-      # missing secret doesn't block deploys. Add them back here when used.
-      - --set-secrets=ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest,MONGODB_URI=MONGODB_URI:latest,VOYAGE_API_KEY=VOYAGE_API_KEY:latest,ENCRYPTION_KEY=ENCRYPTION_KEY:latest,CRON_SECRET=CRON_SECRET:latest,GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest,GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest,FIREBASE_SERVICE_ACCOUNT_JSON=FIREBASE_SERVICE_ACCOUNT_JSON:latest
+      # SERPER_API_KEY, EMAILFINDER_API_KEY and MILLIONVERIFIER_API_KEY power the
+      # contact-discovery + email-resolution cascade (api/_lib/email-resolver.ts);
+      # each feature stays off unless its key resolves at runtime, so the secrets
+      # MUST exist in Secret Manager before deploy or the deploy fails. APOLLO_API_KEY
+      # is still omitted (unused) — add it back here when wired.
+      - --set-secrets=ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest,MONGODB_URI=MONGODB_URI:latest,VOYAGE_API_KEY=VOYAGE_API_KEY:latest,ENCRYPTION_KEY=ENCRYPTION_KEY:latest,CRON_SECRET=CRON_SECRET:latest,GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest,GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest,FIREBASE_SERVICE_ACCOUNT_JSON=FIREBASE_SERVICE_ACCOUNT_JSON:latest,SERPER_API_KEY=SERPER_API_KEY:latest,EMAILFINDER_API_KEY=EMAILFINDER_API_KEY:latest,MILLIONVERIFIER_API_KEY=MILLIONVERIFIER_API_KEY:latest
       - --set-env-vars=ANTHROPIC_MODEL=claude-sonnet-4-5,MONGODB_DB=outreachos,FIREBASE_PROJECT_ID=$PROJECT_ID,GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=${_REGION},GCS_BUCKET=$PROJECT_ID-assets,CLOUD_TASKS_QUEUE=outreach-jobs
 
 substitutions:

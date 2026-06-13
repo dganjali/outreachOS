@@ -15,6 +15,7 @@
 // These are stamped by the `forUser(uid).collection().insertOne()` wrapper.
 
 import type { EmbedInputType } from '../api/_lib/embeddings';
+import type { PlanId, PlanStatus } from './plans';
 
 void ({} as EmbedInputType); // keep the import live for downstream consumers
 
@@ -52,6 +53,15 @@ export interface ProfileDoc extends BaseDoc {
   onboardingCompletedAt: Date | null;
   // When true, the follow-up sweeper skips this user's scheduled touches.
   pauseFollowups?: boolean;
+  // Billing plan (absent == free tier). See shared/plans.ts.
+  plan?: PlanId | null;
+  planStatus?: PlanStatus | null;
+  // Monotonic monthly mission-launch counter, the source of truth for the
+  // monthly cap. `period` is the UTC 'YYYY-MM' the count applies to; a new month
+  // lazily resets `used` to 0. NEVER decremented on mission delete — counting
+  // live mission docs instead would let a user mint unlimited missions by
+  // delete-and-recreate. Incremented in api/data/router.ts on mission insert.
+  missionQuota?: { period: string; used: number } | null;
 }
 
 // Email addresses that must never be contacted (unsubscribe, bounce, manual).

@@ -4,6 +4,7 @@ import { Mail, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
+import { useConfirm } from '../context/ConfirmContext';
 import { gmail } from '../lib/api';
 import type { Integration } from '../types';
 import { Button } from '@/components/ui/button';
@@ -24,6 +25,7 @@ function SettingsSection({ title, hint, children }: { title: string; hint?: stri
 
 export function SettingsPage() {
   const { user } = useAuth();
+  const confirm = useConfirm();
   const location = useLocation();
   const [email] = useState(user?.email ?? '');
   const [password, setPassword] = useState('');
@@ -154,7 +156,15 @@ export function SettingsPage() {
   }
 
   async function disconnectGmail() {
-    if (!confirm('Disconnect Gmail? Future agent sends will fail until you reconnect.')) return;
+    if (
+      !(await confirm({
+        title: 'Disconnect Gmail?',
+        description: 'Future agent sends will fail until you reconnect.',
+        confirmText: 'Disconnect',
+        destructive: true,
+      }))
+    )
+      return;
     setGmailBusy(true);
     try {
       await gmail.disconnect();

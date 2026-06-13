@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../supabaseClient';
+import { useConfirm } from '../../context/ConfirmContext';
 import {
   diffSnapshots,
   fieldLabel,
@@ -64,6 +65,7 @@ function renderValue(v: string | string[]): string {
 }
 
 export function History({ userId, current, reloadKey, onRestore }: HistoryProps) {
+  const confirm = useConfirm();
   const [versions, setVersions] = useState<ProfileVersion[] | null>(null);
   const [outcomes, setOutcomes] = useState<Record<string, VersionOutcome>>({});
   const [error, setError] = useState<string | null>(null);
@@ -299,7 +301,14 @@ export function History({ userId, current, reloadKey, onRestore }: HistoryProps)
                   title={matchesCurrent ? 'This snapshot matches your current profile' : 'Roll back to this snapshot'}
                   onClick={async () => {
                     if (matchesCurrent) return;
-                    if (!confirm('Restore this snapshot? Your current profile will be overwritten (a new version row will be created).')) return;
+                    if (
+                      !(await confirm({
+                        title: 'Restore this snapshot?',
+                        description: 'Your current profile will be overwritten (a new version row will be created).',
+                        confirmText: 'Restore',
+                      }))
+                    )
+                      return;
                     setRestoringId(v.id);
                     try {
                       await onRestore(snap, v.id);

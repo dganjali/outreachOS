@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ProfileAsset, ProfileAssetKind } from '../../types';
+import { useConfirm } from '../../context/ConfirmContext';
 import {
   deleteAsset,
   listAssets,
@@ -33,6 +34,7 @@ function formatBytes(n: number): string {
 }
 
 export function AssetUploader({ userId, reloadKey, onUploaded, onError }: AssetUploaderProps) {
+  const confirm = useConfirm();
   const [assets, setAssets] = useState<ProfileAsset[] | null>(null);
   const [busyKind, setBusyKind] = useState<ProfileAssetKind | null>(null);
 
@@ -66,7 +68,15 @@ export function AssetUploader({ userId, reloadKey, onUploaded, onError }: AssetU
   }
 
   async function handleDelete(asset: ProfileAsset) {
-    if (!confirm(`Delete ${asset.file_name}? This cannot be undone.`)) return;
+    if (
+      !(await confirm({
+        title: `Delete ${asset.file_name}?`,
+        description: 'This cannot be undone.',
+        confirmText: 'Delete',
+        destructive: true,
+      }))
+    )
+      return;
     try {
       await deleteAsset(asset);
       setAssets((prev) => prev?.filter((a) => a.id !== asset.id) ?? null);
@@ -91,6 +101,7 @@ export function AssetUploader({ userId, reloadKey, onUploaded, onError }: AssetU
           hint={KIND_HINT.resume}
           busy={busyKind === 'resume'}
           onFile={(f) => handleFile('resume', f)}
+          onError={onError}
         />
         <Dropzone
           kind="portfolio_pdf"
@@ -99,6 +110,7 @@ export function AssetUploader({ userId, reloadKey, onUploaded, onError }: AssetU
           hint={KIND_HINT.portfolio_pdf}
           busy={busyKind === 'portfolio_pdf'}
           onFile={(f) => handleFile('portfolio_pdf', f)}
+          onError={onError}
         />
       </div>
 
@@ -162,6 +174,7 @@ function Dropzone({
   accept,
   busy,
   onFile,
+  onError,
 }: {
   kind: ProfileAssetKind;
   label: string;
@@ -169,6 +182,7 @@ function Dropzone({
   accept: string;
   busy: boolean;
   onFile: (file: File) => void;
+  onError: (msg: string) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -177,7 +191,7 @@ function Dropzone({
     if (!file) return;
     if (file.size > MAX_ASSET_BYTES) {
       // Surface the same message uploadAsset would throw so users see it before they wait.
-      alert(`File too large. Max 2MB; this file is ${(file.size / 1024 / 1024).toFixed(1)}MB.`);
+      onError(`File too large. Max 2MB; this file is ${(file.size / 1024 / 1024).toFixed(1)}MB.`);
       return;
     }
     onFile(file);

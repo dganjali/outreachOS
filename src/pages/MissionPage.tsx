@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
+import { useConfirm } from '../context/ConfirmContext';
 import { agents, gmail } from '../lib/api';
 import { asScore } from '../lib/score';
 import { CsvImport } from '../components/CsvImport';
@@ -26,6 +27,7 @@ const MODE_LABEL: Record<string, string> = {
 export function MissionPage() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
+  const confirm = useConfirm();
   const navigate = useNavigate();
   const [mission, setMission] = useState<Mission | null>(null);
   const [targets, setTargets] = useState<Target[]>([]);
@@ -214,7 +216,7 @@ export function MissionPage() {
   }
 
   async function deleteTarget(target: Target) {
-    if (!confirm(`Remove ${target.company_name}?`)) return;
+    if (!(await confirm({ title: `Remove ${target.company_name}?`, confirmText: 'Remove', destructive: true }))) return;
     const { error } = await supabase.from('targets').delete().eq('id', target.id);
     if (error) {
       toast.error(`Could not remove ${target.company_name}: ${error.message}`);
@@ -700,6 +702,7 @@ function Touch({
   disabled?: boolean;
   disabledReason?: string;
 }) {
+  const confirm = useConfirm();
   const isSent = sent?.status === 'sent';
   const isDraft = sent?.status === 'draft';
   const [editing, setEditing] = useState(false);
@@ -759,8 +762,9 @@ function Touch({
                 className="btn-primary tiny"
                 disabled={!!sending || disabled}
                 title={disabledReason}
-                onClick={() => {
-                  if (confirm(`Send this email now?\n\nSubject: ${subject}`)) onSend(touchIndex, 'send');
+                onClick={async () => {
+                  if (await confirm({ title: 'Send this email now?', description: `Subject: ${subject}`, confirmText: 'Send now' }))
+                    onSend(touchIndex, 'send');
                 }}
               >
                 {sending === `send:${touchIndex}` ? 'Sending…' : 'Send now'}

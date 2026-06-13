@@ -9,6 +9,7 @@ import { requireUser } from '../_lib/auth';
 import { forUser, newId, COL, type CollectionName } from '../_lib/db';
 import { signedUploadUrl, signedDownloadUrl, deleteObject } from '../_lib/storage';
 import { assertSafeWriteBody, UnsafePayloadError } from '../_lib/sanitize';
+import { checkMissionQuota, incrementMissionQuota } from '../_lib/runs';
 
 // Module augmentation so `req.uid` is typed (set by the middleware below).
 declare module 'express-serve-static-core' {
@@ -164,8 +165,15 @@ router.post('/:collection', async (req, res) => {
     if (err instanceof UnsafePayloadError) return res.status(400).json({ error: 'invalid_payload', detail: err.message });
     throw err;
   }
+  const scope = forUser(uid);
+  // Monthly mission-launch cap (delete-proof; see api/_lib/runs.ts). 429s with
+  // mission_quota_exceeded when the caller is at their plan limit.
+  if (collection === COL.missions && !(await checkMissionQuota(scope, res))) return;
   const doc = { _id: newId(), ...stripOwnership(body) };
-  const created = await forUser(uid).collection(collection as CollectionName).insertOne(doc as any);
+  const created = await scope.collection(collection as CollectionName).insertOne(doc as any);
+  // Count the launch only after a successful insert so a failed create doesn't
+  // burn quota. The counter is monotonic — deletes never refund it.
+  if (collection === COL.missions) await incrementMissionQuota(scope);
   res.status(201).json({ data: created });
 });
 

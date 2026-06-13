@@ -4,6 +4,7 @@ import { Plus, Download, Archive, RotateCcw, Target, Trash2 } from 'lucide-react
 import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
+import { useConfirm } from '../context/ConfirmContext';
 import { exportPipelineCsv } from '../lib/exportPipeline';
 import type { Mission } from '../types';
 import { Button } from '@/components/ui/button';
@@ -49,6 +50,7 @@ interface MissionWithCounts extends Mission {
 
 export function Missions() {
   const { user } = useAuth();
+  const confirm = useConfirm();
   const [missions, setMissions] = useState<MissionWithCounts[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -117,7 +119,14 @@ export function Missions() {
   async function archive(e: React.MouseEvent, mission: MissionWithCounts) {
     e.preventDefault();
     e.stopPropagation();
-    if (!confirm(`Archive "${mission.name}"? You can restore it from the archived view.`)) return;
+    if (
+      !(await confirm({
+        title: `Archive "${mission.name}"?`,
+        description: 'You can restore it from the archived view.',
+        confirmText: 'Archive',
+      }))
+    )
+      return;
     const { error: err } = await supabase.from('missions').update({ archived_at: new Date().toISOString() }).eq('id', mission.id);
     if (err) {
       toast.error(`Could not archive: ${err.message}`);
@@ -143,9 +152,12 @@ export function Missions() {
     e.preventDefault();
     e.stopPropagation();
     if (
-      !confirm(
-        `Permanently delete "${mission.name}"? This also deletes its targets, drafts, and replies, and cannot be undone.`
-      )
+      !(await confirm({
+        title: `Permanently delete "${mission.name}"?`,
+        description: 'This also deletes its targets, drafts, and replies, and cannot be undone.',
+        confirmText: 'Delete',
+        destructive: true,
+      }))
     )
       return;
     const { error: delErr } = await supabase.from('missions').delete().eq('id', mission.id);
