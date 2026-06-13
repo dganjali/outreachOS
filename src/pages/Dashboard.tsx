@@ -1,6 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, Plus } from 'lucide-react';
+import {
+  ArrowRight,
+  ArrowUpRight,
+  Plus,
+  Target,
+  Users,
+  FileText,
+  ChevronRight,
+  CheckCircle2,
+  TrendingUp,
+  Zap,
+} from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { gmail } from '../lib/api';
@@ -194,6 +205,7 @@ export function Dashboard() {
   const responseRate = stats.contacted > 0 ? Math.round((stats.replied / stats.contacted) * 100) : null;
   const firstName = profile?.name ? profile.name.split(' ')[0] : null;
   const percent = profileCompleteness(profile as unknown as Record<string, unknown>);
+  const dateLabel = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
 
   // ---- First-run launchpad ----
   if (!loading && missions.length === 0) {
@@ -262,7 +274,6 @@ export function Dashboard() {
           sub: 'Agent-written emails waiting for your eyes.',
           to: '/missions',
           cta: 'Review drafts',
-          tone: 'accent' as const,
         }
       : null,
     stats.repliesToHandle > 0
@@ -273,27 +284,45 @@ export function Dashboard() {
           sub: 'Prospects wrote back. Keep the thread warm.',
           to: '/inbox',
           cta: 'Open inbox',
-          tone: 'positive' as const,
         }
       : null,
   ].filter(Boolean) as Array<{
-    key: string; count: number; noun: string; sub: string; to: string; cta: string; tone: 'accent' | 'positive';
+    key: string; count: number; noun: string; sub: string; to: string; cta: string;
   }>;
 
   return (
-    <div className="flex flex-col gap-6 animate-fade-in">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+    <div className="flex flex-col gap-7 animate-fade-in">
+      <header className="flex flex-col gap-1.5">
+        <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">{dateLabel}</span>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <h1 className="text-[1.6rem] font-semibold leading-tight tracking-tight text-foreground">
             {firstName ? `Welcome back, ${firstName}` : 'Dashboard'}
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {stats.missions} {stats.missions === 1 ? 'mission' : 'missions'}
-            {stats.drafts > 0 && `, ${stats.drafts} ${stats.drafts === 1 ? 'draft' : 'drafts'} pending`}
-            {stats.contacted > 0 && `, ${stats.contacted} contacted`}
-            {responseRate !== null && `, ${responseRate}% reply rate`}.
-          </p>
         </div>
+        <p className="text-sm text-muted-foreground">
+          <span className="font-medium text-foreground/90">{stats.missions}</span>{' '}
+          {stats.missions === 1 ? 'mission' : 'missions'}
+          {stats.drafts > 0 && (
+            <>
+              {', '}
+              <span className="font-medium text-foreground/90">{stats.drafts}</span>{' '}
+              {stats.drafts === 1 ? 'draft' : 'drafts'} pending
+            </>
+          )}
+          {stats.contacted > 0 && (
+            <>
+              {', '}
+              <span className="font-medium text-foreground/90">{stats.contacted}</span> contacted
+            </>
+          )}
+          {responseRate !== null && (
+            <>
+              {', '}
+              <span className="font-medium text-foreground/90">{responseRate}%</span> reply rate
+            </>
+          )}
+          .
+        </p>
       </header>
 
       {error && (
@@ -312,116 +341,156 @@ export function Dashboard() {
         </div>
       )}
 
+      {/* Focus band — the hero region. Action cards when there's something to do,
+          a clean "caught up" panel with a primary CTA otherwise. */}
       {focusItems.length > 0 ? (
-        <section className="grid gap-4 sm:grid-cols-2" aria-label="Needs your attention">
+        <section className="grid gap-3 sm:grid-cols-2" aria-label="Needs your attention">
           {focusItems.map((f) => (
             <Link
               key={f.key}
               to={f.to}
-              className="group flex items-center gap-4 rounded-lg border border-border bg-card p-4 transition-colors hover:border-primary/50 hover:bg-secondary/40"
+              className="panel group flex items-center gap-4 p-4 transition-colors hover:border-primary/45"
             >
-              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-xl font-bold text-primary">
+              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-xl font-bold tabular-nums text-primary ring-1 ring-inset ring-primary/20">
                 {f.count}
               </span>
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="text-sm font-semibold text-foreground">{f.noun}</span>
                 <span className="truncate text-xs text-muted-foreground">{f.sub}</span>
               </span>
-              <span className="inline-flex items-center gap-1 text-sm font-medium text-primary opacity-0 transition-opacity group-hover:opacity-100">
-                {f.cta} <ArrowRight className="h-3.5 w-3.5" />
+              <span className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-muted-foreground transition-colors group-hover:text-primary">
+                <span className="hidden sm:inline">{f.cta}</span>
+                <ArrowUpRight className="h-4 w-4" />
               </span>
             </Link>
           ))}
         </section>
       ) : (
         !loading && (
-          <p className="text-sm text-muted-foreground">
-            You're all caught up.{' '}
-            <Link to="/missions/new" className="font-medium text-primary hover:underline">
-              Start a mission
-            </Link>{' '}
-            to fill your pipeline.
-          </p>
+          <section className="panel flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+            <div className="flex items-start gap-3.5">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary ring-1 ring-inset ring-primary/20">
+                <CheckCircle2 className="h-5 w-5" strokeWidth={2} />
+              </span>
+              <div>
+                <h2 className="text-base font-semibold text-foreground">You're all caught up</h2>
+                <p className="mt-0.5 text-sm leading-relaxed text-muted-foreground">
+                  No drafts or replies waiting. Start a mission to keep the pipeline full.
+                </p>
+              </div>
+            </div>
+            <Button asChild className="btn-glow shrink-0 gap-2 border-0 font-semibold text-primary-foreground">
+              <Link to="/missions/new">
+                <Plus className="h-4 w-4" /> New mission
+              </Link>
+            </Button>
+          </section>
         )
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+      <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
         <section className="flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Active missions</h2>
-            <Link to="/missions" className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">
-              All missions <ArrowRight className="h-3.5 w-3.5" />
-            </Link>
-          </div>
+          <SectionHeader
+            title="Active missions"
+            action={
+              <Link to="/missions" className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
+                All missions <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            }
+          />
           {loading ? (
             <div className="flex flex-col gap-2">
-              <Skeleton className="h-16 w-full rounded-lg" />
-              <Skeleton className="h-16 w-full rounded-lg" />
-              <Skeleton className="h-16 w-full rounded-lg" />
+              <Skeleton className="h-[5.5rem] w-full rounded-lg" />
+              <Skeleton className="h-[5.5rem] w-full rounded-lg" />
+              <Skeleton className="h-[5.5rem] w-full rounded-lg" />
             </div>
           ) : (
-            <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
+            <div className="panel divide-y divide-border/70 overflow-hidden">
               {missions.map((m) => {
                 const pct = m.target_count > 0 ? Math.round((m.draft_count / m.target_count) * 100) : 0;
+                const started = m.target_count > 0;
+                // Floor a non-zero bar to 3% so it's visible, but keep 0% truly empty
+                // (a green sliver next to a "0% drafted" label reads as a contradiction).
+                const fillPct = pct > 0 ? Math.max(Math.min(pct, 100), 3) : 0;
                 return (
-                  <li key={m.id}>
-                    <Link
-                      to={`/missions/${m.id}`}
-                      className="flex flex-col gap-3 p-4 transition-colors hover:bg-secondary/40"
+                  <Link
+                    key={m.id}
+                    to={`/missions/${m.id}`}
+                    className="group flex items-center gap-4 p-4 transition-colors hover:bg-secondary/40"
+                  >
+                    <span
+                      aria-hidden
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border/70 bg-secondary/40 text-sm font-semibold uppercase text-foreground/80"
                     >
+                      {m.name.trim().charAt(0) || '·'}
+                    </span>
+                    <div className="flex min-w-0 flex-1 flex-col gap-2">
                       <div className="flex items-center gap-2">
-                        <strong className="text-sm font-semibold text-foreground">{m.name}</strong>
-                        <Badge variant="secondary" className="font-normal capitalize">{m.mode}</Badge>
+                        <strong className="truncate text-sm font-semibold text-foreground">{m.name}</strong>
+                        <Badge variant="secondary" className="shrink-0 px-2 py-0 text-[10px] font-medium capitalize">
+                          {m.mode}
+                        </Badge>
                       </div>
-                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary" aria-hidden>
-                        <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${Math.min(pct, 100)}%` }} />
+                      <div className="flex items-center gap-2.5">
+                        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-secondary" aria-hidden>
+                          <div
+                            className="h-full rounded-full bg-primary transition-all"
+                            style={{ width: `${fillPct}%` }}
+                          />
+                        </div>
+                        <span className="w-16 shrink-0 text-right text-[11px] font-medium tabular-nums text-muted-foreground">
+                          {started ? `${Math.min(pct, 100)}% drafted` : 'Not started'}
+                        </span>
                       </div>
-                      <div className="flex gap-4 text-xs text-muted-foreground">
-                        <span>{m.target_count} targets</span>
-                        <span>{m.contact_count} contacts</span>
-                        <span>{m.draft_count} drafts</span>
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                        <MissionStat icon={Target} value={m.target_count} label="targets" />
+                        <MissionStat icon={Users} value={m.contact_count} label="contacts" />
+                        <MissionStat icon={FileText} value={m.draft_count} label="drafts" />
                       </div>
-                    </Link>
-                  </li>
+                    </div>
+                    <ChevronRight className="hidden h-4 w-4 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-foreground sm:block" />
+                  </Link>
                 );
               })}
-            </ul>
+            </div>
           )}
         </section>
 
         <aside className="flex flex-col gap-6">
           <section className="flex flex-col gap-3">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Recent activity</h2>
+            <SectionHeader title="Recent activity" />
             {runs.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Nothing yet. Run a mission to see activity here.</p>
+              <div className="panel px-3.5 py-6 text-center text-sm text-muted-foreground">
+                Nothing yet. Run a mission to see activity here.
+              </div>
             ) : (
-              <ul className="flex flex-col gap-px overflow-hidden rounded-lg border border-border bg-card">
+              <div className="panel divide-y divide-border/60 overflow-hidden">
                 {runs.map((r) => (
-                  <li key={r.id} className="flex items-center gap-2 px-3 py-2.5 text-sm">
-                    <span className="min-w-0 flex-1 truncate text-foreground">{RUN_LABEL[r.agent_type] ?? r.agent_type}</span>
-                    <span
-                      className={cn(
-                        'shrink-0 text-xs font-medium',
-                        r.status === 'running' && 'text-primary',
-                        r.status === 'completed' && 'text-muted-foreground',
-                        r.status === 'failed' && 'text-destructive'
-                      )}
-                    >
-                      {r.status === 'running' ? 'running…' : r.status}
+                  <div key={r.id} className="flex items-center gap-2.5 px-3.5 py-2.5">
+                    <StatusDot status={r.status} />
+                    <span className="min-w-0 flex-1 truncate text-[13px] text-foreground/90">
+                      {RUN_LABEL[r.agent_type] ?? r.agent_type}
                     </span>
-                    <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{timeAgo(r.started_at)}</span>
-                  </li>
+                    {r.status === 'running' && (
+                      <span className="shrink-0 text-[11px] font-medium text-primary">running…</span>
+                    )}
+                    {r.status === 'failed' && (
+                      <span className="shrink-0 text-[11px] font-medium text-destructive">failed</span>
+                    )}
+                    <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{timeAgo(r.started_at)}</span>
+                  </div>
                 ))}
-              </ul>
+              </div>
             )}
           </section>
 
           <section className="flex flex-col gap-3">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">This week</h2>
-            <dl className="grid grid-cols-3 gap-px overflow-hidden rounded-lg border border-border bg-border">
-              <StatCell label="Contacted" value={String(stats.contacted)} />
-              <StatCell label="Reply rate" value={responseRate === null ? '—' : `${responseRate}%`} />
+            <SectionHeader title="This week" />
+            <dl className="panel grid grid-cols-3 divide-x divide-border/60 overflow-hidden">
+              <StatCell icon={Users} label="Contacted" value={String(stats.contacted)} />
+              <StatCell icon={TrendingUp} label="Reply rate" value={responseRate === null ? '—' : `${responseRate}%`} />
               <StatCell
+                icon={Zap}
                 label="Runs today"
                 value={`${stats.runsToday}`}
                 suffix="/50"
@@ -435,14 +504,67 @@ export function Dashboard() {
   );
 }
 
-function StatCell({ label, value, suffix, warn }: { label: string; value: string; suffix?: string; warn?: boolean }) {
+function SectionHeader({ title, action }: { title: string; action?: ReactNode }) {
   return (
-    <div className="bg-card p-3">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className={cn('mt-1 text-lg font-semibold tabular-nums', warn ? 'text-warning' : 'text-foreground')}>
+    <div className="flex items-center justify-between">
+      <h2 className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+        <span aria-hidden className="h-3 w-px rounded-full bg-gradient-to-b from-foreground/30 to-transparent" />
+        {title}
+      </h2>
+      {action}
+    </div>
+  );
+}
+
+function MissionStat({ icon: Icon, value, label }: { icon: ComponentType<{ className?: string }>; value: number; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <Icon className="h-3.5 w-3.5 text-muted-foreground/70" />
+      <span className="font-medium tabular-nums text-foreground/80">{value}</span>
+      <span>{label}</span>
+    </span>
+  );
+}
+
+function StatusDot({ status }: { status: string }) {
+  if (status === 'running') {
+    return (
+      <span className="relative flex h-2 w-2 shrink-0" aria-hidden>
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-60" />
+        <span className="relative inline-flex h-2 w-2 rounded-full bg-primary shadow-[0_0_8px_0_hsl(153_45%_46%/0.8)]" />
+      </span>
+    );
+  }
+  return (
+    <span
+      aria-hidden
+      className={cn('h-2 w-2 shrink-0 rounded-full', status === 'failed' ? 'bg-destructive' : 'bg-muted-foreground/40')}
+    />
+  );
+}
+
+function StatCell({
+  icon: Icon,
+  label,
+  value,
+  suffix,
+  warn,
+}: {
+  icon: ComponentType<{ className?: string }>;
+  label: string;
+  value: string;
+  suffix?: string;
+  warn?: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-2 px-3 py-3.5">
+      <span className="flex items-center gap-1.5 whitespace-nowrap text-[11px] font-medium uppercase text-muted-foreground">
+        <Icon className="h-3 w-3 shrink-0" /> {label}
+      </span>
+      <span className={cn('text-2xl font-semibold leading-none tabular-nums', warn ? 'text-warning' : 'text-foreground')}>
         {value}
-        {suffix && <span className="text-xs font-normal text-muted-foreground">{suffix}</span>}
-      </dd>
+        {suffix && <span className="text-sm font-normal text-muted-foreground">{suffix}</span>}
+      </span>
     </div>
   );
 }
