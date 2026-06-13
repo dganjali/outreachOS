@@ -13,6 +13,7 @@
 
 import { matchEmailForPerson, type ScrapeResult } from './web-scrape';
 import { emailFinderEnabled, findEmail } from './email-finder';
+import { verifierEnabled, verifyEmail, type VerifyVerdict } from './email-verifier';
 
 export type EmailStatus = 'verified' | 'likely' | 'guessed' | 'none';
 
@@ -23,9 +24,11 @@ export interface ContactEmailFields {
 }
 
 export interface ResolvedEmail extends ContactEmailFields {
-  // Which rung of the cascade produced this result (for logging/tests only —
-  // not persisted; ContactDoc.source still describes person discovery).
-  resolver: 'apollo' | 'email_finder' | 'scrape' | 'none';
+  // Which rung of the cascade produced this result (persisted as
+  // ContactDoc.emailResolver for analytics). 'verifier' means a finder hit that
+  // passed through the MillionVerifier gate. ContactDoc.source still describes
+  // how the *person* was discovered.
+  resolver: 'apollo' | 'email_finder' | 'scrape' | 'verifier' | 'none';
 }
 
 // A provider maps (name, domain) -> verified email or null.
@@ -34,12 +37,26 @@ export interface EmailProvider {
   findEmail(args: { fullName: string; domain: string }): Promise<{ email: string | null; raw: unknown }>;
 }
 
+// A verifier gates a candidate email: confirm, downgrade, or reject. Injectable
+// so the cascade is unit-testable with a fake and so MillionVerifier can be
+// swapped for DeBounce later without touching the contacts handler.
+export interface EmailVerifier {
+  enabled(): boolean;
+  verify(email: string): Promise<VerifyVerdict>;
+}
+
 const emailFinderProvider: EmailProvider = {
   enabled: emailFinderEnabled,
   findEmail,
 };
 
+const millionVerifier: EmailVerifier = {
+  enabled: verifierEnabled,
+  verify: verifyEmail,
+};
+
 export const DEFAULT_PROVIDERS: EmailProvider[] = [emailFinderProvider];
+export const DEFAULT_VERIFIER: EmailVerifier = millionVerifier;
 
 function displayPattern(domain: string, existing: ContactEmailFields, scraped: ScrapeResult): string | null {
   if (scraped.pattern) return `${scraped.pattern}@${domain}`;
@@ -59,6 +76,7 @@ export async function resolveEmail(
   existing: ContactEmailFields,
   scraped: ScrapeResult,
   providers: EmailProvider[] = DEFAULT_PROVIDERS,
+  verifier: EmailVerifier = DEFAULT_VERIFIER,
 ): Promise<ResolvedEmail> {
   const pattern = displayPattern(domain, existing, scraped);
 
@@ -72,13 +90,20 @@ export async function resolveEmail(
     return { email: null, emailStatus: 'none', likelyEmailPattern: pattern, resolver: 'none' };
   }
 
-  // 2. External, SMTP-verified finders.
+  // 2. External, SMTP-verified finders, gated by the verifier (catch-all check).
   for (const provider of providers) {
     if (!provider.enabled()) continue;
     const { email } = await provider.findEmail({ fullName: name, domain });
-    if (email) {
-      return { email, emailStatus: 'verified', likelyEmailPattern: pattern, resolver: 'email_finder' };
+    if (!email) continue;
+    // Verifier gate: 'verified' as-is, catch-all/unknown -> 'likely', 'invalid'
+    // -> discard and keep looking down the cascade. When the verifier is off we
+    // trust the finder's own SMTP check (status 'verified').
+    if (verifier.enabled()) {
+      const verdict = await verifier.verify(email);
+      if (verdict === 'invalid') continue;
+      return { email, emailStatus: verdict, likelyEmailPattern: pattern, resolver: 'verifier' };
     }
+    return { email, emailStatus: 'verified', likelyEmailPattern: pattern, resolver: 'email_finder' };
   }
 
   // 3. A real email harvested from the company site that maps to this person.

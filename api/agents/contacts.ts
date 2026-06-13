@@ -13,7 +13,7 @@ import {
 } from '../_lib/apollo';
 import { resolveCompanyDomain } from '../_lib/company-enrich';
 import { serperEnabled, searchPeople as serperSearchPeople } from '../_lib/serper';
-import { resolveEmail } from '../_lib/email-resolver';
+import { resolveEmail, type ContactEmailFields, type ResolvedEmail } from '../_lib/email-resolver';
 import { scrapeCompanyEmails, type ScrapeResult } from '../_lib/web-scrape';
 import {
   isExcludedName,
@@ -46,6 +46,14 @@ interface ApolloContactRanked {
   confidence: number;
   reasoning: string;
 }
+
+// Loop-for-another-contact budget. Discovery hands the resolver a ranked
+// candidate pool; the resolver walks it top-down keeping deliverable rows until
+// it has TARGET_DELIVERABLE of them or has attempted RESOLVE_ATTEMPT_CAP
+// candidates (the per-target cost ceiling — finder/verifier calls cost credits).
+const TARGET_DELIVERABLE = 3;
+const RESOLVE_ATTEMPT_CAP = 8;
+const CANDIDATE_POOL_CAP = 10;
 
 const TITLE_HINTS_BY_MODE: Record<MissionMode, string[]> = {
   sponsorship: ['developer relations', 'devrel', 'community', 'partnerships', 'brand', 'marketing', 'events', 'developer marketing', 'ecosystem'],
@@ -111,7 +119,7 @@ export default async function handler(req: Request, res: Response) {
       rows = await runWebSearchOnly(discoveryArgs);
     }
 
-    rows = await resolveRowEmails(rows, domain, target._id);
+    rows = await resolvePoolWithBudget(rows, domain, target._id);
 
     if (rows.length === 0) {
       await failRun(scope, run._id, 'no_contacts_found');
@@ -180,7 +188,7 @@ async function runWebSearchOnly(args: {
   // Discovery never produces a trusted email — the LLM's `email` field is
   // ignored and resolution happens later in resolveRowEmails. Keep the pattern
   // only as a display hint.
-  return filtered.slice(0, 6).map((c) => ({
+  return filtered.slice(0, CANDIDATE_POOL_CAP).map((c) => ({
     targetId: target._id,
     missionId: mission._id,
     name: c.name,
@@ -254,7 +262,7 @@ async function runSerperDiscovery(args: {
   );
   if (filtered.length === 0) return runWebSearchOnly(args);
 
-  return filtered.slice(0, 6).map((c) => ({
+  return filtered.slice(0, CANDIDATE_POOL_CAP).map((c) => ({
     targetId: target._id,
     missionId: mission._id,
     name: c.name,
@@ -341,7 +349,7 @@ async function runApolloHybrid(args: {
 
   const rankParsed = extractJson<{ contacts: ApolloContactRanked[] }>(rankMsg);
   if (!rankParsed.ok || !rankParsed.data?.contacts) {
-    return list.slice(0, 3).map((p) => ({
+    return list.slice(0, CANDIDATE_POOL_CAP).map((p) => ({
       targetId: target._id,
       missionId: mission._id,
       name: p.name,
@@ -365,7 +373,7 @@ async function runApolloHybrid(args: {
   const exclusions = senderExclusions(profile);
   return rankParsed.data.contacts
     .filter((c) => !isExcludedName(c.name ?? '', exclusions))
-    .slice(0, 4)
+    .slice(0, CANDIDATE_POOL_CAP)
     .map((c) => {
     const apollo = byId.get(c.apollo_person_id ?? '');
     return {
@@ -389,41 +397,76 @@ async function runApolloHybrid(args: {
   });
 }
 
-// Resolve a trustworthy email for each discovered row via the cascade
-// (emailfinder.dev → real scraped email → none). Scrapes the company site once
-// up front and reuses it across rows. Never ships an unverified guess.
-async function resolveRowEmails(
-  rows: Array<Omit<ContactDoc, '_id' | 'userId' | 'createdAt' | 'updatedAt'>>,
+type ContactRow = Omit<ContactDoc, '_id' | 'userId' | 'createdAt' | 'updatedAt'>;
+
+// Injectable so the budget walk is unit-testable without network. Defaults wire
+// the real company-site scrape and the full resolution cascade.
+export interface ResolvePoolDeps {
+  scrape: (domain: string) => Promise<ScrapeResult>;
+  resolve: (name: string, domain: string, existing: ContactEmailFields, scraped: ScrapeResult) => Promise<ResolvedEmail>;
+}
+
+const DEFAULT_RESOLVE_DEPS: ResolvePoolDeps = {
+  scrape: scrapeCompanyEmails,
+  resolve: (name, domain, existing, scraped) => resolveEmail(name, domain, existing, scraped),
+};
+
+// Walk the ranked candidate pool resolving a trustworthy email for each via the
+// cascade (emailfinder.dev → verifier gate → real scraped email → none). Keeps a
+// row only when it yields a deliverable email ('verified'/'likely'); a 'none'
+// candidate is dropped and we try the next one. Stops at TARGET_DELIVERABLE kept
+// or RESOLVE_ATTEMPT_CAP attempts (the per-target cost ceiling). Scrapes the
+// company site once up front and reuses it. Never ships an unverified guess.
+export async function resolvePoolWithBudget(
+  rows: ContactRow[],
   domain: string | null,
-  targetId: string
-): Promise<Array<Omit<ContactDoc, '_id' | 'userId' | 'createdAt' | 'updatedAt'>>> {
-  if (!domain || rows.length === 0) return rows;
+  targetId: string,
+  deps: ResolvePoolDeps = DEFAULT_RESOLVE_DEPS
+): Promise<ContactRow[]> {
+  if (rows.length === 0) return rows;
+  // No domain → can't resolve emails; surface the top-ranked rows display-only.
+  if (!domain) {
+    return rows.slice(0, TARGET_DELIVERABLE).map((row) => ({ ...row, emailResolver: 'none' as const }));
+  }
 
   let scraped: ScrapeResult;
   try {
-    scraped = await scrapeCompanyEmails(domain);
+    scraped = await deps.scrape(domain);
   } catch (err) {
     console.warn('scrape_company_emails_failed', targetId, err);
     scraped = { domain, emails: [], pattern: null, pagesScraped: [] };
   }
 
-  // Sequential: ≤6 rows, keeps us well under provider rate limits.
-  const out: typeof rows = [];
+  // Sequential, top-down through the ranked pool. Bounded by both N kept and the
+  // attempt cap so a bad domain can't burn the whole pool of finder credits.
+  const kept: ContactRow[] = [];
+  let attempts = 0;
   for (const row of rows) {
-    const resolved = await resolveEmail(
+    if (kept.length >= TARGET_DELIVERABLE || attempts >= RESOLVE_ATTEMPT_CAP) break;
+    attempts++;
+    const resolved = await deps.resolve(
       row.name,
       domain,
       { email: row.email, emailStatus: row.emailStatus, likelyEmailPattern: row.likelyEmailPattern },
       scraped
     );
-    out.push({
-      ...row,
-      email: resolved.email,
-      emailStatus: resolved.emailStatus,
-      likelyEmailPattern: resolved.likelyEmailPattern,
-    });
+    if (resolved.email) {
+      kept.push({
+        ...row,
+        email: resolved.email,
+        emailStatus: resolved.emailStatus,
+        likelyEmailPattern: resolved.likelyEmailPattern,
+        emailResolver: resolved.resolver,
+      });
+    }
   }
-  return out;
+
+  // Empty-pool fallback: nothing came back deliverable → ship the top-ranked
+  // rows display-only (email stays null, pattern kept) so a target is never empty.
+  if (kept.length === 0) {
+    return rows.slice(0, TARGET_DELIVERABLE).map((row) => ({ ...row, emailResolver: 'none' as const }));
+  }
+  return kept;
 }
 
 function clamp01(n: number) {

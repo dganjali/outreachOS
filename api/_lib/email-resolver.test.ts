@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveEmail, type EmailProvider, type ContactEmailFields } from './email-resolver';
+import { resolveEmail, type EmailProvider, type EmailVerifier, type ContactEmailFields } from './email-resolver';
+import type { VerifyVerdict } from './email-verifier';
 import type { ScrapeResult } from './web-scrape';
 
 const NO_EMAIL: ContactEmailFields = { email: null, emailStatus: 'none', likelyEmailPattern: null };
@@ -17,12 +18,25 @@ function fakeProvider(email: string | null, enabled = true): EmailProvider {
   };
 }
 
+// A fake verifier so the catch-all gate is testable without network.
+function fakeVerifier(verdict: VerifyVerdict, enabled = true): EmailVerifier {
+  return {
+    enabled: () => enabled,
+    verify: async () => verdict,
+  };
+}
+
+// A disabled verifier matches the default behavior when no MILLIONVERIFIER_API_KEY.
+const VERIFIER_OFF = fakeVerifier('verified', false);
+
 describe('resolveEmail cascade', () => {
   it('returns a verified email from the finder before consulting scrape', async () => {
     // Scrape would also match here; the finder must win because it runs first.
+    // Verifier explicitly off so this asserts the bare-finder path regardless of
+    // any ambient MILLIONVERIFIER_API_KEY in the environment.
     const r = await resolveEmail('Jane Doe', 'acme.co', NO_EMAIL, scrape(['jane.doe@acme.co']), [
       fakeProvider('jane.doe@acme.co'),
-    ]);
+    ], VERIFIER_OFF);
     assert.equal(r.email, 'jane.doe@acme.co');
     assert.equal(r.emailStatus, 'verified');
     assert.equal(r.resolver, 'email_finder');
@@ -70,7 +84,7 @@ describe('resolveEmail cascade', () => {
       emailStatus: 'guessed',
       likelyEmailPattern: null,
     };
-    const r = await resolveEmail('Jane Doe', 'acme.co', existing, scrape([]), [fakeProvider('jane.doe@acme.co')]);
+    const r = await resolveEmail('Jane Doe', 'acme.co', existing, scrape([]), [fakeProvider('jane.doe@acme.co')], VERIFIER_OFF);
     assert.equal(r.email, 'jane.doe@acme.co');
     assert.equal(r.resolver, 'email_finder');
   });
@@ -81,5 +95,47 @@ describe('resolveEmail cascade', () => {
     ]);
     assert.equal(r.email, 'jane.doe@acme.co');
     assert.equal(r.resolver, 'scrape');
+  });
+});
+
+describe('resolveEmail verifier gate', () => {
+  it('keeps a finder hit as verified when the verifier confirms it', async () => {
+    const r = await resolveEmail('Jane Doe', 'acme.co', NO_EMAIL, scrape([]),
+      [fakeProvider('jane.doe@acme.co')], fakeVerifier('verified'));
+    assert.equal(r.email, 'jane.doe@acme.co');
+    assert.equal(r.emailStatus, 'verified');
+    assert.equal(r.resolver, 'verifier');
+  });
+
+  it('downgrades a catch-all/unknown domain to likely', async () => {
+    const r = await resolveEmail('Jane Doe', 'acme.co', NO_EMAIL, scrape([]),
+      [fakeProvider('jane.doe@acme.co')], fakeVerifier('likely'));
+    assert.equal(r.email, 'jane.doe@acme.co');
+    assert.equal(r.emailStatus, 'likely');
+    assert.equal(r.resolver, 'verifier');
+  });
+
+  it('discards an invalid finder hit and continues the cascade to scrape', async () => {
+    // Finder returns an address the verifier rejects; a real scraped email for
+    // the same person must take over instead of shipping the invalid hit.
+    const r = await resolveEmail('Jane Doe', 'acme.co', NO_EMAIL, scrape(['jane.doe@acme.co']),
+      [fakeProvider('stale@acme.co')], fakeVerifier('invalid'));
+    assert.equal(r.email, 'jane.doe@acme.co');
+    assert.equal(r.resolver, 'scrape');
+  });
+
+  it('discards an invalid finder hit with no scrape fallback → null/none', async () => {
+    const r = await resolveEmail('Jane Doe', 'acme.co', NO_EMAIL, scrape([]),
+      [fakeProvider('stale@acme.co')], fakeVerifier('invalid'));
+    assert.equal(r.email, null);
+    assert.equal(r.emailStatus, 'none');
+    assert.equal(r.resolver, 'none');
+  });
+
+  it('trusts the finder (verified/email_finder) when the verifier is off', async () => {
+    const r = await resolveEmail('Jane Doe', 'acme.co', NO_EMAIL, scrape([]),
+      [fakeProvider('jane.doe@acme.co')], VERIFIER_OFF);
+    assert.equal(r.emailStatus, 'verified');
+    assert.equal(r.resolver, 'email_finder');
   });
 });

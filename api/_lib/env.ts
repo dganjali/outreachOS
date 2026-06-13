@@ -60,4 +60,9 @@ export const env = {
   // emailfinder.dev (optional) — SMTP-verified email resolution. When set, the
   // contacts agent resolves a real, deliverable email instead of guessing.
   EMAILFINDER_API_KEY: () => process.env.EMAILFINDER_API_KEY || null,
+
+  // MillionVerifier (optional) — catch-all gate after resolution. When set, a
+  // finder hit on a catch-all/unknown domain is downgraded to 'likely' and
+  // 'invalid' addresses are discarded instead of shipped as 'verified'.
+  MILLIONVERIFIER_API_KEY: () => process.env.MILLIONVERIFIER_API_KEY || null,
 };
