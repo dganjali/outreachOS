@@ -22,6 +22,7 @@
 // the grounding + verification logic pure and unit-testable without Vertex.
 
 import { generateJson, MODEL, MODEL_PRO } from './llm';
+import { checkDeliverability } from '../../shared/deliverability';
 import type { StyleProfile } from '../../shared/schemas';
 
 // ---------------------------------------------------------------------------
@@ -270,7 +271,29 @@ export function verifyDraftDeterministic(
     violations.push({ type: 'constraint', span: '', detail: `Body is ${words} words (target ≥ ${minW}).`, severity: 'warn' });
   }
 
+  // 4. Deliverability heuristics (shared with the pre-send UI) — spam words,
+  // excess links, ALL-CAPS, exclamation pileups, subject issues. Word-count
+  // warnings are dropped here because the engine owns the authoritative bounds
+  // above. All map to warn-level constraints (the LLM judge weighs voice more).
+  for (const w of checkDeliverability(draft.subject, draft.body).warnings) {
+    if (/\bwords\b/.test(w)) continue;
+    violations.push({ type: 'constraint', span: '', detail: w, severity: 'warn' });
+  }
+
+  // 5. CTA presence — a cold email with no ask reads as aimless. Warn (the
+  // sender may intentionally open a soft thread).
+  if (!hasCta(draft.body)) {
+    violations.push({ type: 'constraint', span: '', detail: 'No clear call-to-action detected.', severity: 'warn' });
+  }
+
   return violations;
+}
+
+// Light CTA heuristic: a question, or a recognizable ask/next-step phrase.
+const CTA_PATTERNS =
+  /\?|\b(worth|open to|free to|grab|book|set up|hop on|jump on|chat|call|meeting|connect|reply|let me know|interested|15 min|few minutes|next week|this week)\b/i;
+function hasCta(body: string): boolean {
+  return CTA_PATTERNS.test(body);
 }
 
 /** True if any violation would block sending. */

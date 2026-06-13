@@ -1,0 +1,12 @@
+{
+  "_note": "Seed baseline = target thresholds the engine should meet. Regenerate from a real run with `npm run eval -- --update-baseline` once you have Vertex creds, then commit the result.",
+  "aggregate": {
+    "count": 2,
+    "avgGroundingRate": 1,
+    "totalUngroundedClaims": 0,
+    "avgSlopFlags": 0,
+    "avgVoiceMatchScore": 0.6,
+    "constraintPassRate": 1,
+    "passRate": 1
+  }
+}

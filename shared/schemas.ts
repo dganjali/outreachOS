@@ -265,6 +265,13 @@ export interface EmailSequenceDoc extends BaseDoc {
   anchoredBullets: number[];
   subject: string;
   body: string;
+  // Immutable record of the INITIAL email exactly as the AI first produced it.
+  // The learning loop compares this against the human-edited final (the
+  // edit-delta) — the richest taste signal. Optional: pre-personalization docs
+  // read as undefined; never overwritten once set (saveTouch updates only
+  // subject/body).
+  originalSubject?: string | null;
+  originalBody?: string | null;
   followups: Array<{ waitDays: number; subject: string; body: string }>;
   status: 'draft' | 'approved' | 'sent' | 'bounced' | 'replied' | 'archived';
   scheduledSendAt: Date | null;
@@ -280,8 +287,12 @@ export interface SentMessageDoc extends BaseDoc {
   contactId: string;
   missionId: string;
   touchIndex: number;
-  subject: string;
+  subject: string; // the FINAL text actually sent (post human edit)
   body: string;
+  // The AI's original draft for this touch, captured at send so the edit-delta
+  // (draft → final) is preserved per message. Optional on legacy rows.
+  draftSubject?: string | null;
+  draftBody?: string | null;
   toEmail: string;
   gmailDraftId: string | null;
   gmailMessageId: string | null;
@@ -335,7 +346,11 @@ export interface AgentRunDoc extends BaseDoc {
     | 'reply'
     | 'enrich_profile'
     | 'coach'
-    | 'parse_resume';
+    | 'parse_resume'
+    | 'draft'
+    | 'onboard_questions'
+    | 'refine'
+    | 'extract_style';
   status: 'running' | 'completed' | 'failed';
   input: Record<string, unknown> | null;
   output: Record<string, unknown> | null;

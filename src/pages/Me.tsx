@@ -18,10 +18,11 @@ import type {
 } from '../types';
 import { Workshop, totalScore } from './me/Workshop';
 import { History } from './me/History';
+import { PersonaStudio } from './me/PersonaStudio';
 import { CoachDrawer } from '../components/me/CoachDrawer';
 import { ParseResumeModal } from '../components/me/ParseResumeModal';
 
-type Tab = 'workshop' | 'history';
+type Tab = 'workshop' | 'voice' | 'history';
 
 export function Me() {
   const { profile, refreshProfile } = useAuth();
@@ -264,6 +265,15 @@ export function Me() {
         <button
           type="button"
           role="tab"
+          aria-selected={tab === 'voice'}
+          className={`me-tab ${tab === 'voice' ? 'me-tab-active' : ''}`}
+          onClick={() => setTab('voice')}
+        >
+          Voice
+        </button>
+        <button
+          type="button"
+          role="tab"
           aria-selected={tab === 'history'}
           className={`me-tab ${tab === 'history' ? 'me-tab-active' : ''}`}
           onClick={() => setTab('history')}
@@ -287,6 +297,8 @@ export function Me() {
           onAssetUploaded={handleAssetUploaded}
           onAssetError={(msg) => toast.error(msg)}
         />
+      ) : tab === 'voice' ? (
+        <PersonaStudio userId={profile?.user_id} />
       ) : profile?.user_id ? (
         <History
           userId={profile.user_id}

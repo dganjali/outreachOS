@@ -3,6 +3,7 @@ import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { forUser, newId, type InsertDoc } from '../_lib/db';
 import { getActiveAccessToken, sendNow, isValidEmailAddress } from '../_lib/gmail';
 import { scheduleFollowups, isSuppressed } from '../_lib/sequencing';
+import { recordOutcome } from '../_lib/outcomes';
 import type {
   ContactDoc,
   EmailSequenceDoc,
@@ -91,6 +92,12 @@ export default async function handler(req: Request, res: Response) {
   const touchKey = touchIndex === 0 ? 'initial' : `followup_${touchIndex - 1}`;
   const touchRefs = Array.isArray(refsByTouch[touchKey]) ? refsByTouch[touchKey] : [];
 
+  // Edit-delta capture: the AI's original draft for this touch vs the final text
+  // being sent. For the initial email the original lives on the sequence; for
+  // follow-ups we don't persist a separate original, so draft == final.
+  const draftSubject = touchIndex === 0 ? seq.originalSubject ?? subject : subject;
+  const draftBody = touchIndex === 0 ? seq.originalBody ?? bodyText : bodyText;
+
   const sentRowBase: Omit<InsertDoc<SentMessageDoc>, '_id'> = {
     sequenceId,
     contactId: contact._id,
@@ -98,6 +105,8 @@ export default async function handler(req: Request, res: Response) {
     touchIndex,
     subject,
     body: bodyText,
+    draftSubject,
+    draftBody,
     toEmail,
     gmailDraftId: null,
     gmailMessageId: null,
@@ -158,6 +167,10 @@ export default async function handler(req: Request, res: Response) {
         sentAt,
       });
       await scope.collection<ContactDoc>('contacts').updateById(contact._id, { status: 'contacted' });
+
+      // Credit the facts/exemplars behind this email with a 'sent' so per-fact
+      // reply-rate has a denominator. Best-effort.
+      await recordOutcome(user.id, contact._id, 'sent');
 
       // Auto-schedule the follow-up cadence unless the user paused it globally.
       const paused = (profile as ProfileDoc | null)?.pauseFollowups === true;

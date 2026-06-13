@@ -74,3 +74,26 @@ test('a draft with no claims and no banned phrases has no blockers', () => {
   const v = verifyDraftDeterministic(draft({ claims: [] }), FACTS, { bannedPhrases: [] });
   assert.equal(hasBlocker(v), false);
 });
+
+test('deliverability heuristics (spam words) warn but never block', () => {
+  const v = verifyDraftDeterministic(
+    draft({ body: 'Act now! This is a limited time risk-free offer — worth 15 min next week?' }),
+    FACTS,
+    { bannedPhrases: [] },
+  );
+  assert.equal(v.some((x) => x.type === 'constraint' && x.severity === 'warn'), true);
+  assert.equal(hasBlocker(v), false);
+});
+
+test('a draft with no call-to-action gets a constraint warning', () => {
+  const v = verifyDraftDeterministic(
+    draft({ body: 'I run a 1,400-person dev conference and saw Acme raised a Series B.' }),
+    FACTS,
+    { bannedPhrases: [] },
+  );
+  assert.equal(
+    v.some((x) => x.type === 'constraint' && /call-to-action/i.test(x.detail)),
+    true,
+  );
+  assert.equal(hasBlocker(v), false);
+});

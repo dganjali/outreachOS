@@ -58,8 +58,64 @@ export interface Mission {
   offer_details: string | null;
   status: string;
   archived_at: string | null;
+  // The reusable persona (voice) this mission drafts as. Required for new
+  // missions; null on pre-personalization missions until backfilled.
+  persona_id: string | null;
   created_at: string;
   updated_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Personalization layer (frontend mirrors of shared/schemas.ts, snake_cased by
+// the api.ts response converter).
+// ---------------------------------------------------------------------------
+export interface StyleDimension {
+  value: number;
+  confidence: number;
+  source: string;
+}
+
+export interface StyleProfile {
+  dimensions: Record<string, StyleDimension>;
+  rules: Array<{ rule: string; source: string; confidence: number }>;
+  banned_phrases: string[];
+  voice_summary: string;
+}
+
+export interface Persona {
+  id: string;
+  user_id?: string;
+  name: string;
+  mode: MissionMode | null;
+  offer: string | null;
+  audience: string | null;
+  style_profile: StyleProfile;
+  style_profile_version: number;
+  onboarding_completed_at: string | null;
+  archived_at: string | null;
+  created_at?: string;
+}
+
+export interface ContextFact {
+  id: string;
+  scope: 'person' | 'persona';
+  persona_id: string | null;
+  type: 'proof' | 'metric' | 'offer' | 'audience' | 'credential' | 'constraint';
+  claim: string;
+  date: string | null;
+  evidence_url: string | null;
+  provenance: string;
+  confidence: number;
+}
+
+export interface StyleExemplar {
+  id: string;
+  persona_id: string;
+  subject: string | null;
+  body: string;
+  mode: MissionMode | null;
+  source: 'user-provided' | 'stage4-confirmed' | 'earned-winner';
+  outcome: 'replied' | 'unknown';
 }
 
 export interface Integration {

@@ -59,22 +59,46 @@ The principle that makes it "memory, not a diff prompt": the **StyleProfile is
 structured + versioned + confidence-weighted**, injected as message *data after*
 a cached static prefix. Engine reads it; learning loop writes it.
 
+> **STATUS (full plan now implemented in code).** All three phases are built and
+> compile clean (`server:typecheck` baseline-only noise, frontend tsc clean,
+> `npm test` 105 pass / 2 env-skip, `npm run build` green). What still needs the
+> **cloud** to verify at runtime (live Vertex + Atlas + the app): the LLM stages,
+> the migration, the eval scores, and the onboarding/calibration UX. See §9.
+
 ### Phase 1 — LLM foundation  ✅ DONE (see §4)
 - 1a Gemini adapter upgrade (structured output, model tiering, caching passthrough).
 - 1b Layered persona data model + indexes.
-- 1c Grounded generation engine (assemble → generate → verify → revise).
-- 1d Eval harness (⏳ not started).
+- 1c Grounded generation engine (assemble → generate → verify → revise) — now the
+  **live pipeline path** (`sequence.ts` drafts the initial email through
+  `runDraftEngine`, keeps follow-ups). Deterministic verifier reuses the shared
+  `deliverability.ts` checks + a CTA heuristic. Full observe-telemetry
+  (`fact_ids`/`exemplar_ids`/`claims`/`violations`/`persona_version`) on `agent_runs`.
+- 1d Eval harness ✅ — `npm run eval` (`scripts/eval/`), pure scorers in
+  `api/_lib/eval-scorers.ts` (unit-tested), baseline diff.
 
-### Phase 2 — Taste onboarding flow  ⏳ TODO  (full spec in §6)
-- Persona-builder launched from `MissionNew` (mandatory to send) **and** editable
-  anytime in the **ME tab**. New agents: `onboard-questions`, `refine`
-  (span + structural rewrite), `extract-style`. Stage 4 is a **canvas + side
-  chatbox** calibration UI.
+### Phase 2 — Taste onboarding flow  ✅ DONE (full spec in §6)
+- Agents: `api/agents/onboard-questions.ts`, `refine.ts` (span + structural),
+  `extract-style.ts` (calibration → confidence-weighted StyleProfile + PersonaVersion).
+- Persona **gate in `MissionNew`** (mandatory: a mission can't be created without a
+  persona; `persona_id` wired). ME tab gains a **Voice** tab (`src/pages/me/PersonaStudio.tsx`):
+  substance/exemplars/clarify/calibrate (write → chat-refine → confirm) + the
+  "your voice" legibility surface. (Calibration here is contact-free; the same
+  refine canvas is intended for reuse on real drafts in `MissionPage`.)
 
-### Phase 3 — Runtime learning loop  ⏳ TODO
-- Edit-delta capture (keystone), confidence-weighted calibration merge, pipeline
-  integration (persona-aware, tiered critique, Vertex context caching),
-  reply→outcome stats, "your voice" legibility surface.
+### Phase 3 — Runtime learning loop  ✅ DONE
+- Edit-delta capture (keystone): `originalSubject`/`originalBody` on the sequence,
+  `draftSubject`/`draftBody` on `sent_messages` (captured at send); `saveTouch`
+  preserves the original.
+- Confidence-weighted merge (`api/_lib/style-merge.ts`, unit-tested) + PersonaVersion
+  snapshots in `extract-style.ts`.
+- Pipeline integration done via 1c (engine is the live draft path).
+- Reply→outcome stats: `api/_lib/outcomes.ts` credits per-`ContextFact.replyStats`
+  + per-exemplar `outcome` using engine telemetry, wired into `reply.ts` (replied)
+  and `gmail/send.ts` (sent).
+- "Your voice" legibility surface — in the ME → Voice tab.
+- **Not done (deliberate):** Vertex `CachedContent` *create* helper (the
+  `cachedContent` passthrough exists; wiring a real cached prefix is a perf
+  optimization left for when cost is measured).
 
 ---
 
@@ -112,13 +136,30 @@ exemplars/facts into an `AssembledContext`, and `runs.ts` telemetry wiring.
 
 ## 5. What's left (in depth)
 
-### Task 3 — Persona migration  (`scripts/migrate-personas.ts`, + npm script)
-For each existing `profiles` doc: create a default `PersonaDoc`; convert freeform
-`proofPoints`/`achievements`/`metrics` → `ContextFactDoc(scope:'person')`;
-`exampleEmails` → `StyleExemplarDoc`. Idempotent + non-destructive. Backfill
-`missions.personaId` to the default persona. **Needs live Atlas to run/verify.**
-Also re-run `npm run mongo:init` on the cluster to create the new indexes +
-vector indexes (`scripts/init-mongo.ts` reads `INDEX_SPEC`/`VECTOR_INDEX_SPEC`).
+### Task 3 — Persona migration  ✅ WRITTEN (needs live Atlas to RUN)
+`scripts/migrate-personas.ts` + `npm run migrate:personas` (supports `-- --dry-run`).
+For each `profiles` doc: create a default `PersonaDoc` (voiceSummary seeded from
+`writingTone`) if the user has none; convert freeform `proofPoints`/`achievements`
+/`metrics` → `ContextFactDoc(scope:'person')` (one atomic claim per line, bullet/
+number markers stripped); `exampleEmails` → `StyleExemplarDoc` (`source:
+'user-provided'`, split on `---` lines); backfill `missions.personaId`. Idempotent
++ non-destructive: per-user guards key off "does the user already have any persona
+/ fact / exemplar" so re-runs never duplicate or clobber. **Facts/exemplars are
+written WITHOUT embeddings** (offline script, no Vertex) — the draft engine falls
+back to recency; a later embedding-backfill enables vector retrieval. Still needs
+a live Atlas to run/verify, then re-run `npm run mongo:init` on the cluster to
+create the new indexes + vector indexes.
+
+### Task 4 — Draft agent  ✅ DONE (needs live Vertex+Atlas to RUN end-to-end)
+`api/agents/draft.ts` — the HTTP entry to the engine. Loads contact→target→
+mission→persona, assembles `AssembledContext` (allowedFacts = relevance-ranked
+context facts via `context_fact_vector_idx` + latest evidence-pack bullets, with
+recency fallback; exemplars via `style_exemplar_vector_idx` with recency fallback;
+styleProfile from the persona), then `runDraftEngine(ctx, tier)`. Body: `{ contact_id,
+tier? }` (`tier` defaults `'bulk'`; `'onboarding'` for the interactive calibration
+draft). Wired in `server/index.ts` (`POST /api/agents/draft`) + `agents.draft()` in
+`src/lib/api.ts`. `'draft'` added to `AgentRunDoc.agentType`. Legacy missions with
+`personaId:null` fall back to the user's default persona (or `emptyStyleProfile()`).
 
 ### Task 5 — Eval harness  (`scripts/eval/`, `npm run eval`)
 Fixtures (`persona × mission × contact × evidence`) → run `runDraftEngine` →
@@ -130,9 +171,10 @@ Emit scorecard JSON; diff vs a committed baseline to catch regressions.
 ### Task 6 — Taste onboarding flow + agents  → **see §6 for the authoritative spec**
 New agents (all Gemini `responseJsonSchema`): `api/agents/onboard-questions.ts`,
 `api/agents/refine.ts` (span + structural rewrite), `api/agents/extract-style.ts`
-(calibration → StyleProfile deltas). New `api/agents/draft.ts` (HTTP handler:
-assemble `AssembledContext` from DB + vector retrieval, call `runDraftEngine`).
-Add endpoints to `src/lib/api.ts`. UI: persona selector/gate in
+(calibration → StyleProfile deltas). `api/agents/draft.ts` (the HTTP draft
+handler) is **already built** — see Task 4; onboarding Stage 4 calls it with
+`tier:'onboarding'`. Add the new agent endpoints to `src/lib/api.ts`. UI: persona
+selector/gate in
 `src/pages/MissionNew.tsx`; the ME tab (`src/pages/Me.tsx` + `me/Workshop.tsx`)
 becomes the taste-onboarding home; Stage 4 canvas+chatbox component.
 
