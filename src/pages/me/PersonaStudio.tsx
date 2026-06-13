@@ -147,7 +147,13 @@ function PersonaDetail({
       <ExemplarsCard userId={userId} personaId={persona.id} exemplars={exemplars} onAdded={reload} />
       <ClarifyCard userId={userId} personaId={persona.id} onAnswered={reload} />
       <div className="lg:col-span-2">
-        <CalibrateCard persona={persona} onCalibrated={onCalibrated} />
+        <CalibrateCard
+          persona={persona}
+          onCalibrated={() => {
+            onCalibrated(); // refresh persona (version + style profile)
+            reload(); // refresh this persona's facts + exemplars (count updates)
+          }}
+        />
       </div>
     </div>
   );

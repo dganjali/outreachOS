@@ -127,9 +127,14 @@ export default async function handler(req: Request, res: Response) {
     const merged = mergeStyleProfile(persona.styleProfile, delta, source);
     const nextVersion = (persona.styleProfileVersion ?? 1) + 1;
 
+    // First successful calibration marks the persona as onboarded (drives the
+    // "Calibrated" indicators in the ME → Voice tab and the MissionNew gate).
+    const markOnboarded = !persona.onboardingCompletedAt;
+
     await personas.updateById(personaId, {
       styleProfile: merged,
       styleProfileVersion: nextVersion,
+      ...(markOnboarded ? { onboardingCompletedAt: new Date() } : {}),
     } as Partial<PersonaDoc>);
 
     // Immutable snapshot for audit + rollback.
