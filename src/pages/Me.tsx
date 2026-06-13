@@ -11,7 +11,6 @@ import {
   type SnapshotField,
 } from '../lib/profileSnapshot';
 import type {
-  Profile,
   ProfileVersionSource,
   ParsedResumeFields,
   ProfileAsset,
@@ -22,16 +21,15 @@ import { PersonaStudio } from './me/PersonaStudio';
 import { CoachDrawer } from '../components/me/CoachDrawer';
 import { ParseResumeModal } from '../components/me/ParseResumeModal';
 
-type Tab = 'workshop' | 'voice' | 'history';
+type Tab = 'personalization' | 'context' | 'history';
 
 export function Me() {
   const { profile, refreshProfile } = useAuth();
   const toast = useToast();
   const [form, setForm] = useState<ProfileSnapshot>(() => snapshotFromProfile(profile));
   const [saving, setSaving] = useState(false);
-  const [enriching, setEnriching] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>('workshop');
+  const [tab, setTab] = useState<Tab>('personalization');
   const [historyReloadKey, setHistoryReloadKey] = useState(0);
   const [coach, setCoach] = useState<{ open: boolean; field: CoachField | null; value: string }>({
     open: false,
@@ -52,6 +50,18 @@ export function Me() {
 
   const score = useMemo(() => totalScore(form), [form]);
   const percent = score.total === 0 ? 0 : Math.round((score.filled / score.total) * 100);
+
+  // Proof-y lines from the Context tab a new voice can import as substance,
+  // so users don't retype what they already entered.
+  const importableFacts = useMemo(
+    () =>
+      [form.proof_points, form.achievements, form.metrics]
+        .join('\n')
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean),
+    [form.proof_points, form.achievements, form.metrics]
+  );
 
   async function persistProfile(snapshot: ProfileSnapshot) {
     if (!profile?.id) throw new Error('No profile');
@@ -140,34 +150,6 @@ export function Me() {
     }
   }
 
-  async function handleEnrich() {
-    if (!form.linkedin_url) return;
-    setEnriching(true);
-    try {
-      const r = await agents.enrichProfile();
-      await refreshProfile();
-      // Server already wrote enriched values into `profiles`; record a version snapshot
-      // from the just-refreshed profile so History captures the agent-authored change.
-      const enrichedSnap = snapshotFromProfile(
-        // refreshProfile mutates AuthContext but doesn't return the new profile; we re-fetch
-        // from supabase to avoid a stale-state race in the snapshot row.
-        await fetchFreshProfile(profile?.user_id)
-      );
-      await maybeSnapshot(
-        enrichedSnap,
-        'enrich',
-        `Enriched from ${r.source === 'apollo' ? 'a verified directory' : 'web search'}`
-      );
-      toast.success(
-        `Enriched from ${r.source === 'apollo' ? 'a verified directory' : 'web search'}. Review and tweak.`
-      );
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Enrichment failed');
-    } finally {
-      setEnriching(false);
-    }
-  }
-
   async function handleAssetUploaded(asset: ProfileAsset) {
     setAssetReloadKey((k) => k + 1);
     if (asset.kind !== 'resume') {
@@ -240,7 +222,7 @@ export function Me() {
         <div>
           <h1 className="me-title">Me</h1>
           <p className="me-subtitle">
-            The agent reads this every time it drafts an email. Sharper inputs, sharper outreach.
+            Your voices and the context behind them. The agent reads this every time it drafts.
           </p>
         </div>
         <div className="me-completeness" aria-label={`Profile ${percent}% complete`}>
@@ -256,20 +238,20 @@ export function Me() {
         <button
           type="button"
           role="tab"
-          aria-selected={tab === 'workshop'}
-          className={`me-tab ${tab === 'workshop' ? 'me-tab-active' : ''}`}
-          onClick={() => setTab('workshop')}
+          aria-selected={tab === 'personalization'}
+          className={`me-tab ${tab === 'personalization' ? 'me-tab-active' : ''}`}
+          onClick={() => setTab('personalization')}
         >
-          Workshop
+          Personalization
         </button>
         <button
           type="button"
           role="tab"
-          aria-selected={tab === 'voice'}
-          className={`me-tab ${tab === 'voice' ? 'me-tab-active' : ''}`}
-          onClick={() => setTab('voice')}
+          aria-selected={tab === 'context'}
+          className={`me-tab ${tab === 'context' ? 'me-tab-active' : ''}`}
+          onClick={() => setTab('context')}
         >
-          Voice
+          Context
         </button>
         <button
           type="button"
@@ -282,23 +264,21 @@ export function Me() {
         </button>
       </div>
 
-      {tab === 'workshop' ? (
+      {tab === 'personalization' ? (
+        <PersonaStudio userId={profile?.user_id} importable={importableFacts} />
+      ) : tab === 'context' ? (
         <Workshop
           form={form}
           setForm={setForm}
           profile={profile}
           saving={saving}
-          enriching={enriching}
           error={error}
           onSubmit={handleSubmit}
-          onEnrich={handleEnrich}
           onCoach={(field, value) => setCoach({ open: true, field, value })}
           assetReloadKey={assetReloadKey}
           onAssetUploaded={handleAssetUploaded}
           onAssetError={(msg) => toast.error(msg)}
         />
-      ) : tab === 'voice' ? (
-        <PersonaStudio userId={profile?.user_id} />
       ) : profile?.user_id ? (
         <History
           userId={profile.user_id}
@@ -337,16 +317,6 @@ export function Me() {
       )}
     </div>
   );
-}
-
-async function fetchFreshProfile(userId: string | undefined): Promise<Profile | null> {
-  if (!userId) return null;
-  const { data } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('user_id', userId)
-    .maybeSingle();
-  return (data as Profile | null) ?? null;
 }
 
 function CompletenessRing({ percent }: { percent: number }) {

@@ -48,6 +48,42 @@ export async function getPersona(id: string): Promise<Persona | null> {
   return (data as Persona) ?? null;
 }
 
+export async function updatePersona(
+  id: string,
+  patch: Partial<{
+    name: string;
+    mode: MissionMode | null;
+    offer: string | null;
+    audience: string | null;
+    style_profile: StyleProfile;
+    style_profile_version: number;
+    onboarding_completed_at: string | null;
+    archived_at: string | null;
+  }>
+): Promise<void> {
+  const { error } = await supabase.from('personas').update(patch).eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
+export interface PersonaBundle {
+  persona: Persona;
+  facts: ContextFact[];
+  exemplars: StyleExemplar[];
+}
+
+/** Persona + its persona-scoped facts + exemplars — everything the wizard edits. */
+export async function getPersonaBundle(userId: string, personaId: string): Promise<PersonaBundle | null> {
+  const persona = await getPersona(personaId);
+  if (!persona) return null;
+  const [facts, exemplars] = await Promise.all([
+    listContextFacts(userId, personaId),
+    listExemplars(personaId),
+  ]);
+  // Edit only the facts that belong to this persona; person-level facts are owned
+  // by the Context tab, not the per-voice wizard.
+  return { persona, facts: facts.filter((f) => f.scope === 'persona'), exemplars };
+}
+
 export async function listContextFacts(userId: string, personaId: string | null): Promise<ContextFact[]> {
   const { data, error } = await supabase.from('context_facts').select('*').eq('user_id', userId);
   if (error) throw new Error(error.message);
@@ -74,6 +110,11 @@ export async function addContextFact(
   if (error) throw new Error(error.message);
 }
 
+export async function deleteContextFact(id: string): Promise<void> {
+  const { error } = await supabase.from('context_facts').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
 export async function listExemplars(personaId: string): Promise<StyleExemplar[]> {
   const { data, error } = await supabase.from('style_exemplars').select('*').eq('persona_id', personaId);
   if (error) throw new Error(error.message);
@@ -94,5 +135,10 @@ export async function addExemplar(
     source: 'user-provided',
     outcome: 'unknown',
   });
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteExemplar(id: string): Promise<void> {
+  const { error } = await supabase.from('style_exemplars').delete().eq('id', id);
   if (error) throw new Error(error.message);
 }

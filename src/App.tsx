@@ -22,6 +22,7 @@ import { Inbox } from './pages/Inbox';
 import { Me } from './pages/Me';
 import { SettingsPage } from './pages/SettingsPage';
 import { Privacy, Terms } from './pages/Legal';
+import { WizardPreview } from './pages/_WizardPreview';
 
 function App() {
   return (
@@ -64,6 +65,7 @@ function App() {
             }
           />
           <Route path="/check-email" element={<CheckEmail />} />
+          <Route path="/wizard-preview" element={<WizardPreview />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/terms" element={<Terms />} />
           <Route

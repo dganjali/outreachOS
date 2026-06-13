@@ -4,7 +4,7 @@ import type { Profile, ProfileAsset } from '../../types';
 import type { CoachField } from '../../lib/api';
 import { AssetUploader } from '../../components/me/AssetUploader';
 
-type PanelKey = 'identity' | 'pitch' | 'proof' | 'voice' | 'assets';
+type PanelKey = 'identity' | 'pitch' | 'proof' | 'assets';
 
 function countFilled(values: string[]): { filled: number; total: number } {
   return {
@@ -26,15 +26,13 @@ export function scorePanel(form: ProfileSnapshot, key: PanelKey): { filled: numb
         form.metrics,
         form.portfolio_links.length ? 'x' : '',
       ]);
-    case 'voice':
-      return countFilled([form.writing_tone, form.example_emails]);
     case 'assets':
       return countFilled([form.resume_url, form.linkedin_url, form.website]);
   }
 }
 
 export function totalScore(form: ProfileSnapshot) {
-  const panels: PanelKey[] = ['identity', 'pitch', 'proof', 'voice', 'assets'];
+  const panels: PanelKey[] = ['identity', 'pitch', 'proof', 'assets'];
   return panels.reduce(
     (acc, k) => {
       const s = scorePanel(form, k);
@@ -49,10 +47,8 @@ interface WorkshopProps {
   setForm: React.Dispatch<React.SetStateAction<ProfileSnapshot>>;
   profile: Profile | null;
   saving: boolean;
-  enriching: boolean;
   error: string | null;
   onSubmit: (e: React.FormEvent) => void;
-  onEnrich: () => void;
   onCoach: (field: CoachField, current: string) => void;
   assetReloadKey: number;
   onAssetUploaded: (asset: ProfileAsset) => void;
@@ -64,10 +60,8 @@ export function Workshop({
   setForm,
   profile,
   saving,
-  enriching,
   error,
   onSubmit,
-  onEnrich,
   onCoach,
   assetReloadKey,
   onAssetUploaded,
@@ -77,7 +71,6 @@ export function Workshop({
     identity: true,
     pitch: true,
     proof: false,
-    voice: false,
     assets: false,
   });
 
@@ -191,38 +184,8 @@ export function Workshop({
       </Panel>
 
       <Panel
-        title="Voice"
-        hint="How you want the agent to sound when it writes as you."
-        open={open.voice}
-        score={scorePanel(form, 'voice')}
-        onToggle={() => toggle('voice')}
-      >
-        <Field
-          label="Preferred tone"
-          coach={{ field: 'writing_tone', value: form.writing_tone, onCoach }}
-        >
-          <input
-            type="text"
-            placeholder="e.g. direct, warm, technical, no jargon"
-            value={form.writing_tone}
-            onChange={(e) => set('writing_tone', e.target.value)}
-          />
-        </Field>
-        <Field
-          label="Example emails (style reference)"
-          coach={{ field: 'example_emails', value: form.example_emails, onCoach }}
-        >
-          <textarea
-            rows={6}
-            value={form.example_emails}
-            onChange={(e) => set('example_emails', e.target.value)}
-          />
-        </Field>
-      </Panel>
-
-      <Panel
-        title="Assets"
-        hint="Links and uploads the agent can pull from. Add LinkedIn to enable one-click enrichment; upload a resume to auto-suggest profile updates."
+        title="Links & files"
+        hint="Links and uploads the agent can pull from. Upload a resume to import details into the fields above."
         open={open.assets}
         score={scorePanel(form, 'assets')}
         onToggle={() => toggle('assets')}
@@ -249,30 +212,6 @@ export function Workshop({
               onChange={(e) => set('resume_url', e.target.value)}
             />
           </Field>
-        </div>
-        <div className="me-enrich">
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={onEnrich}
-            disabled={enriching || !form.linkedin_url}
-            title={
-              !form.linkedin_url
-                ? 'Add a LinkedIn URL first'
-                : 'Auto-fill bio, proof points, and tone from your LinkedIn'
-            }
-          >
-            {enriching
-              ? 'Enriching…'
-              : profile?.linkedin_enriched_at
-                ? 'Re-enrich from LinkedIn'
-                : 'Enrich from LinkedIn'}
-          </button>
-          {profile?.linkedin_enriched_at && (
-            <span className="me-enrich-meta">
-              Last enriched {new Date(profile.linkedin_enriched_at).toLocaleDateString()}
-            </span>
-          )}
         </div>
 
         {profile?.user_id && (
