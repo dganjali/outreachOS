@@ -11,7 +11,7 @@ import { listPersonas } from '../../lib/personas';
 import { PersonaWizard } from '../../components/persona/PersonaWizard';
 import type { Persona } from '../../types';
 
-export function PersonaStudio({ userId, importable }: { userId: string | undefined; importable?: string[] }) {
+export function PersonaStudio({ userId }: { userId: string | undefined }) {
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -42,7 +42,6 @@ export function PersonaStudio({ userId, importable }: { userId: string | undefin
       <PersonaWizard
         userId={userId}
         personaId={active === 'new' ? undefined : active}
-        importable={active === 'new' ? importable : undefined}
         onCancel={() => setActive(null)}
         onDone={() => {
           setActive(null);

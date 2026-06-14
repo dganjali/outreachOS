@@ -205,9 +205,10 @@ export type AgentType =
   | 'reply'
   | 'enrich_profile'
   | 'coach'
-  | 'parse_resume';
+  | 'parse_resume'
+  | 'extract_context';
 
-export type ProfileAssetKind = 'resume' | 'portfolio_pdf' | 'case_study' | 'screenshot';
+export type ProfileAssetKind = 'resume' | 'portfolio_pdf' | 'case_study' | 'screenshot' | 'context_dump';
 
 export interface ParsedResumeRole {
   title: string;

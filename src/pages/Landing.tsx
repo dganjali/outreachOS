@@ -15,7 +15,7 @@ import { cn } from '@/lib/utils';
 import { PLANS, PLAN_ORDER } from '../../shared/plans';
 
 const HOW = [
-  { step: '01', title: 'Tell us the mission', body: 'Pick a mode, describe what you are sending, and who you want to reach. Add your LinkedIn and we auto-fill your bio, proof points, and tone.' },
+  { step: '01', title: 'Tell us the mission', body: 'Pick a mode, describe what you are sending, and who you want to reach. Set up a voice with your own facts and tone — what you enter is what the agent cites.' },
   { step: '02', title: 'Agents do the legwork', body: 'Targeting, evidence, contacts, and sequence agents run in one click. They research the web for the right companies and people, then verify the details.' },
   { step: '03', title: 'Review, send, follow up', body: 'Approve drafts in your voice and send via Gmail. Follow-ups go out on their cadence and stop the moment you mark a contact as replied.' },
 ];

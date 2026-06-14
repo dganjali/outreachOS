@@ -2,13 +2,32 @@ import { supabase } from '../supabaseClient';
 import type { ProfileAsset, ProfileAssetKind } from '../types';
 
 const BUCKET = 'profile-assets';
-export const MAX_ASSET_BYTES = 2 * 1024 * 1024; // 2MB — must match server-side cap in parse-resume.ts
+export const MAX_ASSET_BYTES = 20 * 1024 * 1024; // 20MB — must match server-side cap in parse-resume.ts
 
 const ACCEPTED_MIME: Record<ProfileAssetKind, string[]> = {
   resume: ['application/pdf'],
   portfolio_pdf: ['application/pdf'],
   case_study: ['application/pdf'],
   screenshot: ['image/png', 'image/jpeg', 'image/webp'],
+  // context_dump accepts PDF, DOCX, TXT, MD, RTF. Note: .md and .rtf files
+  // often have an empty file.type — the existing `if (file.type && ...)` guard
+  // already lets empty types through, so extension-only detection works fine.
+  context_dump: [
+    'application/pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/msword',
+    'text/plain',
+    'text/markdown',
+    'text/x-markdown',
+    'text/rtf',
+    'application/rtf',
+    // Images / screenshots — extracted via OCR (Gemini) server-side.
+    'image/png',
+    'image/jpeg',
+    'image/webp',
+    'image/heic',
+    'image/heif',
+  ],
 };
 
 function randomSegment(): string {
@@ -50,7 +69,7 @@ export async function uploadAsset(opts: {
   const { userId, kind, file } = opts;
 
   if (file.size > MAX_ASSET_BYTES) {
-    throw new Error(`File too large. Max 2MB; this file is ${(file.size / 1024 / 1024).toFixed(1)}MB.`);
+    throw new Error(`File too large. Max 20MB; this file is ${(file.size / 1024 / 1024).toFixed(1)}MB.`);
   }
   const accepted = ACCEPTED_MIME[kind];
   if (file.type && !accepted.includes(file.type)) {

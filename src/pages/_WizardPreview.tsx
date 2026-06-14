@@ -10,7 +10,6 @@ export function WizardPreview() {
       <PersonaWizard
         userId="preview-user"
         personaId={edit ? 'preview-persona' : undefined}
-        importable={['Ran a 1,400-person developer conference', 'Backed by Vercel and Notion']}
         onDone={() => undefined}
         onCancel={() => undefined}
       />

@@ -6,7 +6,7 @@ import pdfParse from 'pdf-parse/lib/pdf-parse.js';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { forUser } from '../_lib/db';
 import { downloadObject } from '../_lib/storage';
-import { MODEL, createMessageWithRetry, extractJson } from '../_lib/llm';
+import { MODEL, createMessageWithRetry, extractJson, ocrTranscribe } from '../_lib/llm';
 import { PARSE_RESUME_SYSTEM } from '../_lib/prompts';
 import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
 import type { ProfileAssetDoc } from '../../shared/schemas';
@@ -21,7 +21,7 @@ interface ParsedResume {
   roles?: Array<{ title?: string; organization?: string; start?: string; end?: string; summary?: string }>;
 }
 
-const MAX_BYTES = 2 * 1024 * 1024;
+const MAX_BYTES = 20 * 1024 * 1024;
 const MAX_TEXT_CHARS = 30_000;
 
 export default async function handler(req: Request, res: Response) {
@@ -41,7 +41,7 @@ export default async function handler(req: Request, res: Response) {
     return res.status(400).json({ error: 'asset_not_parseable', detail: `Only resume kind is parsed; got ${asset.kind}` });
   }
   if (asset.fileSize > MAX_BYTES) {
-    return res.status(413).json({ error: 'file_too_large', detail: 'Max 2MB' });
+    return res.status(413).json({ error: 'file_too_large', detail: 'Max 20MB' });
   }
 
   const run = await startRun(scope, {
@@ -73,6 +73,16 @@ export default async function handler(req: Request, res: Response) {
         parsedAt: new Date(),
       });
       return res.status(422).json({ error: 'pdf_parse_failed', detail: msg });
+    }
+
+    // Scanned/image-only resumes have no text layer — fall back to OCR (Gemini).
+    if (text.length < 50) {
+      try {
+        const ocr = await ocrTranscribe(buf, asset.mimeType || 'application/pdf');
+        if (ocr.length > text.length) text = ocr;
+      } catch {
+        // OCR best-effort — fall through to the text_empty error below.
+      }
     }
 
     if (!text || text.length < 50) {

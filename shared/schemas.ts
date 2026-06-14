@@ -87,7 +87,7 @@ export interface ProfileVersionDoc extends BaseDoc {
 }
 
 export interface ProfileAssetDoc extends BaseDoc {
-  kind: 'resume' | 'portfolio_pdf' | 'case_study' | 'screenshot';
+  kind: 'resume' | 'portfolio_pdf' | 'case_study' | 'screenshot' | 'context_dump';
   storagePath: string;       // GCS path (NOT a URL)
   fileName: string;
   fileSize: number;
@@ -350,7 +350,8 @@ export interface AgentRunDoc extends BaseDoc {
     | 'draft'
     | 'onboard_questions'
     | 'refine'
-    | 'extract_style';
+    | 'extract_style'
+    | 'extract_context';
   status: 'running' | 'completed' | 'failed';
   input: Record<string, unknown> | null;
   output: Record<string, unknown> | null;

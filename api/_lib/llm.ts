@@ -217,6 +217,53 @@ export async function generateJson<T>(
   return extractJson<T>(message);
 }
 
+// ---- OCR via Gemini multimodal ----
+// Inline data is sent base64; Vertex caps a request at ~20MB total, so base64
+// inflation (~33%) means the raw file must stay well under that.
+const OCR_MAX_BYTES = 14 * 1024 * 1024;
+const OCR_PROMPT =
+  'You are an OCR engine. Transcribe ALL readable text from this document verbatim, ' +
+  'preserving reading order and line breaks. Output only the transcribed text — no ' +
+  'commentary, no markdown fences, no explanations. If the document has no readable ' +
+  'text at all, output nothing.';
+
+/**
+ * OCR a PDF or image by handing the raw bytes to Gemini (which reads them
+ * natively). Used as a fallback when deterministic text extraction finds no
+ * embedded text layer (scanned/image-only files). Returns the transcribed text
+ * (possibly empty if the file genuinely has no readable text).
+ */
+export async function ocrTranscribe(buf: Buffer, mimeType: string): Promise<string> {
+  if (buf.length > OCR_MAX_BYTES) {
+    throw Object.assign(new Error('File too large to OCR — please upload a file under 14MB.'), {
+      code: 'ocr_too_large',
+    });
+  }
+  const model = MODEL(); // flash 2.5 — cheap, strong multimodal OCR
+  const config: Record<string, unknown> = {
+    temperature: 0,
+    maxOutputTokens: 8192,
+  };
+  if (isThinkingModel(model)) config.thinkingConfig = { thinkingBudget: 0 };
+
+  const resp = await client().models.generateContent({
+    model,
+    contents: [
+      {
+        role: 'user',
+        parts: [{ inlineData: { mimeType, data: buf.toString('base64') } }, { text: OCR_PROMPT }],
+      },
+    ],
+    config,
+  });
+
+  let text = '';
+  for (const part of resp.candidates?.[0]?.content?.parts ?? []) {
+    if (typeof (part as { text?: string }).text === 'string') text += (part as { text: string }).text;
+  }
+  return text.trim();
+}
+
 function dedupeCitations(items: Citation[]): Citation[] {
   const seen = new Set<string>();
   const out: Citation[] = [];
