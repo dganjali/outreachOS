@@ -226,9 +226,6 @@ export function Landing() {
                 <a href="#how">See how it works</a>
               </Button>
             </Reveal>
-            <Reveal as="div" delay={260}>
-              <p className="mt-5 text-sm text-muted-foreground">Runs on Google Gemini. Connect Gmail to send.</p>
-            </Reveal>
           </div>
 
           {/* hero product shot — matte frame, single soft shadow, no gradient ring or glow */}
@@ -335,37 +332,25 @@ export function Landing() {
           </div>
         </section>
 
-        {/* Modes — matte bento grid: varied tile sizes, flat cards, hairline borders */}
+        {/* Modes — compact: one tight row of flat tiles, hairline borders */}
         <section id="modes" className="border-t border-border/70">
-          <div className="mx-auto max-w-6xl px-5 py-20 md:px-8 md:py-24">
+          <div className="mx-auto max-w-6xl px-5 py-14 md:px-8 md:py-16">
             <Reveal>
               <SectionHead
                 title="Five modes. One pipeline."
                 sub="Same machine underneath; the targeting, evidence, and tone shift to the job at hand."
               />
             </Reveal>
-            <div className="grid auto-rows-[minmax(11rem,1fr)] grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
               {MODES.map((m, i) => (
                 <Reveal
                   key={m.title}
-                  delay={(i % 2) * 70}
-                  className={cn(
-                    'group flex flex-col justify-between rounded-xl border border-border bg-card p-6 transition-colors duration-200 hover:border-muted-foreground/25 hover:bg-secondary/40',
-                    i === 0 && 'sm:col-span-2 lg:row-span-2'
-                  )}
+                  delay={(i % 3) * 60}
+                  className="group flex flex-col rounded-lg border border-border bg-card p-4 transition-colors duration-200 hover:border-muted-foreground/25 hover:bg-secondary/40"
                 >
-                  <div className="flex items-start justify-between">
-                    <span className="font-mono text-xs text-muted-foreground/60">{String(i + 1).padStart(2, '0')}</span>
-                    <ArrowUpRight className="h-4 w-4 text-muted-foreground/0 transition-colors duration-200 group-hover:text-muted-foreground" />
-                  </div>
-                  <div>
-                    <h3 className={cn('font-semibold text-foreground', i === 0 ? 'text-xl tracking-[-0.01em]' : 'text-base')}>
-                      {m.title}
-                    </h3>
-                    <p className={cn('mt-2 leading-relaxed text-muted-foreground', i === 0 ? 'text-base max-w-sm' : 'text-sm')}>
-                      {m.blurb}
-                    </p>
-                  </div>
+                  <span className="font-mono text-xs text-muted-foreground/60">{String(i + 1).padStart(2, '0')}</span>
+                  <h3 className="mt-2 text-sm font-semibold text-foreground">{m.title}</h3>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{m.blurb}</p>
                 </Reveal>
               ))}
             </div>

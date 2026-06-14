@@ -15,10 +15,10 @@
   --background: 220 16% 6%;
   --foreground: 210 16% 97%;
 
-  --card: 220 14% 8%;
+  --card: 220 14% 10%;
   --card-foreground: 210 16% 97%;
 
-  --popover: 220 14% 9%;
+  --popover: 220 14% 11%;
   --popover-foreground: 210 16% 97%;
 
   /* forest green — the brand / "go" action (Send, Run, Connect, New mission).
@@ -27,15 +27,15 @@
   --primary-foreground: 150 30% 97%;
 
   /* neutral elevated surfaces (segmented controls, soft chips) */
-  --secondary: 220 13% 12%;
+  --secondary: 220 13% 15%;
   --secondary-foreground: 210 16% 97%;
 
-  --muted: 220 13% 12%;
-  --muted-foreground: 220 9% 62%;
+  --muted: 220 13% 15%;
+  --muted-foreground: 220 9% 66%;
 
   /* shadcn uses --accent for hover surfaces (menu items, ghost buttons).
      Keep it NEUTRAL so green stays reserved for primary actions. */
-  --accent: 220 12% 15%;
+  --accent: 220 12% 18%;
   --accent-foreground: 210 16% 97%;
 
   --destructive: 0 70% 55%;
@@ -47,8 +47,8 @@
   --warning: 38 70% 54%;
   --warning-foreground: 38 70% 8%;
 
-  --border: 220 11% 16%;
-  --input: 220 11% 16%;
+  --border: 220 11% 21%;
+  --input: 220 11% 21%;
   --ring: 152 40% 48%;
 
   --radius: 0.5rem;
@@ -58,9 +58,9 @@
   --sidebar-foreground: 220 9% 68%;
   --sidebar-primary: 152 38% 44%;
   --sidebar-primary-foreground: 150 30% 97%;
-  --sidebar-accent: 220 13% 13%;
+  --sidebar-accent: 220 13% 16%;
   --sidebar-accent-foreground: 210 16% 97%;
-  --sidebar-border: 220 11% 14%;
+  --sidebar-border: 220 11% 18%;
   --sidebar-ring: 152 40% 48%;
 
   color-scheme: dark;
@@ -160,7 +160,7 @@ body {
     border: 1px solid hsl(var(--border));
     border-radius: var(--radius-lg, 0.75rem);
     background: hsl(var(--card));
-    box-shadow: 0 1px 2px hsl(0 0% 0% / 0.25);
+    box-shadow: 0 1px 2px hsl(0 0% 0% / 0.35);
   }
   /* Primary action: flat matte green. No gradient, no glow — a crisp fill that
      lifts a touch on hover. Pair with `text-primary-foreground`. */
