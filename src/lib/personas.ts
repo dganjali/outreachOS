@@ -13,15 +13,25 @@ export function emptyStyleProfile(): StyleProfile {
 }
 
 /**
- * Whether a voice has actually learned a style - i.e. the user ran the
- * "calibrate on a real draft" step and extract-style populated the profile.
+ * Whether a voice has been calibrated - i.e. the user ran the "calibrate on a
+ * real draft" step. Two signals, either of which means calibrated:
  *
- * This is the real signal for the "Calibrated" badge. `onboarding_completed_at`
- * only flips when the user clicks Done on the wizard overview, so a fully
- * calibrated voice would otherwise read "uncalibrated" until that final tap.
+ *  1. `onboarding_completed_at` is set. extract-style stamps this on the FIRST
+ *     successful calibration (api/agents/extract-style.ts), so it's the reliable
+ *     "they did the calibrate step" flag.
+ *  2. `style_profile` has learned content (a voice_summary or any dimensions).
+ *
+ * We can't rely on (2) alone: extract-style is deliberately conservative and
+ * often returns an empty delta from a single accepted draft, leaving the profile
+ * blank even though calibration ran - which is why calibrated voices read
+ * "uncalibrated". (1) closes that gap.
  */
-export function isPersonaCalibrated(p: Pick<Persona, 'style_profile'> | null | undefined): boolean {
-  const sp = p?.style_profile;
+export function isPersonaCalibrated(
+  p: Pick<Persona, 'style_profile' | 'onboarding_completed_at'> | null | undefined
+): boolean {
+  if (!p) return false;
+  if (p.onboarding_completed_at) return true;
+  const sp = p.style_profile;
   if (!sp) return false;
   return Boolean(sp.voice_summary?.trim()) || Object.keys(sp.dimensions ?? {}).length > 0;
 }
