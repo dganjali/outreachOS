@@ -265,7 +265,7 @@ export function Landing() {
             </Reveal>
             <div className="grid gap-px overflow-hidden rounded-xl border border-border bg-border md:grid-cols-3">
               {HOW.map((h, i) => (
-                <Reveal key={h.step} delay={i * 90} className="flex flex-col bg-card p-7">
+                <Reveal key={h.step} delay={i * 90} className="flex flex-col bg-card p-7 transition-colors duration-200 hover:bg-secondary/40">
                   <span className="font-mono text-sm text-primary">{h.step}</span>
                   <h3 className="mt-5 text-lg font-semibold tracking-[-0.01em] text-foreground">{h.title}</h3>
                   <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">{h.body}</p>
@@ -313,7 +313,7 @@ export function Landing() {
           </div>
         </section>
 
-        {/* Modes */}
+        {/* Modes — matte bento grid: varied tile sizes, flat cards, hairline borders */}
         <section id="modes" className="border-t border-border/70">
           <div className="mx-auto max-w-6xl px-5 py-20 md:px-8 md:py-24">
             <Reveal>
@@ -322,17 +322,27 @@ export function Landing() {
                 sub="Same machine underneath; the targeting, evidence, and tone shift to the job at hand."
               />
             </Reveal>
-            <div className="grid gap-x-12 sm:grid-cols-2">
+            <div className="grid auto-rows-[minmax(11rem,1fr)] grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {MODES.map((m, i) => (
                 <Reveal
                   key={m.title}
-                  delay={(i % 2) * 80}
-                  className="flex items-baseline gap-5 border-t border-border py-6"
+                  delay={(i % 2) * 70}
+                  className={cn(
+                    'group flex flex-col justify-between rounded-xl border border-border bg-card p-6 transition-colors duration-200 hover:border-muted-foreground/25 hover:bg-secondary/40',
+                    i === 0 && 'sm:col-span-2 lg:row-span-2'
+                  )}
                 >
-                  <span className="font-mono text-xs text-muted-foreground/60">{String(i + 1).padStart(2, '0')}</span>
+                  <div className="flex items-start justify-between">
+                    <span className="font-mono text-xs text-muted-foreground/60">{String(i + 1).padStart(2, '0')}</span>
+                    <ArrowUpRight className="h-4 w-4 text-muted-foreground/0 transition-colors duration-200 group-hover:text-muted-foreground" />
+                  </div>
                   <div>
-                    <h3 className="text-base font-semibold text-foreground">{m.title}</h3>
-                    <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{m.blurb}</p>
+                    <h3 className={cn('font-semibold text-foreground', i === 0 ? 'text-xl tracking-[-0.01em]' : 'text-base')}>
+                      {m.title}
+                    </h3>
+                    <p className={cn('mt-2 leading-relaxed text-muted-foreground', i === 0 ? 'text-base max-w-sm' : 'text-sm')}>
+                      {m.blurb}
+                    </p>
                   </div>
                 </Reveal>
               ))}
@@ -355,8 +365,10 @@ export function Landing() {
                     key={id}
                     delay={i * 70}
                     className={cn(
-                      'relative flex flex-col rounded-xl border p-6',
-                      featured ? 'border-primary/50 bg-primary/[0.04]' : 'border-border bg-card'
+                      'relative flex flex-col rounded-xl border p-6 transition-colors duration-200',
+                      featured
+                        ? 'border-primary/50 bg-primary/[0.04] hover:border-primary/70'
+                        : 'border-border bg-card hover:border-muted-foreground/25'
                     )}
                   >
                     {featured && (
