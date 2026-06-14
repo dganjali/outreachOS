@@ -32,10 +32,16 @@ steps:
       - --region=${_REGION}
       - --platform=managed
       - --allow-unauthenticated
-      - --memory=1Gi
-      - --cpu=1
+      # Smart-fill / extract-context is memory-heavy (pdf-parse, mammoth DOCX,
+      # image OCR, LLM calls). 1Gi @ concurrency 40 let concurrent extractions
+      # OOM-kill the container, which surfaced to clients as a gateway 503
+      # "Service Unavailable" (even on tiny requests like sign-upload). More RAM,
+      # far lower concurrency, and a warm instance to kill cold-start 503s.
+      - --memory=2Gi
+      - --cpu=2
       - --timeout=3600
-      - --concurrency=40
+      - --concurrency=8
+      - --min-instances=1
       # Pull all secrets from Secret Manager. Each secret name should match
       # the env var; create them with `gcloud secrets create <name>`.
       # SERPER_API_KEY, EMAILFINDER_API_KEY and MILLIONVERIFIER_API_KEY power the

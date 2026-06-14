@@ -56,6 +56,30 @@ const toFrontend = (v: unknown) => deepKeyMap(v, snake);
 // ---------------------------------------------------------------------------
 // HTTP
 // ---------------------------------------------------------------------------
+
+// Parse a fetch response defensively. Infra layers (Cloud Run, load balancers)
+// return plain-text bodies like "Service Unavailable" on 5xx, which would make
+// res.json()/JSON.parse throw a cryptic "Unexpected token" error. Always read
+// text first, surface a clean message on non-2xx, and only parse JSON on success.
+async function readJson<T>(res: Response, fallbackErr: string): Promise<T> {
+  const txt = await res.text();
+  if (!res.ok) {
+    let detail: string | undefined;
+    try {
+      const j = txt ? (JSON.parse(txt) as { error?: string; detail?: string }) : undefined;
+      detail = j?.detail || j?.error;
+    } catch {
+      // Non-JSON body (e.g. a gateway "Service Unavailable") - fall through.
+    }
+    throw new Error(detail || `${fallbackErr} (HTTP ${res.status})`);
+  }
+  try {
+    return (txt ? JSON.parse(txt) : {}) as T;
+  } catch {
+    throw new Error(`${fallbackErr} (bad response)`);
+  }
+}
+
 async function call<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
   const token = await currentIdToken();
   if (!token) throw new Error('Not signed in');
@@ -68,9 +92,7 @@ async function call<T>(path: string, init?: { method?: string; body?: unknown })
     },
     body: hasBody ? JSON.stringify(init!.body) : undefined,
   });
-  const txt = await res.text();
-  const j = txt ? (JSON.parse(txt) as { data?: unknown; error?: string; detail?: string }) : ({} as { data?: unknown; error?: string; detail?: string });
-  if (!res.ok) throw new Error(j.detail || j.error || `HTTP ${res.status}`);
+  const j = await readJson<{ data?: unknown }>(res, 'Request failed');
   return toFrontend(j.data) as T;
 }
 
@@ -356,8 +378,7 @@ const storageShim = {
             headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ path, contentType: file.type || 'application/octet-stream' }),
           });
-          const sj = (await signRes.json()) as { data: { url: string; path: string } };
-          if (!signRes.ok) throw new Error('sign_upload_failed');
+          const sj = await readJson<{ data: { url: string; path: string } }>(signRes, 'Upload unavailable');
           const putRes = await fetch(sj.data.url, {
             method: 'PUT',
             headers: { 'Content-Type': file.type || 'application/octet-stream' },
@@ -392,8 +413,7 @@ const storageShim = {
             headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ path, ttlSeconds: _ttl }),
           });
-          const j = (await r.json()) as { data: { url: string } };
-          if (!r.ok) throw new Error('sign_download_failed');
+          const j = await readJson<{ data: { url: string } }>(r, 'Download unavailable');
           return { data: { signedUrl: j.data.url }, error: null };
         } catch (err) {
           return { data: null, error: { message: err instanceof Error ? err.message : 'sign_failed' } };
