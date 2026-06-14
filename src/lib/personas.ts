@@ -65,6 +65,15 @@ export async function updatePersona(
   if (error) throw new Error(error.message);
 }
 
+/**
+ * Delete a voice. Soft-delete via `archived_at` so it disappears from the list
+ * (listPersonas filters archived) while any missions that already reference it
+ * keep working. Reversible by clearing `archived_at`.
+ */
+export async function deletePersona(id: string): Promise<void> {
+  await updatePersona(id, { archived_at: new Date().toISOString() });
+}
+
 export interface PersonaBundle {
   persona: Persona;
   facts: ContextFact[];

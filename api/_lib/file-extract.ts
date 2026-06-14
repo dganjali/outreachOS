@@ -73,7 +73,11 @@ async function ocrSafely(buf: Buffer, mime: string, prev: string): Promise<strin
   try {
     const ocr = await ocrTranscribe(buf, mime);
     return ocr.length > prev.length ? ocr : prev;
-  } catch {
+  } catch (err) {
+    // A too-large file is an actionable user error, not a "no text" miss —
+    // propagate it so the caller surfaces the real reason instead of the
+    // misleading generic "no readable text" message.
+    if ((err as { code?: string }).code === 'ocr_too_large') throw err;
     return prev;
   }
 }

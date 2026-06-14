@@ -37,6 +37,30 @@ interface TargetSuggestion {
   signal_type: string;
 }
 
+// Companies already surfaced for a mission — used to keep re-runs fresh.
+interface AlreadyTargeted {
+  names: string[];
+  domains: Set<string>;
+}
+
+const EXCLUDE_PROMPT_CAP = 60;
+
+// Prompt line telling the model which companies are already covered, so it
+// spends its picks on new ones. Empty string (filtered out) on a first run.
+function alreadyTargetedLine(prior: AlreadyTargeted): string {
+  if (prior.names.length === 0) return '';
+  const list = prior.names.slice(0, EXCLUDE_PROMPT_CAP).join(', ');
+  return `Already covered in this mission — DO NOT include these; find different companies: ${list}`;
+}
+
+// True if a candidate matches a company already surfaced for the mission, by
+// normalized domain (preferred) or name.
+function isAlreadyTargeted(name: string, domain: string | null, prior: AlreadyTargeted): boolean {
+  const d = normalizeDomain(domain);
+  if (d && prior.domains.has(d)) return true;
+  return isExcludedName(name, prior.names.map((n) => n.toLowerCase()));
+}
+
 export default async function handler(req: Request, res: Response) {
   if (req.method !== 'POST') return methodNotAllowed(res, ['POST']);
   const user = await requireUser(req, res);
@@ -55,6 +79,17 @@ export default async function handler(req: Request, res: Response) {
   const desired = Math.min(Math.max(count ?? 10, 1), 25);
   const useApollo = apolloEnabled();
 
+  // Companies already surfaced for this mission. Threaded into the prompts (so
+  // the model picks different ones) and used to drop any that slip through, so a
+  // re-run of the same mission finds NEW companies instead of the same top picks.
+  const priorTargets = await scope.collection<TargetDoc>('targets').find({ missionId: mission_id });
+  const alreadyTargeted: AlreadyTargeted = {
+    names: priorTargets.map((t) => (t.companyName ?? '').trim()).filter(Boolean),
+    domains: new Set(
+      priorTargets.map((t) => normalizeDomain(t.domain)).filter((d): d is string => !!d)
+    ),
+  };
+
   const run = await startRun(scope, {
     agentType: 'targeting',
     missionId: mission_id,
@@ -66,9 +101,9 @@ export default async function handler(req: Request, res: Response) {
   try {
     let rows: Array<Omit<TargetDoc, '_id' | 'userId' | 'createdAt' | 'updatedAt'>>;
     if (useApollo) {
-      rows = await runApolloHybrid({ mission, mode, desired, profile, mission_id });
+      rows = await runApolloHybrid({ mission, mode, desired, profile, mission_id, alreadyTargeted });
     } else {
-      rows = await runWebSearchOnly({ mission, mode, desired, profile, mission_id });
+      rows = await runWebSearchOnly({ mission, mode, desired, profile, mission_id, alreadyTargeted });
     }
 
     if (rows.length === 0) {
@@ -102,14 +137,16 @@ async function runWebSearchOnly(args: {
   desired: number;
   profile: ProfileDoc | null;
   mission_id: string;
+  alreadyTargeted: AlreadyTargeted;
 }): Promise<Array<Omit<TargetDoc, '_id' | 'userId' | 'createdAt' | 'updatedAt'>>> {
-  const { mission, mode, desired, profile, mission_id } = args;
+  const { mission, mode, desired, profile, mission_id, alreadyTargeted } = args;
   const userPrompt = [
     `Mission: ${mission.name}`,
     `Mode: ${mode}`,
     `What I'm sending / offer: ${mission.goal}`,
     `Target description (the why): ${mission.targetDescription}`,
     ...senderContextLines(profile),
+    alreadyTargetedLine(alreadyTargeted),
     '',
     `Find ${desired} target organizations with strong recent "why now" signals.`,
     'Each MUST have a verified website domain. Use web_search to confirm the company exists and matches the audience/geography above.',
@@ -146,7 +183,11 @@ async function runWebSearchOnly(args: {
     }));
   }
 
-  const filtered = candidates.filter((t) => isValidDomain(normalizeDomain(t.domain)));
+  const filtered = candidates.filter(
+    (t) =>
+      isValidDomain(normalizeDomain(t.domain)) &&
+      !isAlreadyTargeted(t.company_name, t.domain, alreadyTargeted)
+  );
 
   return filtered.slice(0, desired).map((t) => ({
     missionId: mission_id,
@@ -171,8 +212,9 @@ async function runApolloHybrid(args: {
   desired: number;
   profile: ProfileDoc | null;
   mission_id: string;
+  alreadyTargeted: AlreadyTargeted;
 }): Promise<Array<Omit<TargetDoc, '_id' | 'userId' | 'createdAt' | 'updatedAt'>>> {
-  const { mission, mode, desired, profile, mission_id } = args;
+  const { mission, mode, desired, profile, mission_id, alreadyTargeted } = args;
 
   const filterPrompt = [
     `Mission name: ${mission.name}`,
@@ -209,6 +251,7 @@ async function runApolloHybrid(args: {
   const exclusions = senderExclusions(profile);
   const trimmed = candidates
     .filter((o) => o.name && !isExcludedName(o.name, exclusions))
+    .filter((o) => !isAlreadyTargeted(o.name!, o.primary_domain ?? domainFromUrl(o.website_url), alreadyTargeted))
     .slice(0, perPage);
 
   const candidateList = trimmed.map((o, i) => ({
@@ -231,6 +274,7 @@ async function runApolloHybrid(args: {
     `Offer: ${mission.goal}`,
     `Audience: ${mission.targetDescription}`,
     profile?.proofPoints ? `Sender credibility: ${profile.proofPoints}` : '',
+    alreadyTargetedLine(alreadyTargeted),
     '',
     `Apollo candidates (${trimmed.length}):`,
     JSON.stringify(candidateList, null, 2),

@@ -4,6 +4,16 @@ import type { ProfileAsset, ProfileAssetKind } from '../types';
 const BUCKET = 'profile-assets';
 export const MAX_ASSET_BYTES = 20 * 1024 * 1024; // 20MB — must match server-side cap in parse-resume.ts
 
+// Server-side OCR (Gemini inline data) caps the raw file at 14MB — base64
+// inflation (~33%) would otherwise push the request past Vertex's ~20MB limit.
+// So any image larger than this can't be OCR'd as-is. We recompress in the
+// browser before upload to land comfortably under the cap; `OCR_TARGET_BYTES`
+// is the size we aim for (well below 14MB, leaving headroom for base64).
+const OCR_TARGET_BYTES = 9 * 1024 * 1024;
+// Longest edge we keep when recompressing — high enough that OCR text stays
+// crisp, low enough to shrink oversized phone screenshots/photos.
+const MAX_IMAGE_EDGE = 4000;
+
 const ACCEPTED_MIME: Record<ProfileAssetKind, string[]> = {
   resume: ['application/pdf'],
   portfolio_pdf: ['application/pdf'],
@@ -51,6 +61,62 @@ function safeExtension(name: string, mime: string): string {
   return 'bin';
 }
 
+/**
+ * Recompress an oversized image so server-side OCR (which caps inline data at
+ * 14MB) can read it. Returns the original file untouched when it's not a
+ * canvas-decodable raster, is already small enough, or can't be decoded (e.g.
+ * HEIC, which browsers can't draw — the server then surfaces a clear size error).
+ *
+ * Downscales the longest edge to `MAX_IMAGE_EDGE` and re-encodes as JPEG,
+ * stepping quality down until the result fits `OCR_TARGET_BYTES`. Text stays
+ * legible at these settings; a 15MB PNG screenshot lands around ~1MB.
+ */
+async function downscaleImageForOcr(file: File): Promise<File> {
+  // Detect images by MIME *or* extension — screenshots often arrive with an
+  // empty file.type, which a MIME-only check would miss.
+  const ext = file.name.slice(file.name.lastIndexOf('.') + 1).toLowerCase();
+  const looksLikeImage =
+    /^image\//.test(file.type) || ['png', 'jpg', 'jpeg', 'webp', 'heic', 'heif', 'bmp', 'gif'].includes(ext);
+  if (!looksLikeImage || file.size <= OCR_TARGET_BYTES) return file;
+
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch {
+    return file; // Undecodable (e.g. HEIC) — let the server report the size issue.
+  }
+
+  try {
+    const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(bitmap.width, bitmap.height));
+    const w = Math.max(1, Math.round(bitmap.width * scale));
+    const h = Math.max(1, Math.round(bitmap.height * scale));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return file;
+    ctx.drawImage(bitmap, 0, 0, w, h);
+
+    let quality = 0.9;
+    let blob = await canvasToBlob(canvas, quality);
+    while (blob && blob.size > OCR_TARGET_BYTES && quality > 0.5) {
+      quality -= 0.1;
+      blob = await canvasToBlob(canvas, quality);
+    }
+    if (!blob || blob.size >= file.size) return file; // No win — keep original.
+
+    const baseName = file.name.replace(/\.[^./\\]+$/, '');
+    return new File([blob], `${baseName}.jpg`, { type: 'image/jpeg', lastModified: Date.now() });
+  } finally {
+    bitmap.close();
+  }
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob | null> {
+  return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
+}
+
 export async function listAssets(userId: string): Promise<ProfileAsset[]> {
   const { data, error } = await supabase
     .from('profile_assets')
@@ -66,7 +132,10 @@ export async function uploadAsset(opts: {
   kind: ProfileAssetKind;
   file: File;
 }): Promise<ProfileAsset> {
-  const { userId, kind, file } = opts;
+  const { userId, kind } = opts;
+  // Oversized images are recompressed so server-side OCR can read them; other
+  // file types pass through unchanged.
+  const file = await downscaleImageForOcr(opts.file);
 
   if (file.size > MAX_ASSET_BYTES) {
     throw new Error(`File too large. Max 20MB; this file is ${(file.size / 1024 / 1024).toFixed(1)}MB.`);

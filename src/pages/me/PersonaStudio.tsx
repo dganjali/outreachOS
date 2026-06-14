@@ -6,8 +6,8 @@
 // so configuration is progressive instead of a wall.
 
 import { useCallback, useEffect, useState } from 'react';
-import { Mic2, Plus, Check, ChevronRight } from 'lucide-react';
-import { listPersonas } from '../../lib/personas';
+import { Mic2, Plus, Check, Trash2, Loader2 } from 'lucide-react';
+import { listPersonas, deletePersona } from '../../lib/personas';
 import { PersonaWizard } from '../../components/persona/PersonaWizard';
 import type { Persona } from '../../types';
 
@@ -17,6 +17,9 @@ export function PersonaStudio({ userId }: { userId: string | undefined }) {
   const [loading, setLoading] = useState(true);
   // null = list view; 'new' = create wizard; string = edit that persona.
   const [active, setActive] = useState<'new' | string | null>(null);
+  // Persona id awaiting delete confirmation, and the one currently deleting.
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!userId) return;
@@ -34,6 +37,22 @@ export function PersonaStudio({ userId }: { userId: string | undefined }) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  async function handleDelete(id: string) {
+    setDeletingId(id);
+    setError(null);
+    try {
+      await deletePersona(id);
+      setConfirmId(null);
+      // Drop it locally for an instant response, then reconcile with the server.
+      setPersonas((prev) => prev.filter((p) => p.id !== id));
+      refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not delete this voice');
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   if (!userId) return <p className="me-muted">Sign in to manage your voices.</p>;
 
@@ -83,25 +102,58 @@ export function PersonaStudio({ userId }: { userId: string | undefined }) {
       ) : (
         <div className="me-voice-grid">
           {personas.map((p) => (
-            <button key={p.id} type="button" className="me-voice-card" onClick={() => setActive(p.id)}>
-              <div className="me-voice-card-top">
-                <span className="me-voice-name">{p.name}</span>
-                <ChevronRight size={16} className="me-voice-chev" />
-              </div>
-              <p className="me-voice-summary">
-                {p.style_profile?.voice_summary?.trim() ||
-                  (p.mode ? `${capitalize(p.mode)} voice` : 'No tone tuned yet')}
-              </p>
-              <div className="me-voice-status">
-                {p.onboarding_completed_at ? (
-                  <span className="me-voice-tag is-ready">
-                    <Check size={12} /> Calibrated
-                  </span>
-                ) : (
-                  <span className="me-voice-tag">Draft</span>
-                )}
-              </div>
-            </button>
+            <div key={p.id} className="me-voice-card-wrap">
+              <button type="button" className="me-voice-card" onClick={() => setActive(p.id)}>
+                <div className="me-voice-card-top">
+                  <span className="me-voice-name">{p.name}</span>
+                </div>
+                <p className="me-voice-summary">
+                  {p.style_profile?.voice_summary?.trim() ||
+                    (p.mode ? `${capitalize(p.mode)} voice` : 'No tone tuned yet')}
+                </p>
+                <div className="me-voice-status">
+                  {p.onboarding_completed_at ? (
+                    <span className="me-voice-tag is-ready">
+                      <Check size={12} /> Calibrated
+                    </span>
+                  ) : (
+                    <span className="me-voice-tag">Draft</span>
+                  )}
+                </div>
+              </button>
+
+              {confirmId === p.id ? (
+                <div className="me-voice-confirm" role="group" aria-label={`Delete ${p.name}?`}>
+                  <span className="me-voice-confirm-label">Delete?</span>
+                  <button
+                    type="button"
+                    className="me-voice-confirm-yes"
+                    onClick={() => handleDelete(p.id)}
+                    disabled={deletingId === p.id}
+                  >
+                    {deletingId === p.id ? <Loader2 size={13} className="pw-spin" /> : 'Delete'}
+                  </button>
+                  <button
+                    type="button"
+                    className="me-voice-confirm-no"
+                    onClick={() => setConfirmId(null)}
+                    disabled={deletingId === p.id}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="me-voice-del"
+                  aria-label={`Delete ${p.name}`}
+                  title="Delete voice"
+                  onClick={() => setConfirmId(p.id)}
+                >
+                  <Trash2 size={14} />
+                </button>
+              )}
+            </div>
           ))}
         </div>
       )}
