@@ -11,6 +11,7 @@ import {
 } from '../lib/profileSnapshot';
 import type { ProfileVersionSource, ContextFact } from '../types';
 import { listContextFacts, addContextFact, deleteContextFact } from '../lib/personas';
+import { agents } from '../lib/api';
 import { ContextTab, totalScore } from './me/ContextTab';
 import { History } from './me/History';
 import { PersonaStudio } from './me/PersonaStudio';
@@ -169,6 +170,25 @@ export function Me() {
     }
   }
 
+  /**
+   * Autofill from LinkedIn: persist the current form first (so the server reads
+   * the latest LinkedIn URL), run the enrichment agent, then refresh the profile
+   * (role/org may have been filled) and reload the facts it added. Throws so the
+   * ContextTab button can surface the error inline.
+   */
+  async function handleAutofill() {
+    if (!profile?.user_id) return;
+    await persistProfile(form);
+    const { facts_added } = await agents.enrichProfile();
+    await refreshProfile();
+    reloadFacts();
+    toast.success(
+      facts_added > 0
+        ? `Added ${facts_added} fact${facts_added === 1 ? '' : 's'} from your LinkedIn.`
+        : 'Profile refreshed — no new facts found.'
+    );
+  }
+
   async function handleRestore(snapshot: ProfileSnapshot, fromVersionId: string) {
     if (!profile?.user_id) return;
     try {
@@ -253,6 +273,7 @@ export function Me() {
           onAddFact={handleAddFact}
           onRemoveFact={handleRemoveFact}
           onFactsChanged={reloadFacts}
+          onAutofill={handleAutofill}
         />
       ) : profile?.user_id ? (
         <History

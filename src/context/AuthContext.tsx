@@ -80,14 +80,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
       setFirebaseUser(u ?? null);
-      // Await the profile fetch BEFORE clearing `loading`. Otherwise there's a
-      // window where loading=false and profile=null, which the onboarding gates
-      // read as "not onboarded" and bounce the user to /onboarding on every load.
+      // Re-raise `loading` while we (re)fetch the profile. This callback also
+      // fires on sign-in and on hourly token refresh — moments when `loading`
+      // is already false. Without re-raising it there's a render where session
+      // is truthy but profile is still null/stale, and the route gates read
+      // that as "not onboarded" and flash /onboarding before the fetch lands.
+      // Awaiting the fetch before clearing `loading` closes that window.
       if (u?.uid) {
+        setLoading(true);
         try {
           await fetchProfile();
         } catch {
-          setProfile(null);
+          // fetchProfile already swallows its own errors and keeps the last
+          // known profile; this guards against anything unexpected.
         }
       } else {
         setProfile(null);

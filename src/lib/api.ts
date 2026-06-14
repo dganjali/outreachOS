@@ -133,10 +133,12 @@ export const agents = {
       { reply_id }
     ),
   enrichProfile: () =>
-    authedFetch<{ run_id: string; profile: Profile; source: 'apollo' | 'web_search' }>(
-      '/api/agents/enrich-profile',
-      {}
-    ),
+    authedFetch<{
+      run_id: string;
+      profile: Profile;
+      source: 'apollo' | 'web_search';
+      facts_added: number;
+    }>('/api/agents/enrich-profile', {}),
   coach: (field: CoachField, current_value: string) =>
     authedFetch<{
       run_id: string;

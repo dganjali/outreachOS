@@ -242,7 +242,9 @@ export async function ocrTranscribe(buf: Buffer, mimeType: string): Promise<stri
   const model = MODEL(); // flash 2.5 — cheap, strong multimodal OCR
   const config: Record<string, unknown> = {
     temperature: 0,
-    maxOutputTokens: 8192,
+    // Generous budget so multi-page scanned documents aren't silently
+    // truncated mid-transcription (8k tokens ≈ 6k words ran out on long PDFs).
+    maxOutputTokens: 32768,
   };
   if (isThinkingModel(model)) config.thinkingConfig = { thinkingBudget: 0 };
 

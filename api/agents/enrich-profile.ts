@@ -1,11 +1,16 @@
 import type { Request, Response } from 'express';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
-import { forUser } from '../_lib/db';
+import { forUser, newId, type InsertDoc } from '../_lib/db';
 import { createMessageWithRetry, MODEL, WEB_SEARCH_TOOL, extractJson } from '../_lib/llm';
 import { PROFILE_ENRICH_SYSTEM } from '../_lib/prompts';
 import { startRun, completeRun, failRun } from '../_lib/runs';
+import { embedOne } from '../_lib/embeddings';
 import { apolloEnabled, matchPerson, fullName, type ApolloPerson } from '../_lib/apollo';
-import type { ProfileDoc } from '../../shared/schemas';
+import type { ContextFactDoc, ProfileDoc } from '../../shared/schemas';
+
+// Cap on how many facts a single enrichment can add — keeps the context bank
+// from ballooning and the embed loop bounded.
+const MAX_ENRICH_FACTS = 20;
 
 interface EnrichmentOutput {
   bio: string;
@@ -75,14 +80,25 @@ export default async function handler(req: Request, res: Response) {
     await scope.collection<ProfileDoc>('profiles').updateById(profile._id, updates);
     const updated = await scope.collection<ProfileDoc>('profiles').findById(profile._id);
 
+    // Turn the enrichment into atomic, person-level context facts — the actual
+    // grounding source the drafting engine reads. Without this the LinkedIn URL
+    // collected at onboarding never reaches a draft.
+    const factsAdded = await persistEnrichmentFacts(scope, {
+      proofPoints: llmResult.proof_points,
+      achievements: llmResult.achievements,
+      metrics: llmResult.metrics,
+    });
+
     await completeRun(scope, run._id, {
       source: apolloPerson ? 'apollo' : 'web_search',
       fields_filled: Object.keys(updates).length,
+      facts_added: factsAdded,
     });
     return res.status(200).json({
       run_id: run._id,
       profile: updated,
       source: apolloPerson ? 'apollo' : 'web_search',
+      facts_added: factsAdded,
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'unknown_error';
@@ -141,6 +157,72 @@ async function runLlmEnrichment(args: {
   const parsed = extractJson<EnrichmentOutput>(message);
   if (!parsed.ok || !parsed.data) throw new Error('parse_failed');
   return parsed.data;
+}
+
+/**
+ * Split the enrichment's list-shaped fields into atomic claims and persist them
+ * as person-level context facts (deduped against what's already there, embedded
+ * best-effort). Returns the number actually inserted.
+ */
+async function persistEnrichmentFacts(
+  scope: ReturnType<typeof forUser>,
+  fields: { proofPoints?: string; achievements?: string; metrics?: string }
+): Promise<number> {
+  const candidates: Array<{ claim: string; type: ContextFactDoc['type'] }> = [
+    ...splitClaims(fields.proofPoints).map((claim) => ({ claim, type: 'proof' as const })),
+    ...splitClaims(fields.achievements).map((claim) => ({ claim, type: 'proof' as const })),
+    ...splitClaims(fields.metrics).map((claim) => ({ claim, type: 'metric' as const })),
+  ];
+  if (candidates.length === 0) return 0;
+
+  const existing = await scope
+    .collection<ContextFactDoc>('context_facts')
+    .find({ scope: 'person' } as Record<string, unknown>);
+  const seen = new Set(existing.map((f) => f.claim.toLowerCase().trim()));
+
+  let inserted = 0;
+  for (const c of candidates) {
+    if (inserted >= MAX_ENRICH_FACTS) break;
+    const key = c.claim.toLowerCase().trim();
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    let embedding: number[] | undefined;
+    try {
+      embedding = await embedOne(c.claim, 'document');
+    } catch {
+      // Best-effort — facts are still useful without a vector (recency fallback).
+    }
+
+    const doc: InsertDoc<ContextFactDoc> = {
+      _id: newId(),
+      scope: 'person',
+      personaId: null,
+      type: c.type,
+      claim: c.claim,
+      date: null,
+      evidenceUrl: null,
+      provenance: 'enrich',
+      confidence: 0.6, // web-sourced — lower than user-entered, the user can prune
+      ...(embedding ? { embedding } : {}),
+    };
+    await scope.collection<ContextFactDoc>('context_facts').insertOne(doc);
+    inserted += 1;
+  }
+  return inserted;
+}
+
+/**
+ * Best-effort split of a "comma- or newline-separated list" field into atomic
+ * claims. Splits on newlines, semicolons, and bullets; drops list markers and
+ * fragments too short to be a real, citable fact.
+ */
+function splitClaims(raw: string | undefined | null): string[] {
+  if (!raw) return [];
+  return raw
+    .split(/[\n;•]+/)
+    .map((s) => s.replace(/^[\s•\-*\d.)]+/, '').trim())
+    .filter((s) => s.length >= 8 && s.length <= 300);
 }
 
 function pickLinkedinUrl(linkedinUrl: string | null, resumeUrl: string | null): string | null {
