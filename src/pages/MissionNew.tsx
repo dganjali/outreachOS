@@ -41,6 +41,7 @@ export function MissionNew() {
   const [mode, setMode] = useState<MissionMode>('sponsorship');
   const [whatSending, setWhatSending] = useState('');
   const [whoAndWhy, setWhoAndWhy] = useState('');
+  const [geo, setGeo] = useState('');
 
   // Step 2 — personalization
   const [personas, setPersonas] = useState<Persona[]>([]);
@@ -81,6 +82,7 @@ export function MissionNew() {
         mode,
         goal: whatSending.trim(),
         target_description: whoAndWhy.trim(),
+        geo: geo.trim() || null,
         status: 'active',
         persona_id: personaId,
       })
@@ -207,6 +209,17 @@ export function MissionNew() {
                     placeholder="e.g. 'Dev-tools companies with active student programs and recent hackathon sponsorships in 2025.'"
                   />
                 </label>
+                <label className="pw-field">
+                  <span className="pw-field-label">
+                    Location focus <span className="pw-field-optional">· optional</span>
+                  </span>
+                  <input
+                    className="pw-input"
+                    value={geo}
+                    onChange={(e) => setGeo(e.target.value)}
+                    placeholder="e.g. 'Toronto, Canada' — scopes contacts to a region"
+                  />
+                </label>
               </div>
             )}
 
@@ -275,6 +288,9 @@ export function MissionNew() {
                   <div className="pw-ov-body">
                     <p className="pw-ov-snippet"><strong>Offer:</strong> {whatSending}</p>
                     <p className="pw-ov-snippet"><strong>Audience:</strong> {whoAndWhy}</p>
+                    {geo.trim() && (
+                      <p className="pw-ov-snippet"><strong>Location:</strong> {geo.trim()}</p>
+                    )}
                   </div>
                 </section>
 

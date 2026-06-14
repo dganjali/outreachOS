@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { pickDomainFromResults } from './company-enrich';
+import { pickDomainFromResults, parseEmployeeCount } from './company-enrich';
 import type { SerperOrganicResult } from './serper';
 
 function r(link: string): SerperOrganicResult {
@@ -33,5 +33,21 @@ describe('pickDomainFromResults', () => {
 
   it('returns null for an empty result set', () => {
     assert.equal(pickDomainFromResults([]), null);
+  });
+});
+
+describe('parseEmployeeCount', () => {
+  it('takes the upper bound of a range', () => {
+    assert.equal(parseEmployeeCount('Financial Services · 1,001-5,000 employees'), 5000);
+  });
+  it('reads the floor of an "N+" count', () => {
+    assert.equal(parseEmployeeCount('Banking · 10,001+ employees · Toronto'), 10001);
+  });
+  it('reads a plain count', () => {
+    assert.equal(parseEmployeeCount('Startup · 42 employees'), 42);
+  });
+  it('returns null when there is no headcount', () => {
+    assert.equal(parseEmployeeCount('Acme — the official website'), null);
+    assert.equal(parseEmployeeCount(''), null);
   });
 });

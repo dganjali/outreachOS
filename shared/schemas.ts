@@ -16,6 +16,7 @@
 
 import type { EmbedInputType } from '../api/_lib/embeddings';
 import type { PlanId, PlanStatus } from './plans';
+import type { ContactIcp } from './types';
 
 void ({} as EmbedInputType); // keep the import live for downstream consumers
 
@@ -196,6 +197,13 @@ export interface MissionDoc extends BaseDoc {
   targetDescription: string;
   mode: 'sponsorship' | 'bd' | 'internship' | 'recruiting' | 'sales';
   offerDetails: string | null;
+  // Optional location focus (region/country/city) for contact discovery. null =
+  // no geographic preference. See CONTACT_ENGINE.md §4.
+  geo?: string | null;
+  // Cached Ideal Contact Profile — generated once on first contact discovery and
+  // reused across this mission's targets (CONTACT_ENGINE.md §2/§8). Optional so
+  // pre-engine missions read as undefined; lazily backfilled on next run.
+  contactIcp?: ContactIcp | null;
   status: string;
   archivedAt: Date | null;
   // The persona (reusable voice) this mission drafts as. Required for new

@@ -109,3 +109,56 @@ export async function resolveCompanyDomain(
   const map = await resolveCompanyDomains([{ name: companyName, hint }]);
   return map.get(companyName.trim()) ?? [...map.values()][0] ?? null;
 }
+
+// ---------------------------------------------------------------------------
+// Company-size enrichment (CONTACT_ENGINE.md §6). A headcount lets the contact
+// engine shift the seniority band by size tier. Best-effort: parse it out of a
+// LinkedIn company-page snippet; return null (→ the "unknown" band) on a miss
+// rather than guessing.
+// ---------------------------------------------------------------------------
+
+/**
+ * Pull an employee count out of free text like "10,001+ employees" or
+ * "1,001-5,000 employees" (the LinkedIn company-size format). For a range we
+ * take the upper bound; for "N+" we take N. Returns null when nothing matches.
+ */
+export function parseEmployeeCount(text: string): number | null {
+  const t = (text ?? '').replace(/ /g, ' ');
+  const toNum = (s: string) => Number(s.replace(/,/g, ''));
+
+  // Range: "1,001-5,000 employees" → upper bound.
+  const range = t.match(/([\d,]+)\s*[-–]\s*([\d,]+)\s*employees/i);
+  if (range) {
+    const hi = toNum(range[2]);
+    if (Number.isFinite(hi) && hi > 0) return hi;
+  }
+  // "10,001+ employees" → the floor number.
+  const plus = t.match(/([\d,]+)\+\s*employees/i);
+  if (plus) {
+    const n = toNum(plus[1]);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  // Plain "250 employees".
+  const plain = t.match(/([\d,]+)\s*employees/i);
+  if (plain) {
+    const n = toNum(plain[1]);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return null;
+}
+
+/** Resolve a company's employee count via the LinkedIn company page snippet. */
+export async function enrichCompanySize(name: string, domain?: string | null): Promise<number | null> {
+  if (!serperEnabled() || !name.trim()) return null;
+  const q = `site:linkedin.com/company "${name.trim()}"${domain ? ` ${domain}` : ''}`;
+  try {
+    const results = await search(q, 3);
+    for (const r of results) {
+      const n = parseEmployeeCount(`${r.title} ${r.snippet}`);
+      if (n) return n;
+    }
+  } catch (err) {
+    console.warn('enrich_company_size_failed', name, err);
+  }
+  return null;
+}

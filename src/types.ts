@@ -11,6 +11,11 @@ export type {
   EvidencePack,
   SequenceStatus,
   EmailSequence,
+  SeniorityLevel,
+  SizeTier,
+  GeoScope,
+  ContactIcp,
+  ContactIcpGeo,
 } from '../shared/types';
 import type { MissionMode } from '../shared/types';
 import type { PlanId, PlanStatus } from '../shared/plans';
@@ -56,6 +61,9 @@ export interface Mission {
   target_description: string;
   mode: MissionMode;
   offer_details: string | null;
+  // Optional location focus (region/country/city) used to scope and rank
+  // contact discovery. null = no geographic preference.
+  geo: string | null;
   status: string;
   archived_at: string | null;
   // The reusable persona (voice) this mission drafts as. Required for new
