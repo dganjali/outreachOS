@@ -19,7 +19,7 @@ import { PLANS, PLAN_ORDER } from '../../shared/plans';
 const REPLACES = ['Apollo', 'LinkedIn', 'ChatGPT', 'Spreadsheets', 'Gmail'];
 
 const HOW = [
-  { step: '01', title: 'Tell us the mission', body: 'Pick a mode, describe what you are sending, and who you want to reach. Set up a voice with your own facts and tone — what you enter is what the agent cites.' },
+  { step: '01', title: 'Tell us the mission', body: 'Pick a mode, say what you are sending and who you want to reach, and set a voice from your own facts and tone — what you enter is what the agent cites.' },
   { step: '02', title: 'Agents do the legwork', body: 'Targeting, evidence, contacts, and sequence agents run in one click. They research the web for the right companies and people, then verify the details.' },
   { step: '03', title: 'Review, send, follow up', body: 'Approve drafts in your voice and send via Gmail. Follow-ups go out on their cadence and stop the moment you mark a contact as replied.' },
 ];
@@ -37,7 +37,7 @@ const FEATURES = [
     eyebrow: 'Targeting',
     icon: Target,
     title: 'The right companies, ranked by why-now.',
-    body: 'The targeting agent finds high-fit companies and scores each one on a real reason to reach out today: a funding round, a launch, a hiring signal. No scraping spreadsheets, no guessing.',
+    body: 'The targeting agent finds high-fit companies and scores each on a real reason to reach out now — a funding round, a launch, a hiring signal. No scraping, no guessing.',
     bullets: ['Web research, ranked by fit and recency', 'Verified emails and the actual decision-maker', 'Evidence sourced per company, with citations'],
     url: 'app.outreachos.com/missions',
     mock: <PipelineMock />,
@@ -46,7 +46,7 @@ const FEATURES = [
     eyebrow: 'Drafts',
     icon: FileText,
     title: 'Personalization with receipts.',
-    body: 'Every line in every draft is anchored to a sourced bullet, so personalization is not a Mad Lib. The model cannot flatter what it has not read. You review, tweak, and send in your own voice.',
+    body: 'Every line is anchored to a sourced bullet, so personalization is not a Mad Lib — the model cannot flatter what it has not read. You review, tweak, and send in your voice.',
     bullets: ['Each claim tied to a citation', 'Written in your tone, from your profile', 'A 3-touch sequence, ready to send'],
     url: 'app.outreachos.com/draft',
     mock: <DraftMock />,
@@ -65,8 +65,7 @@ const FEATURES = [
 const FAQ = [
   { q: 'Do I need a data-provider subscription?', a: 'No. The agents research the open web to find high-fit companies and the right decision-makers, then verify contact details. Just connect Gmail and go.' },
   { q: 'How does it send email?', a: 'Through your own Gmail with send-only access. OutreachOS can send the emails you approve, and it can never read your inbox.' },
-  { q: 'Is it autonomous, or do I stay in control?', a: 'Initial emails always wait for your approval. Once you send, follow-ups go out on schedule, with a suppression list and a one-click reply-stop as guardrails.' },
-  { q: 'Does it follow up?', a: 'Yes. Follow-ups are scheduled and sent on cadence. Mark a contact as replied and theirs stop; suppressed addresses are never emailed.' },
+  { q: 'Is it autonomous, or do I stay in control?', a: 'Initial emails always wait for your approval. After you send, follow-ups go out on cadence and stop the moment a contact replies — with a suppression list as a backstop.' },
   { q: 'What does it run on?', a: 'Google Gemini powers the agents. Your data lives in your account; emails send from your Gmail.' },
 ];
 
@@ -203,14 +202,13 @@ export function Landing() {
           <div className="mx-auto max-w-3xl text-center">
             <Reveal as="div" delay={0}>
               <h1 className="text-balance font-display font-semibold leading-[1.03] tracking-[-0.035em] text-foreground text-[clamp(2.6rem,6.2vw,4.75rem)]">
-                Cold outreach that writes
-                <br className="hidden sm:block" /> and sends itself.
+                Outreach that runs itself — and still sounds like you.
               </h1>
             </Reveal>
             <Reveal as="div" delay={90}>
               <p className="mx-auto mt-6 max-w-xl text-pretty text-lg leading-relaxed text-muted-foreground">
-                OutreachOS finds the right companies, writes personalized emails backed by real buying
-                signals, and sends them from your Gmail. You review and approve.
+                Fully automated end to end — and still unmistakably you. Every company researched, every
+                line sourced, every email in your voice. Not the generic AI slop everyone else sends.
               </p>
             </Reveal>
             <Reveal as="div" delay={180} className="mt-9 flex flex-wrap items-center justify-center gap-3">
@@ -300,7 +298,10 @@ export function Landing() {
         <section id="features" className="border-t border-border/70">
           <div className="mx-auto max-w-6xl px-5 py-20 md:px-8 md:py-24">
             <Reveal>
-              <SectionHead title="Inside the pipeline." />
+              <SectionHead
+                title="Inside the pipeline."
+                sub="Automated at every step, sourced at every step — so it moves on its own without ever sending slop in your name."
+              />
             </Reveal>
             <div className="flex flex-col gap-16 md:gap-20">
               {FEATURES.map((f, i) => (
