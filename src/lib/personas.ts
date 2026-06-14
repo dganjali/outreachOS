@@ -9,6 +9,20 @@ export function emptyStyleProfile(): StyleProfile {
   return { dimensions: {}, rules: [], banned_phrases: [], voice_summary: '' };
 }
 
+/**
+ * Whether a voice has actually learned a style — i.e. the user ran the
+ * "calibrate on a real draft" step and extract-style populated the profile.
+ *
+ * This is the real signal for the "Calibrated" badge. `onboarding_completed_at`
+ * only flips when the user clicks Done on the wizard overview, so a fully
+ * calibrated voice would otherwise read "uncalibrated" until that final tap.
+ */
+export function isPersonaCalibrated(p: Pick<Persona, 'style_profile'> | null | undefined): boolean {
+  const sp = p?.style_profile;
+  if (!sp) return false;
+  return Boolean(sp.voice_summary?.trim()) || Object.keys(sp.dimensions ?? {}).length > 0;
+}
+
 export async function listPersonas(userId: string): Promise<Persona[]> {
   const { data, error } = await supabase
     .from('personas')

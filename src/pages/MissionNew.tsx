@@ -13,7 +13,7 @@ import { ArrowLeft, ArrowRight, Check, Plus, Rocket, Mic2 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import type { MissionMode, Persona } from '../types';
-import { listPersonas } from '../lib/personas';
+import { listPersonas, isPersonaCalibrated } from '../lib/personas';
 import { PersonaWizard } from '../components/persona/PersonaWizard';
 
 const MODES: Array<{ value: MissionMode; label: string; hint: string }> = [
@@ -239,7 +239,7 @@ export function MissionNew() {
                           <Mic2 size={13} /> {p.name}
                         </span>
                         <span className="pw-card-hint">
-                          {p.onboarding_completed_at ? 'Calibrated' : 'Not calibrated yet'}
+                          {isPersonaCalibrated(p) ? 'Calibrated' : 'Not calibrated yet'}
                           {p.mode ? ` · ${p.mode}` : ''}
                         </span>
                       </button>
@@ -286,7 +286,7 @@ export function MissionNew() {
                       </h3>
                       {selectedPersona && (
                         <span className="pw-ov-sub">
-                          {selectedPersona.onboarding_completed_at ? 'Calibrated' : 'Not calibrated'}
+                          {isPersonaCalibrated(selectedPersona) ? 'Calibrated' : 'Not calibrated'}
                         </span>
                       )}
                     </div>

@@ -4,7 +4,13 @@
 import type { Request, Response } from 'express';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { forUser, newId, type InsertDoc } from '../_lib/db';
-import { createMessageWithRetry, MODEL, WEB_SEARCH_TOOL, extractJson } from '../_lib/llm';
+import {
+  createMessageWithRetry,
+  MODEL,
+  WEB_SEARCH_TOOL,
+  extractJson,
+  generateJsonWithSearch,
+} from '../_lib/llm';
 import {
   TARGETING_SYSTEM,
   TARGETING_FILTER_SYSTEM,
@@ -155,15 +161,13 @@ async function runWebSearchOnly(args: {
     .filter(Boolean)
     .join('\n');
 
-  const message = await createMessageWithRetry({
+  const parsed = await generateJsonWithSearch<{ targets: TargetSuggestion[] }>({
     model: MODEL(),
     max_tokens: 4096,
     system: TARGETING_SYSTEM,
     tools: [WEB_SEARCH_TOOL],
     messages: [{ role: 'user', content: userPrompt }],
   });
-
-  const parsed = extractJson<{ targets: TargetSuggestion[] }>(message);
   if (!parsed.ok || !parsed.data?.targets) throw new Error('parse_failed');
 
   const exclusions = senderExclusions(profile);
@@ -284,15 +288,13 @@ async function runApolloHybrid(args: {
     .filter(Boolean)
     .join('\n');
 
-  const rankMsg = await createMessageWithRetry({
+  const rankParsed = await generateJsonWithSearch<{ targets: TargetSuggestion[] }>({
     model: MODEL(),
     max_tokens: 4096,
     system: TARGETING_RANK_SYSTEM,
     tools: [WEB_SEARCH_TOOL],
     messages: [{ role: 'user', content: rankPrompt }],
   });
-
-  const rankParsed = extractJson<{ targets: TargetSuggestion[] }>(rankMsg);
   if (!rankParsed.ok || !rankParsed.data?.targets) {
     return trimmed.slice(0, desired).map((o) => ({
       missionId: mission_id,

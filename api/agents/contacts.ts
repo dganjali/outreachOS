@@ -1,7 +1,13 @@
 import type { Request, Response } from 'express';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { forUser, newId, type InsertDoc } from '../_lib/db';
-import { createMessageWithRetry, MODEL, WEB_SEARCH_TOOL, extractJson } from '../_lib/llm';
+import {
+  createMessageWithRetry,
+  MODEL,
+  WEB_SEARCH_TOOL,
+  extractJson,
+  generateJsonWithSearch,
+} from '../_lib/llm';
 import { CONTACTS_SYSTEM, CONTACTS_RANK_SYSTEM, CONTACTS_FROM_SERP_SYSTEM, type MissionMode } from '../_lib/prompts';
 import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
 import {
@@ -170,15 +176,13 @@ async function runWebSearchOnly(args: {
     .filter(Boolean)
     .join('\n');
 
-  const message = await createMessageWithRetry({
+  const parsed = await generateJsonWithSearch<{ contacts: ContactSuggestion[] }>({
     model: MODEL(),
     max_tokens: 2048,
     system: CONTACTS_SYSTEM,
     tools: [WEB_SEARCH_TOOL],
     messages: [{ role: 'user', content: userPrompt }],
   });
-
-  const parsed = extractJson<{ contacts: ContactSuggestion[] }>(message);
   if (!parsed.ok || !parsed.data?.contacts) throw new Error('parse_failed');
 
   const filtered = parsed.data.contacts.filter(

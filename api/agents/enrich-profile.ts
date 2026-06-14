@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { forUser, newId, type InsertDoc } from '../_lib/db';
-import { createMessageWithRetry, MODEL, WEB_SEARCH_TOOL, extractJson } from '../_lib/llm';
+import { MODEL, WEB_SEARCH_TOOL, generateJsonWithSearch } from '../_lib/llm';
 import { PROFILE_ENRICH_SYSTEM } from '../_lib/prompts';
 import { startRun, completeRun, failRun } from '../_lib/runs';
 import { embedOne } from '../_lib/embeddings';
@@ -146,15 +146,13 @@ async function runLlmEnrichment(args: {
     'Use web_search to verify and surface concrete proof points. JSON only.',
   ].filter(Boolean).join('\n');
 
-  const message = await createMessageWithRetry({
+  const parsed = await generateJsonWithSearch<EnrichmentOutput>({
     model: MODEL(),
     max_tokens: 2048,
     system: PROFILE_ENRICH_SYSTEM,
     tools: [WEB_SEARCH_TOOL],
     messages: [{ role: 'user', content: userPrompt }],
   });
-
-  const parsed = extractJson<EnrichmentOutput>(message);
   if (!parsed.ok || !parsed.data) throw new Error('parse_failed');
   return parsed.data;
 }

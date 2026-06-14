@@ -12,6 +12,7 @@ import { SignIn } from './pages/SignIn';
 import { SignUp } from './pages/SignUp';
 import { ForgotPassword } from './pages/ForgotPassword';
 import { CheckEmail } from './pages/CheckEmail';
+import { AuthAction } from './pages/AuthAction';
 import { Onboarding } from './pages/Onboarding';
 import { Dashboard } from './pages/Dashboard';
 import { Missions } from './pages/Missions';
@@ -65,6 +66,10 @@ function App() {
             }
           />
           <Route path="/check-email" element={<CheckEmail />} />
+          {/* Firebase email action handler (verify email, password reset,
+              email recovery). Public + ungated — users may arrive here signed
+              out, on a different device. See AuthAction.tsx for why it exists. */}
+          <Route path="/auth/action" element={<AuthAction />} />
           <Route path="/wizard-preview" element={<WizardPreview />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/terms" element={<Terms />} />

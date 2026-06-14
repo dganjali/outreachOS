@@ -4,7 +4,7 @@
 import type { Request, Response } from 'express';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { forUser, newId, type InsertDoc } from '../_lib/db';
-import { createMessageWithRetry, MODEL, WEB_SEARCH_TOOL, extractJson } from '../_lib/llm';
+import { MODEL, WEB_SEARCH_TOOL, generateJsonWithSearch } from '../_lib/llm';
 import { EVIDENCE_SYSTEM, type MissionMode } from '../_lib/prompts';
 import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
 import { embedOne } from '../_lib/embeddings';
@@ -51,15 +51,13 @@ export default async function handler(req: Request, res: Response) {
     .join('\n');
 
   try {
-    const message = await createMessageWithRetry({
+    const parsed = await generateJsonWithSearch<{ bullets: EvidenceBullet[] }>({
       model: MODEL(),
       max_tokens: 3072,
       system: EVIDENCE_SYSTEM,
       tools: [WEB_SEARCH_TOOL],
       messages: [{ role: 'user', content: userPrompt }],
     });
-
-    const parsed = extractJson<{ bullets: EvidenceBullet[] }>(message);
     if (!parsed.ok || !parsed.data?.bullets) {
       await failRun(scope, run._id, 'parse_failed');
       return res.status(502).json({ error: 'parse_failed', raw: parsed.raw.slice(0, 500) });

@@ -1,11 +1,13 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Mail, Check, Loader2 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
+import { gmail } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import type { Profile } from '../types';
 
-const TOTAL_STEPS = 4;
-const STEP_NAMES = ['name', 'email', 'occupation', 'resume'] as const;
+const TOTAL_STEPS = 5;
+const STEP_NAMES = ['name', 'email', 'occupation', 'gmail', 'resume'] as const;
 
 export function Onboarding() {
   const { user, profile, refreshProfile } = useAuth();
@@ -19,8 +21,73 @@ export function Onboarding() {
   const [resumeUrl, setResumeUrl] = useState(profile?.resume_url ?? '');
   const [linkedinUrl, setLinkedinUrl] = useState(profile?.linkedin_url ?? '');
 
+  // Gmail connect (optional step). Connection happens in a popup so the OAuth
+  // round-trip (which lands on /settings) doesn't blow away onboarding state —
+  // we just poll status and close the popup once it's connected.
+  const [gmailConnected, setGmailConnected] = useState(false);
+  const [gmailChecking, setGmailChecking] = useState(false);
+  const [gmailConnecting, setGmailConnecting] = useState(false);
+  const [gmailError, setGmailError] = useState<string | null>(null);
+
   const navigate = useNavigate();
   const isInitialMount = useRef(true);
+
+  // Pull current Gmail status when the user reaches the connect step.
+  useEffect(() => {
+    if (step !== 4) return;
+    let cancelled = false;
+    setGmailChecking(true);
+    gmail
+      .status()
+      .then((r) => {
+        if (!cancelled) setGmailConnected(r.connected);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setGmailChecking(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [step]);
+
+  async function connectGmail() {
+    setGmailError(null);
+    setGmailConnecting(true);
+    try {
+      const { url } = await gmail.start();
+      const popup = window.open(url, 'gmail-oauth', 'width=520,height=680');
+      if (!popup) {
+        // Popup blocked — fall back to a full redirect (lands on /settings).
+        window.location.href = url;
+        return;
+      }
+      const poll = window.setInterval(async () => {
+        let connected = false;
+        try {
+          connected = (await gmail.status()).connected;
+        } catch {
+          /* transient — keep polling */
+        }
+        if (connected) {
+          window.clearInterval(poll);
+          setGmailConnected(true);
+          setGmailConnecting(false);
+          try {
+            popup.close();
+          } catch {
+            /* cross-origin close guard */
+          }
+        } else if (popup.closed) {
+          window.clearInterval(poll);
+          setGmailConnecting(false);
+        }
+      }, 1500);
+    } catch (err: unknown) {
+      setGmailError(err instanceof Error ? err.message : 'Could not start Gmail connection.');
+      setGmailConnecting(false);
+    }
+  }
 
   useEffect(() => {
     if (!profile) return;
@@ -109,7 +176,8 @@ export function Onboarding() {
     1: "What's your name?",
     2: "Here's the email we have on file.",
     3: "What's your occupation?",
-    4: 'Add your LinkedIn and résumé (optional) so they\'re on hand when you draft.',
+    4: 'Connect Gmail to send from your own address.',
+    5: 'Add your LinkedIn and résumé (optional) so they\'re on hand when you draft.',
   };
 
   return (
@@ -198,6 +266,73 @@ export function Onboarding() {
                   {stepQuestions[4]}
                 </p>
                 <div className="field">
+                  <div className="onboarding-gmail">
+                    <div className="onboarding-gmail-row">
+                      <span className="onboarding-gmail-icon" aria-hidden>
+                        <Mail size={18} />
+                      </span>
+                      <div className="onboarding-gmail-text">
+                        <strong>Gmail</strong>
+                        <span>
+                          {gmailChecking
+                            ? 'Checking…'
+                            : gmailConnected
+                              ? 'Connected'
+                              : 'Not connected'}
+                        </span>
+                      </div>
+                      {gmailConnected ? (
+                        <span className="onboarding-gmail-done" aria-label="Connected">
+                          <Check size={16} />
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          onClick={connectGmail}
+                          disabled={gmailConnecting || gmailChecking}
+                        >
+                          {gmailConnecting ? (
+                            <>
+                              <Loader2 size={14} className="pw-spin" /> Connecting…
+                            </>
+                          ) : (
+                            'Connect Gmail'
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <p className="section-hint">
+                    Optional, and you can do it later in Settings. OutreachOS can only <strong>send</strong> — it never reads your inbox — and you approve every email before it goes out.
+                  </p>
+                  {gmailError && (
+                    <p role="alert" className="auth-alert" style={{ marginTop: '0.5rem' }}>
+                      {gmailError}
+                    </p>
+                  )}
+                </div>
+                <div className="get-to-know-you-skip">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDirection('forward');
+                      setStep(5);
+                    }}
+                    disabled={saving}
+                  >
+                    {gmailConnected ? 'Continue' : 'Skip for now'}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {step === 5 && (
+              <>
+                <p className="get-to-know-you-title" style={{ marginBottom: '1.25rem' }}>
+                  {stepQuestions[5]}
+                </p>
+                <div className="field">
                   <label htmlFor="onboarding-linkedin">LinkedIn URL</label>
                   <input
                     id="onboarding-linkedin"
@@ -282,6 +417,19 @@ export function Onboarding() {
               </button>
             )}
             {step === 4 && (
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => {
+                  setDirection('forward');
+                  setStep(5);
+                }}
+                disabled={saving}
+              >
+                Next
+              </button>
+            )}
+            {step === 5 && (
               <button
                 type="button"
                 className="btn-primary"

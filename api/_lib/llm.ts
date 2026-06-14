@@ -217,6 +217,44 @@ export async function generateJson<T>(
   return extractJson<T>(message);
 }
 
+/**
+ * Grounded JSON with a repair pass.
+ *
+ * Web-search (grounding) and structured output (responseJsonSchema) are
+ * mutually exclusive, so search-backed agents have to scrape JSON out of free
+ * text — the brittle path that surfaces to users as `parse_failed`. This runs
+ * the grounded call, and if the result won't parse, hands the unparseable text
+ * back for a fast, deterministic reformat (search tool dropped, temperature 0)
+ * so the common "prose-wrapped / fenced JSON" failures recover instead of
+ * blowing up the run.
+ */
+export async function generateJsonWithSearch<T>(
+  params: CreateMessageParams
+): Promise<JsonExtraction<T>> {
+  const first = extractJson<T>(await createMessageWithRetry(params));
+  if (first.ok || !first.raw.trim()) return first;
+
+  const repaired = extractJson<T>(
+    await createMessageWithRetry({
+      ...params,
+      tools: undefined,
+      temperature: 0,
+      messages: [
+        ...params.messages,
+        { role: 'assistant', content: first.raw.slice(0, 8000) },
+        {
+          role: 'user',
+          content:
+            'That reply could not be parsed. Return the SAME content as ONLY a valid JSON ' +
+            'object — no prose, no markdown code fences, nothing before the opening { or ' +
+            'after the closing }.',
+        },
+      ],
+    })
+  );
+  return repaired.ok ? repaired : first;
+}
+
 // ---- OCR via Gemini multimodal ----
 // Inline data is sent base64; Vertex caps a request at ~20MB total, so base64
 // inflation (~33%) means the raw file must stay well under that.

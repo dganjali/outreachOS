@@ -17,16 +17,16 @@ export function SignUp() {
     e.preventDefault();
     setError(null);
     setLoading(true);
-    const { data, error: err } = await supabase.auth.signUp({ email, password });
+    const { error: err } = await supabase.auth.signUp({ email, password });
     setLoading(false);
     if (err) {
       setError(err.message);
       return;
     }
-    if (data.session) {
-      navigate('/onboarding', { replace: true });
-      return;
-    }
+    // A brand-new email/password account is always unverified, so route every
+    // signup to the verification gate. /check-email auto-forwards to onboarding
+    // the moment the email is confirmed — going to onboarding here would let an
+    // unverified user in and cause the onboarding↔verify flicker.
     navigate('/check-email', { replace: true, state: { email } });
   }
 

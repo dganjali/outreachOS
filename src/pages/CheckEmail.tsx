@@ -3,6 +3,7 @@ import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { AuthShell } from '../components/AuthShell';
 import { useToast } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 import { Button } from '@/components/ui/button';
 
 type LocationState = { email?: string } | null;
@@ -11,22 +12,25 @@ export function CheckEmail() {
   const location = useLocation();
   const navigate = useNavigate();
   const toast = useToast();
-  const email = (location.state as LocationState)?.email ?? '';
+  const { user, emailVerified, reloadUser } = useAuth();
+  // Prefer the address passed from sign-up; fall back to the signed-in user's
+  // email when we landed here via a route gate (no navigation state).
+  const email = (location.state as LocationState)?.email ?? user?.email ?? '';
   const [resending, setResending] = useState(false);
   const [resendError, setResendError] = useState<string | null>(null);
 
-  // Some email providers prefetch confirm links — poll auth state so we can
-  // forward to onboarding the moment Supabase says the email is verified.
+  // Firebase's cached `currentUser.emailVerified` does NOT flip when the user
+  // clicks the verification link in another tab — only a `reload()` refreshes
+  // it. Poll reloadUser() so we advance automatically instead of forcing the
+  // user to manually refresh until it "lets them in".
   useEffect(() => {
-    if (!email) return;
+    if (!user) return;
     let cancelled = false;
 
     const tick = async () => {
-      const { data } = await supabase.auth.getUser();
+      const verified = await reloadUser();
       if (cancelled) return;
-      if (data.user?.email_confirmed_at) {
-        navigate('/onboarding', { replace: true });
-      }
+      if (verified) navigate('/onboarding', { replace: true });
     };
 
     tick();
@@ -35,7 +39,12 @@ export function CheckEmail() {
       cancelled = true;
       window.clearInterval(handle);
     };
-  }, [email, navigate]);
+  }, [user, reloadUser, navigate]);
+
+  // Already verified (e.g. landed here after the fact) — move along.
+  if (user && emailVerified) {
+    return <Navigate to="/onboarding" replace />;
+  }
 
   if (!email) {
     return <Navigate to="/sign-up" replace />;

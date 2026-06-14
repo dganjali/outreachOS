@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Mic2, Plus, Check, Trash2, Loader2 } from 'lucide-react';
-import { listPersonas, deletePersona } from '../../lib/personas';
+import { listPersonas, deletePersona, isPersonaCalibrated } from '../../lib/personas';
 import { PersonaWizard } from '../../components/persona/PersonaWizard';
 import type { Persona } from '../../types';
 
@@ -112,7 +112,7 @@ export function PersonaStudio({ userId }: { userId: string | undefined }) {
                     (p.mode ? `${capitalize(p.mode)} voice` : 'No tone tuned yet')}
                 </p>
                 <div className="me-voice-status">
-                  {p.onboarding_completed_at ? (
+                  {isPersonaCalibrated(p) ? (
                     <span className="me-voice-tag is-ready">
                       <Check size={12} /> Calibrated
                     </span>
