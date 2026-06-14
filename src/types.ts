@@ -88,6 +88,8 @@ export interface StyleProfile {
   rules: Array<{ rule: string; source: string; confidence: number }>;
   banned_phrases: string[];
   voice_summary: string;
+  // 0 = loose voice inspiration, 100 = follow the closest exemplar verbatim.
+  template_strictness: number;
 }
 
 export interface Persona {
@@ -102,6 +104,8 @@ export interface Persona {
   onboarding_completed_at: string | null;
   archived_at: string | null;
   created_at?: string;
+  // Person-level (default) fact ids this voice has opted out of — see PersonaDoc.
+  excluded_fact_ids?: string[];
 }
 
 export interface ContextFact {

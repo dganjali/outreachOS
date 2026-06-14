@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import {
   verifyDraftDeterministic,
   hasBlocker,
+  templateStrictnessDirective,
   type AllowedFact,
   type DraftOutput,
 } from './engine';
@@ -96,4 +97,20 @@ test('a draft with no call-to-action gets a constraint warning', () => {
     true,
   );
   assert.equal(hasBlocker(v), false);
+});
+
+test('template-strictness directive scales from loose inspiration to near-verbatim', () => {
+  // With no exemplars there is nothing to be strict about — emit nothing.
+  assert.equal(templateStrictnessDirective(100, false), '');
+
+  const loose = templateStrictnessDirective(0, true);
+  assert.match(loose, /TEMPLATE STRICTNESS: 0\/100/);
+  assert.match(loose, /loose voice inspiration/i);
+
+  const strict = templateStrictnessDirective(100, true);
+  assert.match(strict, /TEMPLATE STRICTNESS: 100\/100/);
+  assert.match(strict, /verbatim/i);
+
+  // Out-of-range values are clamped before bucketing.
+  assert.match(templateStrictnessDirective(999, true), /100\/100/);
 });

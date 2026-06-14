@@ -23,6 +23,7 @@
 
 import { generateJson, MODEL, MODEL_PRO } from './llm';
 import { checkDeliverability } from '../../shared/deliverability';
+import { DEFAULT_TEMPLATE_STRICTNESS } from '../../shared/schemas';
 import type { StyleProfile } from '../../shared/schemas';
 
 // ---------------------------------------------------------------------------
@@ -192,6 +193,34 @@ function styleProfileBlock(sp: StyleProfile): string {
     .join('\n\n');
 }
 
+/**
+ * Translate the 0–100 template-strictness slider into an explicit drafting
+ * directive. Low = the exemplars are loose voice inspiration; high = treat the
+ * closest exemplar as a template to follow structurally, almost verbatim.
+ */
+export function templateStrictnessDirective(strictness: number, hasExemplars: boolean): string {
+  if (!hasExemplars) return '';
+  const s = Math.max(0, Math.min(100, Math.round(strictness)));
+  let guidance: string;
+  if (s <= 20) {
+    guidance =
+      'Use the exemplars ONLY as loose voice inspiration — match the sender\'s tone and rhythm, but write a fresh structure tailored to this recipient. Do not reuse the exemplars\' opening lines, structure, or phrasing.';
+  } else if (s <= 45) {
+    guidance =
+      'Lean on the exemplars for voice and general shape, but adapt freely to this recipient. Borrow phrasing only where it fits naturally.';
+  } else if (s <= 70) {
+    guidance =
+      'Treat the closest exemplar as a strong template: follow its overall structure, paragraph flow, and CTA style, swapping in details relevant to this recipient.';
+  } else if (s <= 90) {
+    guidance =
+      'Follow the closest exemplar closely as a template: keep its structure, sentence patterns, and most phrasing, changing only the recipient-specific details and grounded facts.';
+  } else {
+    guidance =
+      'Reproduce the closest exemplar as a near-verbatim template: preserve its structure, opening, sentence patterns, and wording, changing ONLY the recipient-specific details and grounded facts. Stay as close to the original as the facts allow.';
+  }
+  return `TEMPLATE STRICTNESS: ${s}/100. ${guidance}`;
+}
+
 /** Build the volatile user-message prompt (everything not in the frozen system). */
 export function buildDraftUserPrompt(ctx: AssembledContext): string {
   const facts = ctx.allowedFacts.length
@@ -202,6 +231,10 @@ export function buildDraftUserPrompt(ctx: AssembledContext): string {
         .map((e, i) => `--- Exemplar ${i + 1} ---\n${e.subject ? `Subject: ${e.subject}\n` : ''}${e.body}`)
         .join('\n\n')
     : '(no exemplars yet — lean on the style profile)';
+  const strictness = templateStrictnessDirective(
+    ctx.styleProfile.templateStrictness ?? DEFAULT_TEMPLATE_STRICTNESS,
+    ctx.exemplars.length > 0
+  );
 
   return [
     `MODE: ${ctx.mode}`,
@@ -215,6 +248,7 @@ export function buildDraftUserPrompt(ctx: AssembledContext): string {
     `SENDER STYLE PROFILE\n${styleProfileBlock(ctx.styleProfile)}`,
     '',
     `SENDER EXEMPLARS (imitate the voice, not the specifics):\n${exemplars}`,
+    ...(strictness ? ['', strictness] : []),
     '',
     `Word target: ${ctx.minWords ?? DEFAULT_MIN_WORDS}–${ctx.maxWords ?? DEFAULT_MAX_WORDS} words.`,
     'Output JSON only.',

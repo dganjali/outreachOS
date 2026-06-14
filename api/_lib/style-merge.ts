@@ -9,6 +9,7 @@
 // Pure (no LLM/DB) so it's unit-testable. The LLM (extract-style.ts) produces
 // the delta; this decides how much of it to believe.
 
+import { DEFAULT_TEMPLATE_STRICTNESS } from '../../shared/schemas';
 import type { StyleProfile, StyleDimension } from '../../shared/schemas';
 
 export interface StyleDelta {
@@ -64,7 +65,15 @@ export function mergeStyleProfile(cur: StyleProfile, delta: StyleDelta, source: 
 
   const voiceSummary = delta.voiceSummary?.trim() ? delta.voiceSummary.trim() : cur.voiceSummary;
 
-  return { dimensions, rules, bannedPhrases, voiceSummary };
+  // templateStrictness is a user-set knob, not something calibration infers — carry
+  // it through untouched so a re-extract never silently resets the slider.
+  return {
+    dimensions,
+    rules,
+    bannedPhrases,
+    voiceSummary,
+    templateStrictness: cur.templateStrictness ?? DEFAULT_TEMPLATE_STRICTNESS,
+  };
 }
 
 function clamp01(n: number): number {

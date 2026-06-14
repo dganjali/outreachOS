@@ -53,7 +53,9 @@ export async function assembleDraftContext(
 ): Promise<AssembledBundle> {
   const { contact, target, mission, persona } = args;
 
-  const facts = await assembleAllowedFacts(scope, uid, persona?._id ?? null, target._id, mission.goal);
+  const facts = await assembleAllowedFacts(scope, uid, persona?._id ?? null, target._id, mission.goal, {
+    excludedFactIds: persona?.excludedFactIds ?? [],
+  });
   const exemplarDocs = persona ? await fetchExemplars(uid, persona._id, mission.goal) : [];
 
   const ctx: AssembledContext = {
@@ -86,9 +88,13 @@ export async function assembleAllowedFacts(
   uid: string,
   personaId: string | null,
   targetId: string,
-  missionGoal: string
+  missionGoal: string,
+  opts: { excludedFactIds?: string[] } = {}
 ): Promise<AllowedFact[]> {
   const facts: AllowedFact[] = [];
+  // Default (person-level) facts this voice opted out of — drop them from
+  // grounding so a cleared default never resurfaces in a generated email.
+  const excluded = new Set(opts.excludedFactIds ?? []);
 
   const ranked = await fetchRankedContextFacts(uid, personaId, missionGoal);
   let contextFacts = ranked;
@@ -102,6 +108,7 @@ export async function assembleAllowedFacts(
     contextFacts = candidates.slice(0, MAX_FACTS);
   }
   for (const f of contextFacts) {
+    if (excluded.has(f._id)) continue;
     facts.push({ id: f._id, claim: f.claim, source: 'context_fact' });
   }
 

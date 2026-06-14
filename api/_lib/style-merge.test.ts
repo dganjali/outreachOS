@@ -65,3 +65,9 @@ test('out-of-range confidences are clamped to [0,1]', () => {
   const out = mergeStyleProfile(profile(), { dimensions: { d: { value: 0.5, confidence: 5 } } }, 's');
   assert.ok(out.dimensions.d.confidence <= 1);
 });
+
+test('templateStrictness (a user-set knob) is preserved across calibration', () => {
+  const cur = profile({ templateStrictness: 90 });
+  // A delta from extract-style never carries strictness — it must survive untouched.
+  assert.equal(mergeStyleProfile(cur, { voiceSummary: 'updated' }, 's').templateStrictness, 90);
+});

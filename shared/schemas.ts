@@ -136,12 +136,20 @@ export interface StyleProfile {
   bannedPhrases: string[];
   // Short prose summary regenerated from the above, injected into the prompt.
   voiceSummary: string;
+  // How closely the generator should hug the persona's exemplar emails as a
+  // template: 0 = loose inspiration (borrow only the voice), 100 = follow the
+  // structure/phrasing of the closest exemplar almost verbatim. User-set via the
+  // Style step slider; the engine turns it into an explicit drafting directive.
+  templateStrictness: number;
 }
 
 /** A fresh, empty StyleProfile (persona v1 before any calibration). */
 export function emptyStyleProfile(): StyleProfile {
-  return { dimensions: {}, rules: [], bannedPhrases: [], voiceSummary: '' };
+  return { dimensions: {}, rules: [], bannedPhrases: [], voiceSummary: '', templateStrictness: DEFAULT_TEMPLATE_STRICTNESS };
 }
+
+/** Mid-scale default: lean on the exemplar voice without copying its structure. */
+export const DEFAULT_TEMPLATE_STRICTNESS = 50;
 
 export interface PersonaDoc extends BaseDoc {
   name: string;                          // "Sponsorship voice", "Recruiting voice"
@@ -152,6 +160,11 @@ export interface PersonaDoc extends BaseDoc {
   styleProfileVersion: number;           // monotonically increments on each calibration
   onboardingCompletedAt: Date | null;
   archivedAt: Date | null;
+  // Person-level (default) context facts this voice has opted OUT of. Person
+  // facts apply to every persona by default; listing an id here hides it from
+  // this voice's display AND its generation grounding, without deleting the
+  // fact globally (it stays available to other voices).
+  excludedFactIds?: string[];
 }
 
 // Immutable per-calibration snapshots — audit + rollback for a persona's voice.
