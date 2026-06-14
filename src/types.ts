@@ -11,6 +11,11 @@ export type {
   EvidencePack,
   SequenceStatus,
   EmailSequence,
+  SeniorityLevel,
+  SizeTier,
+  GeoScope,
+  ContactIcp,
+  ContactIcpGeo,
 } from '../shared/types';
 import type { MissionMode } from '../shared/types';
 import type { PlanId, PlanStatus } from '../shared/plans';
@@ -35,7 +40,7 @@ export interface Profile {
   writing_tone: string | null;
   linkedin_data: Record<string, unknown> | null;
   linkedin_enriched_at: string | null;
-  linkedin_source: 'apollo' | 'web_search' | null;
+  linkedin_source: 'web_search' | null;
   onboarding_step: number;
   onboarding_completed_at: string | null;
   // Billing (Stripe). Absent == free tier.
@@ -56,6 +61,9 @@ export interface Mission {
   target_description: string;
   mode: MissionMode;
   offer_details: string | null;
+  // Optional location focus (region/country/city) used to scope and rank
+  // contact discovery. null = no geographic preference.
+  geo: string | null;
   status: string;
   archived_at: string | null;
   // The reusable persona (voice) this mission drafts as. Required for new
@@ -80,6 +88,8 @@ export interface StyleProfile {
   rules: Array<{ rule: string; source: string; confidence: number }>;
   banned_phrases: string[];
   voice_summary: string;
+  // 0 = loose voice inspiration, 100 = follow the closest exemplar verbatim.
+  template_strictness: number;
 }
 
 export interface Persona {
@@ -94,6 +104,8 @@ export interface Persona {
   onboarding_completed_at: string | null;
   archived_at: string | null;
   created_at?: string;
+  // Person-level (default) fact ids this voice has opted out of — see PersonaDoc.
+  excluded_fact_ids?: string[];
 }
 
 export interface ContextFact {

@@ -3,8 +3,56 @@
 
 export type MissionMode = 'sponsorship' | 'bd' | 'internship' | 'recruiting' | 'sales';
 
+// ---------------------------------------------------------------------------
+// Contact Discovery Engine — see CONTACT_ENGINE.md. Defined in this
+// dependency-free module so both the api/ engine and the React client share one
+// source of truth for the seniority taxonomy and the Ideal Contact Profile.
+// ---------------------------------------------------------------------------
+
+// Normalized seniority ladder, junior → senior. Rank values live in
+// api/_lib/seniority.ts (SENIORITY_RANK); this is just the closed vocabulary.
+export type SeniorityLevel =
+  | 'ic'
+  | 'senior_ic'
+  | 'lead'
+  | 'manager'
+  | 'senior_manager'
+  | 'director'
+  | 'senior_director'
+  | 'vp'
+  | 'svp'
+  | 'cxo'
+  | 'founder';
+
+// Company-size tier. The acceptable seniority band shifts with this so the same
+// mission targets a startup's CMO but an enterprise's program manager.
+export type SizeTier = 'startup' | 'small' | 'mid' | 'large' | 'enterprise';
+
+export type GeoScope = 'metro' | 'country' | 'region' | 'global';
+
+export interface ContactIcpGeo {
+  preferred: string | null; // human label, e.g. "Toronto, CA" — null = anywhere
+  scope: GeoScope;
+  strict: boolean; // true = drop out-of-geo contacts; false = only down-rank them
+}
+
+// The adaptive spec of WHO to reach at a target. Generated per mission, adapted
+// per target. Drives query construction, hard filtering, and ranking.
+export interface ContactIcp {
+  functions: string[]; // semantic target functions (e.g. "community investment")
+  functionKeywords: string[]; // expanded query synonyms
+  seniority: {
+    idealLevels: SeniorityLevel[];
+    maxLevel: SeniorityLevel; // hard cap before per-target size shift
+  };
+  disqualifierKeywords: string[]; // title substrings that hard-drop a candidate
+  routerOk: boolean; // accept gatekeepers/routers (coordinators, EAs)?
+  geo: ContactIcpGeo;
+  rationale: string; // one line: why this band for this mission
+}
+
 export type TargetStatus = 'suggested' | 'approved' | 'rejected' | 'contacted';
-export type TargetSource = 'web_search' | 'apollo' | 'csv' | 'manual';
+export type TargetSource = 'web_search' | 'csv' | 'manual';
 
 export interface Target {
   id: string;
@@ -17,7 +65,6 @@ export interface Target {
   signal_type: string | null;
   status: TargetStatus;
   source: TargetSource;
-  apollo_organization_id: string | null;
   industry: string | null;
   employee_count: number | null;
   headquarters_location: string | null;
@@ -25,7 +72,7 @@ export interface Target {
 }
 
 export type ContactStatus = 'suggested' | 'approved' | 'rejected' | 'contacted' | 'replied';
-export type ContactSource = 'web_search' | 'apollo' | 'csv' | 'manual';
+export type ContactSource = 'web_search' | 'csv' | 'manual';
 export type EmailStatus = 'verified' | 'likely' | 'guessed' | 'none';
 
 export interface Contact {
@@ -41,7 +88,6 @@ export interface Contact {
   reasoning: string | null;
   status: ContactStatus;
   source: ContactSource;
-  apollo_person_id: string | null;
   seniority: string | null;
   headline: string | null;
   location: string | null;

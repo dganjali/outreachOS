@@ -1,9 +1,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolvePoolWithBudget, type ResolvePoolDeps } from './contacts';
+import { resolvePoolWithBudget, rankCandidates, type ResolvePoolDeps, type ContactSuggestion } from './contacts';
+import { defaultContactIcp } from '../_lib/icp';
 import type { ResolvedEmail } from '../_lib/email-resolver';
 import type { ScrapeResult } from '../_lib/web-scrape';
-import type { ContactDoc } from '../../shared/schemas';
+import type { ContactDoc, MissionDoc, TargetDoc } from '../../shared/schemas';
 
 type ContactRow = Omit<ContactDoc, '_id' | 'userId' | 'createdAt' | 'updatedAt'>;
 
@@ -21,7 +22,6 @@ function row(name: string): ContactRow {
     reasoning: 'ranked',
     status: 'suggested',
     source: 'web_search',
-    apolloPersonId: null,
     seniority: null,
     headline: null,
     location: null,
@@ -89,5 +89,88 @@ describe('resolvePoolWithBudget', () => {
     assert.equal(out.length, 3);
     assert.equal(calls(), 0, 'no domain → no resolver calls');
     assert.ok(out.every((r) => r.emailResolver === 'none'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rankCandidates — the end-to-end "right people" behavior on the reported bank
+// example: drop the off-function execs, keep the program owners, sort by
+// reply-likelihood, populate seniority.
+// ---------------------------------------------------------------------------
+
+function suggestion(name: string, role: string): ContactSuggestion {
+  return {
+    name,
+    role,
+    linkedin_url: `https://linkedin.com/in/${name.toLowerCase().replace(/\s+/g, '')}`,
+    location: null,
+    headline: null,
+    email: null,
+    likely_email_pattern: null,
+    confidence: 0.7,
+    reasoning: 'serp',
+  };
+}
+
+const target = { _id: 't1', companyName: 'Big Bank' } as TargetDoc;
+const mission = { _id: 'm1', mode: 'sponsorship' } as MissionDoc;
+
+describe('rankCandidates — the bank example at enterprise size', () => {
+  // A community-investment-flavored sponsorship ICP.
+  const icp = {
+    ...defaultContactIcp('sponsorship'),
+    functions: ['community investment', 'community', 'sponsorship', 'corporate citizenship'],
+    functionKeywords: ['community', 'investment', 'sponsorship'],
+  };
+
+  const suggestions = [
+    suggestion('Reggie Prez', 'Regional President'),
+    suggestion('Glenda Cmo', 'Global Chief Marketing Officer'),
+    suggestion('Dana Design', 'Senior Director, Global Design and Standards'),
+    suggestion('Sam Svp', 'Senior Vice President, Community'),
+    suggestion('Dina Dir', 'Director, Sponsors and Community Investment'),
+    suggestion('Manny Mgr', 'Senior Community Investment Manager'),
+  ];
+
+  const result = rankCandidates(suggestions, { icp, sizeTier: 'enterprise', target, mission, profile: null });
+  const names = result.rows.map((r) => r.name);
+
+  it('drops the off-function execs (president, CMO, design director)', () => {
+    assert.ok(!names.includes('Reggie Prez'));
+    assert.ok(!names.includes('Glenda Cmo'));
+    assert.ok(!names.includes('Dana Design'));
+    assert.equal(result.droppedAboveCap, 3);
+  });
+
+  it('ranks the program owners on top, exec fallback last', () => {
+    assert.deepEqual(names, ['Manny Mgr', 'Dina Dir', 'Sam Svp']);
+  });
+
+  it('populates the parsed seniority level and uses score as confidence', () => {
+    const mgr = result.rows.find((r) => r.name === 'Manny Mgr')!;
+    assert.equal(mgr.seniority, 'senior_manager');
+    assert.ok((mgr.confidence ?? 0) > 0.6);
+    // ordering is by confidence (= composite reply-likelihood score)
+    const confs = result.rows.map((r) => r.confidence ?? 0);
+    assert.deepEqual(confs, [...confs].sort((a, b) => b - a));
+  });
+});
+
+describe('rankCandidates — never returns an empty target', () => {
+  const icp = defaultContactIcp('bd'); // partnerships, caps at director
+  it('falls back to above-cap people when the band disqualifies everyone', () => {
+    // Off-function AND above-cap → disqualified in the strict pass; the fallback
+    // re-scores with allowAboveCap so the target still gets best-available rows.
+    const onlyExecs = [suggestion('Fin Vp', 'VP of Finance'), suggestion('Fin Cfo', 'Chief Financial Officer')];
+    const strict = rankCandidates(onlyExecs, { icp, sizeTier: 'enterprise', target, mission, profile: null });
+    assert.ok(strict.rows.length > 0, 'surfaces best-available instead of nothing');
+    assert.equal(strict.usedFallback, true);
+  });
+
+  it('on-function above-cap people are kept WITHOUT needing the fallback', () => {
+    const onFn = [suggestion('V P', 'VP, Strategic Partnerships')];
+    const result = rankCandidates(onFn, { icp, sizeTier: 'enterprise', target, mission, profile: null });
+    assert.equal(result.rows.length, 1);
+    assert.equal(result.usedFallback, false);
   });
 });

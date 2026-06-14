@@ -30,14 +30,18 @@ import {
   X,
 } from 'lucide-react';
 import type { MissionMode, Persona } from '../../types';
+import { useConfirm } from '../../context/ConfirmContext';
+import { useToast } from '../../context/ToastContext';
 import { agents } from '../../lib/api';
 import { uploadAsset, MAX_ASSET_BYTES } from '../../lib/profileAssets';
 import {
   addContextFact,
   addExemplar,
   createPersona,
+  DEFAULT_TEMPLATE_STRICTNESS,
   deleteContextFact,
   deleteExemplar,
+  emptyStyleProfile,
   getPersonaBundle,
   listContextFacts,
   updatePersona,
@@ -96,6 +100,8 @@ export function PersonaWizard({
   embedded,
 }: PersonaWizardProps) {
   const editing = Boolean(initialPersonaId);
+  const confirm = useConfirm();
+  const toast = useToast();
 
   // frame
   const [name, setName] = useState('');
@@ -104,6 +110,8 @@ export function PersonaWizard({
   const [facts, setFacts] = useState<FactItem[]>([]);
   // style
   const [exemplars, setExemplars] = useState<ExItem[]>([]);
+  // how strictly the engine should follow the exemplars as a template (0–100)
+  const [strictness, setStrictness] = useState<number>(DEFAULT_TEMPLATE_STRICTNESS);
   // calibrate
   const [calSubject, setCalSubject] = useState('');
   const [calBody, setCalBody] = useState('');
@@ -170,10 +178,15 @@ export function PersonaWizard({
     setName(b.persona.name);
     setMode(b.persona.mode);
     const personaItems: FactItem[] = b.facts.map((f) => ({ id: f.id, claim: f.claim, scope: 'persona' as const }));
-    const personItems: FactItem[] = (personFacts ?? []).map((f) => ({ id: f.id, claim: f.claim, scope: 'person' as const }));
+    // Person-level facts this voice has opted out of are hidden from the list.
+    const excluded = new Set(b.persona.excluded_fact_ids ?? []);
+    const personItems: FactItem[] = (personFacts ?? [])
+      .filter((f) => !excluded.has(f.id))
+      .map((f) => ({ id: f.id, claim: f.claim, scope: 'person' as const }));
     // Merge: person-level first (identity facts), then persona-scoped.
     setFacts([...personItems, ...personaItems]);
     setExemplars(b.exemplars.map((e) => ({ id: e.id, body: e.body })));
+    setStrictness(b.persona.style_profile?.template_strictness ?? DEFAULT_TEMPLATE_STRICTNESS);
   }
 
   const go = useCallback((to: Step, direction: 'forward' | 'back') => {
@@ -225,6 +238,13 @@ export function PersonaWizard({
     }
     const after = await getPersonaBundle(userId, pid);
     if (after) {
+      // Persist the template-strictness slider into the persona's style profile
+      // (merged so we never clobber a learned voice). extract-style preserves it.
+      const sp = after.persona.style_profile ?? emptyStyleProfile();
+      if ((sp.template_strictness ?? DEFAULT_TEMPLATE_STRICTNESS) !== strictness) {
+        await updatePersona(pid, { style_profile: { ...sp, template_strictness: strictness } });
+        after.persona = { ...after.persona, style_profile: { ...sp, template_strictness: strictness } };
+      }
       // Re-merge: preserve person-level items, replace persona-level from DB.
       const freshPersonaFacts: FactItem[] = after.facts.map((f) => ({ id: f.id, claim: f.claim, scope: 'persona' as const }));
       setFacts([...personItemsPreserved, ...freshPersonaFacts]);
@@ -232,7 +252,36 @@ export function PersonaWizard({
       setPersona(after.persona);
     }
     return pid;
-  }, [userId, name, mode, seed, editing, facts, exemplars]);
+  }, [userId, name, mode, seed, editing, facts, exemplars, strictness]);
+
+  // Opt this voice out of the shared person-level ("default") facts. They stay
+  // in the Context bank and other voices — we just record their ids on the
+  // persona so they're hidden here and dropped from this voice's grounding.
+  const clearDefaultFacts = useCallback(async () => {
+    const defaultIds = facts.filter((f) => f.scope === 'person' && f.id).map((f) => f.id!);
+    if (defaultIds.length === 0) return;
+    const ok = await confirm({
+      title: 'Clear default facts for this voice?',
+      description: `These ${defaultIds.length} shared fact${defaultIds.length === 1 ? '' : 's'} won't be used by this voice. They stay available in your Context bank and other voices.`,
+      confirmText: 'Clear',
+      destructive: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const pid = await ensurePersona();
+      const existing = persona?.excluded_fact_ids ?? [];
+      const next = Array.from(new Set([...existing, ...defaultIds]));
+      await updatePersona(pid, { excluded_fact_ids: next });
+      setPersona((p) => (p ? { ...p, excluded_fact_ids: next } : p));
+      setFacts((f) => f.filter((x) => x.scope !== 'person'));
+      toast.success('Default facts cleared for this voice.');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not clear default facts.');
+    } finally {
+      setBusy(false);
+    }
+  }, [facts, persona, ensurePersona, confirm, toast]);
 
   // ---- step transitions (some run side effects) ----
   async function next() {
@@ -285,6 +334,7 @@ export function PersonaWizard({
   function applyBundleProfile(b: PersonaBundle) {
     setPersona(b.persona);
     setExemplars(b.exemplars.map((e) => ({ id: e.id, body: e.body })));
+    setStrictness(b.persona.style_profile?.template_strictness ?? DEFAULT_TEMPLATE_STRICTNESS);
   }
 
   async function finish() {
@@ -351,6 +401,8 @@ export function PersonaWizard({
               setFacts={setFacts}
               userId={userId}
               personaId={personaIdRef.current ?? undefined}
+              onClearDefaults={clearDefaultFacts}
+              clearing={busy}
             />
           )}
           {step === 'clarify' && (
@@ -360,7 +412,14 @@ export function PersonaWizard({
               ensurePersona={ensurePersona}
             />
           )}
-          {step === 'style' && <StyleStep exemplars={exemplars} setExemplars={setExemplars} />}
+          {step === 'style' && (
+            <StyleStep
+              exemplars={exemplars}
+              setExemplars={setExemplars}
+              strictness={strictness}
+              setStrictness={setStrictness}
+            />
+          )}
           {step === 'calibrate' && (
             <CalibrateStep
               subject={calSubject}
@@ -489,12 +548,17 @@ function SubstanceStep({
   setFacts,
   userId,
   personaId,
+  onClearDefaults,
+  clearing,
 }: {
   facts: FactItem[];
   setFacts: React.Dispatch<React.SetStateAction<FactItem[]>>;
   userId: string;
   personaId?: string;
+  onClearDefaults: () => void;
+  clearing: boolean;
 }) {
+  const defaultCount = facts.filter((f) => f.scope === 'person').length;
   const [text, setText] = useState('');
   // Smart-fill state
   const [dumpText, setDumpText] = useState('');
@@ -669,6 +733,22 @@ function SubstanceStep({
         <Plus size={14} /> Add
       </button>
 
+      {defaultCount > 0 && (
+        <div className="pw-facts-toolbar">
+          <span className="pw-facts-toolbar-label">
+            <Sparkles size={11} /> {defaultCount} default fact{defaultCount === 1 ? '' : 's'} from your Context bank
+          </span>
+          <button
+            type="button"
+            className="pw-facts-clear"
+            onClick={onClearDefaults}
+            disabled={clearing}
+          >
+            {clearing ? <Loader2 className="pw-spin" size={12} /> : <X size={12} />} Clear defaults
+          </button>
+        </div>
+      )}
+
       <ScopedChipList facts={facts} onRemove={handleRemove} />
     </div>
   );
@@ -785,12 +865,24 @@ function ClarifyStep({
   );
 }
 
+function strictnessLabel(s: number): string {
+  if (s <= 20) return 'Loose inspiration';
+  if (s <= 45) return 'Mostly my own';
+  if (s <= 70) return 'Balanced';
+  if (s <= 90) return 'Follow closely';
+  return 'Near-verbatim';
+}
+
 function StyleStep({
   exemplars,
   setExemplars,
+  strictness,
+  setStrictness,
 }: {
   exemplars: ExItem[];
   setExemplars: React.Dispatch<React.SetStateAction<ExItem[]>>;
+  strictness: number;
+  setStrictness: React.Dispatch<React.SetStateAction<number>>;
 }) {
   const [body, setBody] = useState('');
   function add() {
@@ -833,12 +925,36 @@ function StyleStep({
           </div>
         ))}
       </div>
+      <div className="pw-slider pw-strictness">
+        <div className="pw-slider-top">
+          <label htmlFor="pw-strictness-slider" className="pw-slider-label">
+            How strictly should we follow these examples?
+          </label>
+          <span className="pw-strictness-value">{strictnessLabel(strictness)}</span>
+        </div>
+        <input
+          id="pw-strictness-slider"
+          className="pw-range"
+          type="range"
+          min={0}
+          max={100}
+          step={5}
+          value={strictness}
+          onChange={(e) => setStrictness(Number(e.target.value))}
+          aria-valuetext={strictnessLabel(strictness)}
+        />
+        <div className="pw-slider-ends">
+          <span>Loose — just borrow my voice</span>
+          <span>Strict — reuse the structure</span>
+        </div>
+      </div>
     </div>
   );
 }
 
-// Calibrate (Stages 4–5) — we grab a real contact and run the engine ONCE so the
-// user reacts to a genuine draft instead of writing one. Two ways to refine:
+// Calibrate (Stages 4–5) — we run the engine ONCE on a real contact (or a
+// synthesized stand-in recipient when none exist yet) so the user reacts to a
+// genuine draft instead of writing one. Two ways to refine:
 //   • whole-draft chat (structural)
 //   • highlight a span → a prompt box pops up right above it to rewrite just that.
 // Every instruction is learned as taste (extract-style turns them into rules).
@@ -872,8 +988,11 @@ function CalibrateStep({
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
   const [recipient, setRecipient] = useState<Recipient | null>(null);
-  // null = haven't tried yet; 'none' = no contact, fall back to manual paste.
-  const [genState, setGenState] = useState<'idle' | 'none' | 'ready'>('idle');
+  // Whether the recipient is a synthesized stand-in (no real contacts yet).
+  const [synthetic, setSynthetic] = useState(false);
+  // 'idle' = not generated; 'ready' = a draft is on screen; 'failed' = the
+  // engine couldn't draft (rare) → user can edit directly or regenerate.
+  const [genState, setGenState] = useState<'idle' | 'failed' | 'ready'>('idle');
 
   // contentEditable body: uncontrolled DOM, synced to parent state via onInput.
   // We only push state INTO the DOM on programmatic replacement (bumping
@@ -896,20 +1015,16 @@ function CalibrateStep({
     setGenError(null);
     try {
       const pid = await ensurePersona();
-      const r = await agents.calibrateDraft(pid);
-      if ('none' in r && r.none) {
-        setGenState('none');
-        return;
-      }
-      const data = r as Exclude<typeof r, { none: true }>;
+      const data = await agents.calibrateDraft(pid);
       setRecipient(data.recipient);
+      setSynthetic(Boolean(data.synthetic));
       setSubject(data.subject);
       setBody(data.body);
       setBodyVersion((v) => v + 1);
       setGenState('ready');
     } catch (e) {
-      setGenError(e instanceof Error ? e.message : 'Could not draft — paste one below instead.');
-      setGenState('none');
+      setGenError(e instanceof Error ? e.message : 'Could not draft right now — edit below or regenerate.');
+      setGenState('failed');
     } finally {
       setGenerating(false);
     }
@@ -1001,9 +1116,10 @@ function CalibrateStep({
           <span className="pw-calib-meta">
             Drafted to <strong>{recipient.name}</strong>
             {recipient.company ? ` at ${recipient.company}` : ''}
+            {synthetic ? ' · sample contact' : ''}
           </span>
-        ) : genState === 'none' ? (
-          <span className="pw-calib-meta">No contacts yet — write or paste a draft you'd actually send.</span>
+        ) : genState === 'failed' ? (
+          <span className="pw-calib-meta">Couldn't draft — edit below or regenerate.</span>
         ) : (
           <span className="pw-calib-meta" />
         )}

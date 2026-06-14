@@ -8,17 +8,10 @@ import {
   extractJson,
   generateJsonWithSearch,
 } from '../_lib/llm';
-import { CONTACTS_SYSTEM, CONTACTS_RANK_SYSTEM, CONTACTS_FROM_SERP_SYSTEM, type MissionMode } from '../_lib/prompts';
+import { CONTACTS_SYSTEM, CONTACTS_FROM_SERP_SYSTEM, type MissionMode } from '../_lib/prompts';
 import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
-import {
-  apolloEnabled,
-  searchPeople,
-  fullName,
-  normalizeEmailStatus,
-  type ApolloPerson,
-} from '../_lib/apollo';
-import { resolveCompanyDomain } from '../_lib/company-enrich';
-import { serperEnabled, searchPeople as serperSearchPeople } from '../_lib/serper';
+import { resolveCompanyDomain, enrichCompanySize } from '../_lib/company-enrich';
+import { serperEnabled, searchPeoplePool, type PeopleQuerySpec } from '../_lib/serper';
 import { resolveEmail, type ContactEmailFields, type ResolvedEmail } from '../_lib/email-resolver';
 import { scrapeCompanyEmails, type ScrapeResult } from '../_lib/web-scrape';
 import {
@@ -27,28 +20,26 @@ import {
   senderContextLines,
   senderExclusions,
 } from '../_lib/sender-context';
+import { defaultContactIcp, synthesizeContactIcp } from '../_lib/icp';
+import {
+  scoreContact,
+  sizeTierFromCount,
+  effectiveBand,
+  rank,
+  SENIORITY_RANK,
+  type Band,
+} from '../_lib/seniority';
+import type { ContactIcp, SeniorityLevel, SizeTier } from '../../shared/types';
 import type { ContactDoc, MissionDoc, ProfileDoc, TargetDoc } from '../../shared/schemas';
 
-interface ContactSuggestion {
+export interface ContactSuggestion {
   name: string;
   role: string;
   linkedin_url: string | null;
+  location: string | null;
+  headline: string | null;
   email: string | null;
   likely_email_pattern: string | null;
-  confidence: number;
-  reasoning: string;
-}
-
-interface ApolloContactRanked {
-  apollo_person_id: string;
-  name: string;
-  role: string;
-  linkedin_url: string | null;
-  email: string | null;
-  email_status: 'verified' | 'likely' | 'guessed' | 'none';
-  seniority: string | null;
-  headline: string | null;
-  location: string | null;
   confidence: number;
   reasoning: string;
 }
@@ -60,22 +51,6 @@ interface ApolloContactRanked {
 const TARGET_DELIVERABLE = 3;
 const RESOLVE_ATTEMPT_CAP = 8;
 const CANDIDATE_POOL_CAP = 10;
-
-const TITLE_HINTS_BY_MODE: Record<MissionMode, string[]> = {
-  sponsorship: ['developer relations', 'devrel', 'community', 'partnerships', 'brand', 'marketing', 'events', 'developer marketing', 'ecosystem'],
-  bd: ['business development', 'partnerships', 'alliances', 'strategic partnerships', 'corporate development', 'integrations'],
-  internship: ['engineering manager', 'recruiter', 'university', 'talent', 'hiring manager', 'head of engineering', 'technical recruiter'],
-  recruiting: ['engineering manager', 'head of engineering', 'cto', 'vp engineering', 'director of engineering', 'recruiter', 'talent'],
-  sales: ['head', 'director', 'vp', 'cto', 'cio', 'engineering manager', 'product manager', 'operations'],
-};
-
-const SENIORITIES_BY_MODE: Record<MissionMode, string[]> = {
-  sponsorship: ['c_suite', 'vp', 'director', 'head', 'manager'],
-  bd: ['c_suite', 'vp', 'director', 'head'],
-  internship: ['vp', 'director', 'head', 'manager', 'senior'],
-  recruiting: ['c_suite', 'vp', 'director', 'head', 'manager'],
-  sales: ['c_suite', 'vp', 'director', 'head', 'manager'],
-};
 
 export default async function handler(req: Request, res: Response) {
   if (req.method !== 'POST') return methodNotAllowed(res, ['POST']);
@@ -101,11 +76,15 @@ export default async function handler(req: Request, res: Response) {
       await scope.collection<TargetDoc>('targets').updateById(target._id, { domain });
     }
   }
-  const useApollo = apolloEnabled() && !!domain;
-  const useSerper = !useApollo && serperEnabled() && !!domain;
-  // How the people were discovered (for observability). ContactDoc.source stays
-  // 'apollo' | 'web_search' — Serper-discovered people are still web_search.
-  const discoverySource = useApollo ? 'apollo' : useSerper ? 'serper' : 'web_search';
+
+  // The adaptive spec of WHO to reach (CONTACT_ENGINE.md §2). Generated once per
+  // mission and cached; size tier is resolved per target so the band shifts.
+  const icp = await getOrCreateContactIcp(scope, mission, mode);
+  const employeeCount = await getTargetSize(scope, target, domain);
+  const sizeTier = sizeTierFromCount(employeeCount);
+
+  const useSerper = serperEnabled() && !!domain;
+  const discoverySource = useSerper ? 'serper' : 'web_search';
 
   const run = await startRun(scope, {
     agentType: 'contacts',
@@ -115,16 +94,14 @@ export default async function handler(req: Request, res: Response) {
   });
 
   try {
-    const discoveryArgs = { target: { ...target, domain }, mission, mode, profile };
-    let rows: Array<Omit<ContactDoc, '_id' | 'userId' | 'createdAt' | 'updatedAt'>>;
-    if (useApollo) {
-      rows = await runApolloHybrid(discoveryArgs);
-    } else if (useSerper) {
-      rows = await runSerperDiscovery(discoveryArgs);
-    } else {
-      rows = await runWebSearchOnly(discoveryArgs);
-    }
+    const discoveryArgs: DiscoveryArgs = { target: { ...target, domain }, mission, icp, sizeTier, profile };
+    const suggestions = useSerper
+      ? await runSerperDiscovery(discoveryArgs)
+      : await runWebSearchOnly(discoveryArgs);
 
+    const ranked = rankCandidates(suggestions, { icp, sizeTier, target, mission, profile });
+
+    let rows = ranked.rows;
     rows = await resolvePoolWithBudget(rows, domain, target._id);
 
     if (rows.length === 0) {
@@ -139,6 +116,14 @@ export default async function handler(req: Request, res: Response) {
     await completeRun(scope, run._id, {
       count: inserted.length,
       source: discoverySource,
+      // Decision-log summary (CONTACT_ENGINE.md §9) — observability for why the
+      // pool looked the way it did, without per-contact schema churn.
+      sizeTier: sizeTier ?? 'unknown',
+      candidates: suggestions.length,
+      kept: ranked.rows.length,
+      droppedAboveCap: ranked.droppedAboveCap,
+      droppedDisqualified: ranked.droppedDisqualified,
+      usedAboveCapFallback: ranked.usedFallback,
     });
     return res.status(200).json({
       run_id: run._id,
@@ -152,26 +137,98 @@ export default async function handler(req: Request, res: Response) {
   }
 }
 
-async function runWebSearchOnly(args: {
+// ---------------------------------------------------------------------------
+// ICP + size setup
+// ---------------------------------------------------------------------------
+
+type Scope = ReturnType<typeof forUser>;
+
+/** Lazily synthesize + cache the mission's ICP; always reflect current geo. */
+async function getOrCreateContactIcp(scope: Scope, mission: MissionDoc, mode: MissionMode): Promise<ContactIcp> {
+  const geo = mission.geo ?? null;
+  if (mission.contactIcp) {
+    return { ...mission.contactIcp, geo: { ...mission.contactIcp.geo, preferred: geo?.trim() || mission.contactIcp.geo.preferred } };
+  }
+  let icp: ContactIcp;
+  try {
+    icp = await synthesizeContactIcp({
+      mode,
+      goal: mission.goal,
+      offerDetails: mission.offerDetails,
+      targetDescription: mission.targetDescription,
+      geo,
+    });
+  } catch {
+    icp = defaultContactIcp(mode, geo);
+  }
+  try {
+    await scope.collection<MissionDoc>('missions').updateById(mission._id, { contactIcp: icp } as Partial<MissionDoc>);
+  } catch (err) {
+    console.warn('persist_contact_icp_failed', mission._id, err);
+  }
+  return icp;
+}
+
+/** Resolve + cache the target's headcount so the seniority band can shift. */
+async function getTargetSize(scope: Scope, target: TargetDoc, domain: string | null): Promise<number | null> {
+  if (typeof target.employeeCount === 'number' && target.employeeCount > 0) return target.employeeCount;
+  const n = await enrichCompanySize(target.companyName, domain);
+  if (n) {
+    try {
+      await scope.collection<TargetDoc>('targets').updateById(target._id, { employeeCount: n });
+    } catch (err) {
+      console.warn('persist_employee_count_failed', target._id, err);
+    }
+  }
+  return n;
+}
+
+// ---------------------------------------------------------------------------
+// Discovery — produce raw candidate suggestions. Scoring/ranking happens once,
+// after, in rankCandidates.
+// ---------------------------------------------------------------------------
+
+interface DiscoveryArgs {
   target: TargetDoc;
   mission: MissionDoc;
-  mode: MissionMode;
+  icp: ContactIcp;
+  sizeTier: SizeTier | null;
   profile: ProfileDoc | null;
-}): Promise<Array<Omit<ContactDoc, '_id' | 'userId' | 'createdAt' | 'updatedAt'>>> {
-  const { target, mission, mode, profile } = args;
-  const exclusions = senderContextLines(profile);
+}
+
+/** Compact ICP context block injected into the discovery prompts. */
+function icpContextLines(icp: ContactIcp, sizeTier: SizeTier | null): string[] {
+  const band = effectiveBand(icp, sizeTier);
+  return [
+    'IDEAL CONTACT PROFILE:',
+    `- target functions: ${icp.functions.join(', ')}`,
+    `- prefer this seniority band (company is ${sizeTier ?? 'unknown'} size): ${bandLabel(band)}`,
+    `- who replies: ${icp.rationale}`,
+    icp.geo.preferred ? `- location focus: ${icp.geo.preferred}` : '',
+  ].filter(Boolean);
+}
+
+function bandLabel(band: Band): string {
+  const name = (r: number) =>
+    (Object.entries(SENIORITY_RANK).find(([, v]) => v === r)?.[0] ?? `rank${r}`).replace(/_/g, ' ');
+  return `${name(band.idealMin)} → ${name(band.idealMax)} (never above ${name(band.hardMax)})`;
+}
+
+async function runWebSearchOnly(args: DiscoveryArgs): Promise<ContactSuggestion[]> {
+  const { target, mission, icp, sizeTier } = args;
   const userPrompt = [
     `Target organization: ${target.companyName}${target.domain ? ` (${target.domain})` : ''}`,
-    `Mission mode: ${mode}`,
+    `Mission mode: ${mission.mode}`,
     `What's being offered: ${mission.goal}`,
     `Why this target: ${target.fitReason ?? mission.targetDescription}`,
     target.whyNow ? `Why now: ${target.whyNow}` : '',
-    ...exclusions,
+    ...senderContextLines(args.profile),
+    ...icpContextLines(icp, sizeTier),
     target.domain
       ? `Company domain for email patterns: ${target.domain}`
       : 'WARNING: no domain on file — use web_search to find the official company website first.',
     '',
-    'Find the 2-4 best people to contact at THIS company (not the sender). Use web_search on company site, LinkedIn public pages, press, blog. Output JSON only.',
+    'Find 3-6 people matching the ICP function at THIS company (not the sender). Favor the program owners (managers/directors) over execs. Use web_search on company site, LinkedIn public pages, press, blog. Output JSON only.',
   ]
     .filter(Boolean)
     .join('\n');
@@ -184,60 +241,36 @@ async function runWebSearchOnly(args: {
     messages: [{ role: 'user', content: userPrompt }],
   });
   if (!parsed.ok || !parsed.data?.contacts) throw new Error('parse_failed');
-
-  const filtered = parsed.data.contacts.filter(
-    (c) => !isExcludedName(c.name ?? '', senderExclusions(profile))
-  );
-
-  // Discovery never produces a trusted email — the LLM's `email` field is
-  // ignored and resolution happens later in resolveRowEmails. Keep the pattern
-  // only as a display hint.
-  return filtered.slice(0, CANDIDATE_POOL_CAP).map((c) => ({
-    targetId: target._id,
-    missionId: mission._id,
-    name: c.name,
-    role: c.role,
-    email: null,
-    emailStatus: 'none' as const,
-    linkedinUrl: c.linkedin_url,
-    likelyEmailPattern: c.likely_email_pattern,
-    confidence: clamp01(c.confidence),
-    reasoning: c.reasoning,
-    status: 'suggested' as const,
-    source: 'web_search' as const,
-    apolloPersonId: null,
-    seniority: null,
-    headline: null,
-    location: null,
-  }));
+  return parsed.data.contacts;
 }
 
-async function runSerperDiscovery(args: {
-  target: TargetDoc;
-  mission: MissionDoc;
-  mode: MissionMode;
-  profile: ProfileDoc | null;
-}): Promise<Array<Omit<ContactDoc, '_id' | 'userId' | 'createdAt' | 'updatedAt'>>> {
-  const { target, mission, mode, profile } = args;
-  const titles = TITLE_HINTS_BY_MODE[mode];
+async function runSerperDiscovery(args: DiscoveryArgs): Promise<ContactSuggestion[]> {
+  const { target, mission, icp, sizeTier } = args;
+  const spec: PeopleQuerySpec = {
+    companyName: target.companyName,
+    functionKeywords: icp.functionKeywords.length ? icp.functionKeywords : icp.functions,
+    seniorityKeywords: seniorityQueryKeywords(icp),
+    negativeTerms: negativeTermsForQuery(effectiveBand(icp, sizeTier)),
+    geo: icp.geo.preferred,
+  };
 
   let results;
   try {
-    results = await serperSearchPeople(target.companyName, titles, 10);
+    results = await searchPeoplePool(spec, 8);
   } catch (err) {
     console.error('serper_search_failed', err);
     return runWebSearchOnly(args);
   }
   if (results.length === 0) return runWebSearchOnly(args);
 
-  const exclusions = senderContextLines(profile);
   const userPrompt = [
     `Target organization: ${target.companyName}${target.domain ? ` (${target.domain})` : ''}`,
-    `Mission mode: ${mode}`,
+    `Mission mode: ${mission.mode}`,
     `What's being offered: ${mission.goal}`,
     `Why this target: ${target.fitReason ?? mission.targetDescription}`,
     target.whyNow ? `Why now: ${target.whyNow}` : '',
-    ...exclusions,
+    ...senderContextLines(args.profile),
+    ...icpContextLines(icp, sizeTier),
     '',
     'SEARCH RESULTS (public LinkedIn profiles, via Google):',
     JSON.stringify(
@@ -246,7 +279,7 @@ async function runSerperDiscovery(args: {
       2
     ),
     '',
-    'From these results, pick the 2-4 best people to contact at THIS company (not the sender). Extract name, role, and LinkedIn URL from each result. Output JSON only.',
+    'From these results, extract every plausible on-function person (4-8 is fine). Capture each title verbatim plus location/headline when shown. Output JSON only.',
   ]
     .filter(Boolean)
     .join('\n');
@@ -260,148 +293,121 @@ async function runSerperDiscovery(args: {
 
   const parsed = extractJson<{ contacts: ContactSuggestion[] }>(message);
   if (!parsed.ok || !parsed.data?.contacts) return runWebSearchOnly(args);
+  if (parsed.data.contacts.length === 0) return runWebSearchOnly(args);
+  return parsed.data.contacts;
+}
 
-  const filtered = parsed.data.contacts.filter(
-    (c) => !isExcludedName(c.name ?? '', senderExclusions(profile))
-  );
-  if (filtered.length === 0) return runWebSearchOnly(args);
+// Map the ICP's ideal levels to LinkedIn-friendly query words.
+const LEVEL_QUERY_WORDS: Record<SeniorityLevel, string[]> = {
+  ic: ['specialist', 'associate'],
+  senior_ic: ['senior', 'principal'],
+  lead: ['lead'],
+  manager: ['manager'],
+  senior_manager: ['senior manager', 'manager'],
+  director: ['director', 'head'],
+  senior_director: ['director'],
+  vp: ['vice president'],
+  svp: ['vice president'],
+  cxo: ['chief'],
+  founder: ['founder'],
+};
 
-  return filtered.slice(0, CANDIDATE_POOL_CAP).map((c) => ({
+function seniorityQueryKeywords(icp: ContactIcp): string[] {
+  const out = new Set<string>();
+  for (const lvl of icp.seniority.idealLevels) {
+    for (const w of LEVEL_QUERY_WORDS[lvl] ?? []) out.add(w);
+  }
+  return [...out];
+}
+
+/** Exec terms to negative-filter when the band caps below them. */
+function negativeTermsForQuery(band: Band): string[] {
+  const negs: string[] = [];
+  if (band.hardMax < rank('founder')) negs.push('president', 'founder', 'owner');
+  if (band.hardMax < rank('cxo')) negs.push('chief', 'ceo', 'cmo', 'cfo', 'cto', 'coo');
+  if (band.hardMax < rank('svp')) negs.push('svp');
+  if (band.hardMax < rank('vp')) negs.push('vp');
+  return negs;
+}
+
+// ---------------------------------------------------------------------------
+// Ranking — score every candidate, drop the misses, sort by reply-likelihood.
+// ---------------------------------------------------------------------------
+
+type ContactRow = Omit<ContactDoc, '_id' | 'userId' | 'createdAt' | 'updatedAt'>;
+
+interface RankResult {
+  rows: ContactRow[];
+  droppedAboveCap: number;
+  droppedDisqualified: number;
+  usedFallback: boolean;
+}
+
+export function rankCandidates(
+  suggestions: ContactSuggestion[],
+  ctx: { icp: ContactIcp; sizeTier: SizeTier | null; target: TargetDoc; mission: MissionDoc; profile: ProfileDoc | null }
+): RankResult {
+  const { icp, sizeTier, target, mission, profile } = ctx;
+  const exclusions = senderExclusions(profile);
+  const cleaned = suggestions.filter((c) => c?.name && !isExcludedName(c.name, exclusions));
+
+  const score = (c: ContactSuggestion, allowAboveCap: boolean) =>
+    scoreContact({
+      title: c.role ?? '',
+      headline: c.headline,
+      location: c.location,
+      llmConfidence: clamp01(c.confidence),
+      icp,
+      sizeTier,
+      allowAboveCap,
+    });
+
+  const scored = cleaned.map((c) => ({ c, s: score(c, false) }));
+  let kept = scored.filter((x) => !x.s.disqualified);
+  let usedFallback = false;
+
+  // Never return an empty target. If the band dropped everyone, re-score with
+  // allowAboveCap so the best-available people surface (flagged in the log).
+  if (kept.length === 0 && cleaned.length > 0) {
+    usedFallback = true;
+    kept = cleaned.map((c) => ({ c, s: score(c, true) })).filter((x) => !x.s.disqualified);
+  }
+
+  kept.sort((a, b) => b.s.score - a.s.score);
+
+  const droppedDisqualified = scored.filter(
+    (x) => x.s.disqualified && x.s.reasons.some((r) => r.startsWith('disqualified'))
+  ).length;
+  const droppedAboveCap = scored.filter(
+    (x) => x.s.disqualified && x.s.reasons.some((r) => r.startsWith('above cap'))
+  ).length;
+
+  const rows = kept.slice(0, CANDIDATE_POOL_CAP).map(({ c, s }) => ({
     targetId: target._id,
     missionId: mission._id,
     name: c.name,
     role: c.role,
     email: null,
     emailStatus: 'none' as const,
-    linkedinUrl: c.linkedin_url,
-    likelyEmailPattern: c.likely_email_pattern,
-    confidence: clamp01(c.confidence),
-    reasoning: c.reasoning,
+    linkedinUrl: c.linkedin_url ?? null,
+    likelyEmailPattern: c.likely_email_pattern ?? null,
+    // confidence now carries the composite reply-likelihood score so downstream
+    // ranking (pipeline "best" pick) selects the most reply-likely contact.
+    confidence: s.score,
+    reasoning: c.reasoning ?? null,
     status: 'suggested' as const,
     source: 'web_search' as const,
-    apolloPersonId: null,
-    seniority: null,
-    headline: null,
-    location: null,
-  }));
-}
-
-async function runApolloHybrid(args: {
-  target: TargetDoc;
-  mission: MissionDoc;
-  mode: MissionMode;
-  profile: ProfileDoc | null;
-}): Promise<Array<Omit<ContactDoc, '_id' | 'userId' | 'createdAt' | 'updatedAt'>>> {
-  const { target, mission, mode, profile } = args;
-  const titles = TITLE_HINTS_BY_MODE[mode];
-  const seniorities = SENIORITIES_BY_MODE[mode];
-
-  let people: ApolloPerson[];
-  try {
-    people = await searchPeople({
-      q_organization_domains: target.domain!,
-      person_titles: titles,
-      person_seniorities: seniorities,
-      contact_email_status: ['verified', 'likely_to_engage'],
-      per_page: 25,
-    });
-  } catch (err) {
-    console.error('apollo_people_failed', err);
-    return runWebSearchOnly(args);
-  }
-
-  if (people.length === 0) return runWebSearchOnly(args);
-
-  const list = people.slice(0, 25).map((p) => ({
-    apollo_person_id: p.id,
-    name: fullName(p),
-    role: p.title,
-    headline: p.headline,
-    linkedin_url: p.linkedin_url,
-    email: p.email,
-    email_status: normalizeEmailStatus(p.email_status),
-    seniority: p.seniority,
-    departments: p.departments,
-    location: [p.city, p.state, p.country].filter(Boolean).join(', ') || null,
+    seniority: s.level,
+    headline: c.headline ?? null,
+    location: c.location ?? null,
   }));
 
-  const rankPrompt = [
-    `TARGET ORGANIZATION`,
-    `${target.companyName} (${target.domain})`,
-    target.whyNow ? `Why now: ${target.whyNow}` : '',
-    target.fitReason ? `Fit: ${target.fitReason}` : '',
-    '',
-    `MISSION`,
-    `Mode: ${mode}`,
-    `Offer: ${mission.goal}`,
-    `Audience: ${mission.targetDescription}`,
-    '',
-    `APOLLO CANDIDATES (${list.length}):`,
-    JSON.stringify(list, null, 2),
-    '',
-    'Pick the 2-4 best fits. Preserve apollo_person_id and email/email_status verbatim. JSON only.',
-  ]
-    .filter(Boolean)
-    .join('\n');
-
-  const rankMsg = await createMessageWithRetry({
-    model: MODEL(),
-    max_tokens: 2048,
-    system: CONTACTS_RANK_SYSTEM,
-    messages: [{ role: 'user', content: rankPrompt }],
-  });
-
-  const rankParsed = extractJson<{ contacts: ApolloContactRanked[] }>(rankMsg);
-  if (!rankParsed.ok || !rankParsed.data?.contacts) {
-    return list.slice(0, CANDIDATE_POOL_CAP).map((p) => ({
-      targetId: target._id,
-      missionId: mission._id,
-      name: p.name,
-      role: p.role ?? p.headline ?? 'Unknown',
-      email: p.email ?? null,
-      emailStatus: p.email_status,
-      linkedinUrl: p.linkedin_url ?? null,
-      likelyEmailPattern: null,
-      confidence: 0.6,
-      reasoning: 'Top Apollo match by title and seniority.',
-      status: 'suggested' as const,
-      source: 'apollo' as const,
-      apolloPersonId: p.apollo_person_id ?? null,
-      seniority: p.seniority ?? null,
-      headline: p.headline ?? null,
-      location: p.location ?? null,
-    }));
-  }
-
-  const byId = new Map(list.map((p) => [p.apollo_person_id ?? '', p]));
-  const exclusions = senderExclusions(profile);
-  return rankParsed.data.contacts
-    .filter((c) => !isExcludedName(c.name ?? '', exclusions))
-    .slice(0, CANDIDATE_POOL_CAP)
-    .map((c) => {
-    const apollo = byId.get(c.apollo_person_id ?? '');
-    return {
-      targetId: target._id,
-      missionId: mission._id,
-      name: c.name,
-      role: c.role,
-      email: apollo?.email ?? c.email ?? null,
-      emailStatus: apollo?.email_status ?? c.email_status ?? 'none',
-      linkedinUrl: apollo?.linkedin_url ?? c.linkedin_url ?? null,
-      likelyEmailPattern: null,
-      confidence: clamp01(c.confidence),
-      reasoning: c.reasoning,
-      status: 'suggested' as const,
-      source: 'apollo' as const,
-      apolloPersonId: c.apollo_person_id ?? null,
-      seniority: apollo?.seniority ?? c.seniority ?? null,
-      headline: apollo?.headline ?? c.headline ?? null,
-      location: apollo?.location ?? c.location ?? null,
-    };
-  });
+  return { rows, droppedAboveCap, droppedDisqualified, usedFallback };
 }
 
-type ContactRow = Omit<ContactDoc, '_id' | 'userId' | 'createdAt' | 'updatedAt'>;
+// ---------------------------------------------------------------------------
+// Email resolution (unchanged) — walk the ranked pool keeping deliverable rows.
+// ---------------------------------------------------------------------------
 
 // Injectable so the budget walk is unit-testable without network. Defaults wire
 // the real company-site scrape and the full resolution cascade.

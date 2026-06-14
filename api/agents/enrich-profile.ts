@@ -5,7 +5,6 @@ import { MODEL, WEB_SEARCH_TOOL, generateJsonWithSearch } from '../_lib/llm';
 import { PROFILE_ENRICH_SYSTEM } from '../_lib/prompts';
 import { startRun, completeRun, failRun } from '../_lib/runs';
 import { embedOne } from '../_lib/embeddings';
-import { apolloEnabled, matchPerson, fullName, type ApolloPerson } from '../_lib/apollo';
 import type { ContextFactDoc, ProfileDoc } from '../../shared/schemas';
 
 // Cap on how many facts a single enrichment can add — keeps the context bank
@@ -38,27 +37,15 @@ export default async function handler(req: Request, res: Response) {
     return res.status(400).json({ error: 'no_linkedin_or_name' });
   }
 
-  const useApollo = apolloEnabled() && !!linkedinUrl;
   const run = await startRun(scope, {
     agentType: 'enrich_profile',
-    input: { source: useApollo ? 'apollo' : 'web_search', linkedin_url: linkedinUrl },
+    input: { source: 'web_search', linkedin_url: linkedinUrl },
   });
 
   try {
-    let apolloPerson: ApolloPerson | null = null;
-    if (useApollo) {
-      try {
-        apolloPerson = await matchPerson({ linkedin_url: linkedinUrl! });
-      } catch (err) {
-        console.error('apollo_match_failed', err);
-      }
-    }
+    const llmResult = await runLlmEnrichment({ profile, linkedinUrl });
 
-    const llmResult = await runLlmEnrichment({ profile, linkedinUrl, apolloPerson });
-
-    const linkedinData = apolloPerson
-      ? compactApollo(apolloPerson)
-      : { headline: llmResult.headline ?? null, links: llmResult.links ?? [] };
+    const linkedinData = { headline: llmResult.headline ?? null, links: llmResult.links ?? [] };
 
     const updates: Partial<ProfileDoc> = {
       bio: llmResult.bio || profile.bio,
@@ -68,13 +55,13 @@ export default async function handler(req: Request, res: Response) {
       writingTone: llmResult.writing_tone || profile.writingTone,
       linkedinData,
       linkedinEnrichedAt: new Date(),
-      linkedinSource: apolloPerson ? 'apollo' : 'web_search',
+      linkedinSource: 'web_search',
     };
-    if (!profile.role && (apolloPerson?.title || llmResult.current_role)) {
-      updates.role = apolloPerson?.title ?? llmResult.current_role ?? null;
+    if (!profile.role && llmResult.current_role) {
+      updates.role = llmResult.current_role ?? null;
     }
-    if (!profile.organization && (apolloPerson?.organization?.name || llmResult.current_organization)) {
-      updates.organization = apolloPerson?.organization?.name ?? llmResult.current_organization ?? null;
+    if (!profile.organization && llmResult.current_organization) {
+      updates.organization = llmResult.current_organization ?? null;
     }
 
     await scope.collection<ProfileDoc>('profiles').updateById(profile._id, updates);
@@ -90,14 +77,14 @@ export default async function handler(req: Request, res: Response) {
     });
 
     await completeRun(scope, run._id, {
-      source: apolloPerson ? 'apollo' : 'web_search',
+      source: 'web_search',
       fields_filled: Object.keys(updates).length,
       facts_added: factsAdded,
     });
     return res.status(200).json({
       run_id: run._id,
       profile: updated,
-      source: apolloPerson ? 'apollo' : 'web_search',
+      source: 'web_search',
       facts_added: factsAdded,
     });
   } catch (err: unknown) {
@@ -110,26 +97,8 @@ export default async function handler(req: Request, res: Response) {
 async function runLlmEnrichment(args: {
   profile: ProfileDoc;
   linkedinUrl: string | null;
-  apolloPerson: ApolloPerson | null;
 }): Promise<EnrichmentOutput> {
-  const { profile, linkedinUrl, apolloPerson } = args;
-
-  const apolloBlock = apolloPerson
-    ? [
-        `APOLLO PROFILE`,
-        `Name: ${fullName(apolloPerson)}`,
-        apolloPerson.title ? `Title: ${apolloPerson.title}` : '',
-        apolloPerson.headline ? `Headline: ${apolloPerson.headline}` : '',
-        apolloPerson.organization?.name ? `Org: ${apolloPerson.organization.name}` : '',
-        apolloPerson.linkedin_url ? `LinkedIn: ${apolloPerson.linkedin_url}` : '',
-        apolloPerson.employment_history?.length
-          ? `History:\n${apolloPerson.employment_history
-              .slice(0, 6)
-              .map((h) => `- ${h.title ?? ''} @ ${h.organization_name ?? ''}${h.current ? ' (current)' : ''}`)
-              .join('\n')}`
-          : '',
-      ].filter(Boolean).join('\n')
-    : '';
+  const { profile, linkedinUrl } = args;
 
   const userPrompt = [
     `SENDER (you are summarizing this person)`,
@@ -140,8 +109,6 @@ async function runLlmEnrichment(args: {
     profile.resumeUrl && profile.resumeUrl !== linkedinUrl ? `Resume: ${profile.resumeUrl}` : '',
     profile.website ? `Website: ${profile.website}` : '',
     profile.portfolioLinks?.length ? `Portfolio:\n${profile.portfolioLinks.join('\n')}` : '',
-    '',
-    apolloBlock,
     '',
     'Use web_search to verify and surface concrete proof points. JSON only.',
   ].filter(Boolean).join('\n');
@@ -227,32 +194,4 @@ function pickLinkedinUrl(linkedinUrl: string | null, resumeUrl: string | null): 
   if (linkedinUrl && /linkedin\.com/i.test(linkedinUrl)) return linkedinUrl;
   if (resumeUrl && /linkedin\.com/i.test(resumeUrl)) return resumeUrl;
   return linkedinUrl;
-}
-
-function compactApollo(p: ApolloPerson): Record<string, unknown> {
-  return {
-    apollo_person_id: p.id ?? null,
-    name: fullName(p),
-    title: p.title ?? null,
-    headline: p.headline ?? null,
-    linkedin_url: p.linkedin_url ?? null,
-    seniority: p.seniority ?? null,
-    location: [p.city, p.state, p.country].filter(Boolean).join(', ') || null,
-    organization: p.organization
-      ? {
-          name: p.organization.name,
-          domain: p.organization.primary_domain,
-          industry: p.organization.industry,
-          employees: p.organization.estimated_num_employees,
-        }
-      : null,
-    employment_history:
-      p.employment_history?.slice(0, 8).map((h) => ({
-        title: h.title ?? null,
-        organization: h.organization_name ?? null,
-        start_date: h.start_date ?? null,
-        end_date: h.end_date ?? null,
-        current: !!h.current,
-      })) ?? [],
-  };
 }

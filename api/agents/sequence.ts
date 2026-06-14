@@ -12,7 +12,7 @@ import { forUser, newId, type InsertDoc } from '../_lib/db';
 import { generateJson, MODEL } from '../_lib/llm';
 import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
 import { embedOne } from '../_lib/embeddings';
-import { runDraftEngine } from '../_lib/engine';
+import { runDraftEngine, ensureSignOff } from '../_lib/engine';
 import { resolvePersona, assembleDraftContext } from '../_lib/assemble';
 import type {
   ContactDoc,
@@ -47,7 +47,7 @@ const FOLLOWUPS_SCHEMA = {
   required: ['followups'],
 } as const;
 
-const FOLLOWUPS_SYSTEM = `You write 2 short follow-up emails for a cold outreach sequence. They reference the original lightly, add no new factual claims, stay in the sender's voice, and each end with one low-friction CTA. Keep each under 70 words. wait_days: first ~3, second ~6. Output JSON only.`;
+const FOLLOWUPS_SYSTEM = `You write 2 short follow-up emails for a cold outreach sequence. They reference the original lightly, add no new factual claims, stay in the sender's voice, and each end with one low-friction CTA. Each email MUST end with a short sign-off ("Best,") followed by the sender's name on the next line — use the sender name provided verbatim, never a placeholder like "[Your Name]". Keep each under 70 words. wait_days: first ~3, second ~6. Output JSON only.`;
 
 // Pull evidence-bullet indices a draft actually cited, from "evidence:<pack>:<i>"
 // factIds — preserves the old anchoredBullets telemetry against the latest pack.
@@ -107,7 +107,7 @@ export default async function handler(req: Request, res: Response) {
     const result = await runDraftEngine(ctx, 'bulk');
     const { subject, body, angle, claims } = result.draft;
 
-    const followups = await generateFollowups(ctx.recipient.name, mission.goal, subject, body);
+    const followups = await generateFollowups(ctx.recipient.name, mission.goal, subject, body, ctx.sender?.name ?? null);
 
     let embedding: number[] | undefined;
     try {
@@ -162,7 +162,8 @@ async function generateFollowups(
   recipientName: string,
   missionGoal: string,
   subject: string,
-  body: string
+  body: string,
+  senderName: string | null
 ): Promise<Array<{ waitDays: number; subject: string; body: string }>> {
   try {
     const r = await generateJson<{ followups: FollowupOut[] }>({
@@ -176,9 +177,10 @@ async function generateFollowups(
           role: 'user',
           content: [
             `Recipient: ${recipientName}`,
+            `Sender (sign off as): ${senderName ?? 'unknown — close with "Best," and no placeholder name'}`,
             `Mission goal / offer: ${missionGoal}`,
             `Original email:\nSubject: ${subject}\n\n${body}`,
-            'Write 2 follow-ups. JSON only.',
+            'Write 2 follow-ups, each ending with a sign-off. JSON only.',
           ].join('\n\n'),
         },
       ],
@@ -187,7 +189,8 @@ async function generateFollowups(
     return r.data.followups.slice(0, 2).map((f) => ({
       waitDays: typeof f.wait_days === 'number' ? f.wait_days : 3,
       subject: f.subject,
-      body: f.body,
+      // Guarantee each follow-up is signed, same as the initial email.
+      body: ensureSignOff(f.body, senderName),
     }));
   } catch {
     return []; // follow-ups are non-critical; never fail the draft over them

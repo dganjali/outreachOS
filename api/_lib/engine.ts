@@ -23,6 +23,7 @@
 
 import { generateJson, MODEL, MODEL_PRO } from './llm';
 import { checkDeliverability } from '../../shared/deliverability';
+import { DEFAULT_TEMPLATE_STRICTNESS } from '../../shared/schemas';
 import type { StyleProfile } from '../../shared/schemas';
 
 // ---------------------------------------------------------------------------
@@ -73,6 +74,8 @@ export interface CritiqueOutput {
 export interface AssembledContext {
   mode: string;
   recipient: { name: string; role: string; company: string };
+  /** The sender's identity — used to guarantee a real sign-off on every email. */
+  sender?: { name: string | null; role?: string | null; organization?: string | null };
   missionGoal: string;
   audience: string;
   whyNow?: string;
@@ -156,6 +159,7 @@ Non-negotiable rules:
 - VOICE: Match the sender's exemplars and style profile — imitate their rhythm, structure, and register. Do NOT regress to generic "professional email" voice.
 - NO SLOP: No "I hope this finds you well", no "I came across your company", no filler, no hedging, no flattery. Respect the sender's banned-phrase list absolutely.
 - FORMAT: Initial email under the word target. Plain text. One specific, low-friction, time-boxed CTA.
+- SIGN-OFF: Always end the body with a short closing line (e.g. "Best,") followed by the sender's name on the next line. Use the SENDER name provided verbatim — NEVER leave a placeholder like "[Your Name]", "[Name]", or "{{name}}". The sign-off is part of the body, not the subject.
 
 Output JSON only, matching the schema.`;
 
@@ -192,6 +196,34 @@ function styleProfileBlock(sp: StyleProfile): string {
     .join('\n\n');
 }
 
+/**
+ * Translate the 0–100 template-strictness slider into an explicit drafting
+ * directive. Low = the exemplars are loose voice inspiration; high = treat the
+ * closest exemplar as a template to follow structurally, almost verbatim.
+ */
+export function templateStrictnessDirective(strictness: number, hasExemplars: boolean): string {
+  if (!hasExemplars) return '';
+  const s = Math.max(0, Math.min(100, Math.round(strictness)));
+  let guidance: string;
+  if (s <= 20) {
+    guidance =
+      'Use the exemplars ONLY as loose voice inspiration — match the sender\'s tone and rhythm, but write a fresh structure tailored to this recipient. Do not reuse the exemplars\' opening lines, structure, or phrasing.';
+  } else if (s <= 45) {
+    guidance =
+      'Lean on the exemplars for voice and general shape, but adapt freely to this recipient. Borrow phrasing only where it fits naturally.';
+  } else if (s <= 70) {
+    guidance =
+      'Treat the closest exemplar as a strong template: follow its overall structure, paragraph flow, and CTA style, swapping in details relevant to this recipient.';
+  } else if (s <= 90) {
+    guidance =
+      'Follow the closest exemplar closely as a template: keep its structure, sentence patterns, and most phrasing, changing only the recipient-specific details and grounded facts.';
+  } else {
+    guidance =
+      'Reproduce the closest exemplar as a near-verbatim template: preserve its structure, opening, sentence patterns, and wording, changing ONLY the recipient-specific details and grounded facts. Stay as close to the original as the facts allow.';
+  }
+  return `TEMPLATE STRICTNESS: ${s}/100. ${guidance}`;
+}
+
 /** Build the volatile user-message prompt (everything not in the frozen system). */
 export function buildDraftUserPrompt(ctx: AssembledContext): string {
   const facts = ctx.allowedFacts.length
@@ -202,11 +234,22 @@ export function buildDraftUserPrompt(ctx: AssembledContext): string {
         .map((e, i) => `--- Exemplar ${i + 1} ---\n${e.subject ? `Subject: ${e.subject}\n` : ''}${e.body}`)
         .join('\n\n')
     : '(no exemplars yet — lean on the style profile)';
+  const strictness = templateStrictnessDirective(
+    ctx.styleProfile.templateStrictness ?? DEFAULT_TEMPLATE_STRICTNESS,
+    ctx.exemplars.length > 0
+  );
+
+  const senderName = ctx.sender?.name?.trim();
+  const senderLine = senderName
+    ? `SENDER (sign off as this person)\nName: ${senderName}${ctx.sender?.role ? `\nRole: ${ctx.sender.role}` : ''}${ctx.sender?.organization ? `\nOrganization: ${ctx.sender.organization}` : ''}`
+    : 'SENDER: name unknown — end with a closing line ("Best,") and leave the name line blank (do NOT write a placeholder).';
 
   return [
     `MODE: ${ctx.mode}`,
     '',
     `RECIPIENT\nName: ${ctx.recipient.name}\nRole: ${ctx.recipient.role}\nCompany: ${ctx.recipient.company}`,
+    '',
+    senderLine,
     '',
     `MISSION\nGoal / offer: ${ctx.missionGoal}\nAudience: ${ctx.audience}${ctx.whyNow ? `\nWhy now: ${ctx.whyNow}` : ''}`,
     '',
@@ -215,6 +258,7 @@ export function buildDraftUserPrompt(ctx: AssembledContext): string {
     `SENDER STYLE PROFILE\n${styleProfileBlock(ctx.styleProfile)}`,
     '',
     `SENDER EXEMPLARS (imitate the voice, not the specifics):\n${exemplars}`,
+    ...(strictness ? ['', strictness] : []),
     '',
     `Word target: ${ctx.minWords ?? DEFAULT_MIN_WORDS}–${ctx.maxWords ?? DEFAULT_MAX_WORDS} words.`,
     'Output JSON only.',
@@ -287,6 +331,44 @@ export function verifyDraftDeterministic(
   }
 
   return violations;
+}
+
+// ---------------------------------------------------------------------------
+// Sign-off guarantee. The prompt asks for a sign-off, but we never *rely* on the
+// model: this deterministic pass (a) swaps any leftover placeholder for the real
+// name and (b) appends a closing if none is present, so EVERY email ends signed.
+// ---------------------------------------------------------------------------
+
+// Closing words that mark a sign-off line ("Best,", "Thanks!", "Warm regards").
+const SIGNOFF_LINE =
+  /^(best|best regards|thanks|thank you|thanks so much|cheers|regards|warm regards|warmly|sincerely|talk soon|speak soon|all the best|looking forward|appreciate it|with thanks|kind regards|yours)\b/i;
+
+// Placeholder name tokens a model sometimes emits instead of the real name.
+const NAME_PLACEHOLDER =
+  /\[\s*(your name|name|sender(?:'s)? name|sender|my name|full name)\s*\]|\{\{\s*(name|sender|sender_name|first_name|full_name)\s*\}\}/gi;
+
+export function ensureSignOff(body: string, senderName: string | null | undefined): string {
+  const name = (senderName ?? '').trim();
+  const firstName = name.split(/\s+/)[0] || name;
+
+  // (a) Replace placeholders with the real name (or strip them when unknown).
+  let text = (body ?? '').replace(NAME_PLACEHOLDER, name).replace(/[ \t]+\n/g, '\n').trimEnd();
+
+  // (b) Detect an existing sign-off in the last few non-empty lines.
+  const nonEmpty = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  const tail = nonEmpty.slice(-3);
+  const nameLower = name.toLowerCase();
+  const firstLower = firstName.toLowerCase();
+  const hasSignoff = tail.some(
+    (l) =>
+      SIGNOFF_LINE.test(l) ||
+      (!!name && (l.toLowerCase() === nameLower || l.toLowerCase() === firstLower))
+  );
+  if (hasSignoff) return text;
+
+  // (c) None present — append one. Use the sender's name when we know it.
+  const closing = name ? `Best,\n${firstName}` : 'Best,';
+  return `${text}\n\n${closing}`;
 }
 
 // Light CTA heuristic: a question, or a recognizable ask/next-step phrase.
@@ -377,8 +459,12 @@ export async function runDraftEngine(ctx: AssembledContext, tier: EngineTier): P
 
     // Revise only if a blocker fired and we still have budget (tiered).
     if (!hasBlocker(all) || revisions >= maxRevisions) {
+      // Guarantee a real sign-off on the final body (placeholders swapped,
+      // closing appended if missing). Done after verification so the appended
+      // closing is never itself flagged.
+      const signed = { ...draft, body: ensureSignOff(draft.body, ctx.sender?.name) };
       return {
-        draft,
+        draft: signed,
         violations: all,
         voiceMatchScore: critique.voiceMatchScore,
         revisions,

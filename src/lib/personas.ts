@@ -5,8 +5,11 @@
 import { supabase } from '../supabaseClient';
 import type { MissionMode, Persona, ContextFact, StyleExemplar, StyleProfile } from '../types';
 
+/** Mid-scale default: lean on the exemplar voice without copying its structure. */
+export const DEFAULT_TEMPLATE_STRICTNESS = 50;
+
 export function emptyStyleProfile(): StyleProfile {
-  return { dimensions: {}, rules: [], banned_phrases: [], voice_summary: '' };
+  return { dimensions: {}, rules: [], banned_phrases: [], voice_summary: '', template_strictness: DEFAULT_TEMPLATE_STRICTNESS };
 }
 
 /**
@@ -49,6 +52,7 @@ export async function createPersona(
       style_profile_version: 1,
       onboarding_completed_at: null,
       archived_at: null,
+      excluded_fact_ids: [],
     })
     .select('*')
     .single();
@@ -73,6 +77,7 @@ export async function updatePersona(
     style_profile_version: number;
     onboarding_completed_at: string | null;
     archived_at: string | null;
+    excluded_fact_ids: string[];
   }>
 ): Promise<void> {
   const { error } = await supabase.from('personas').update(patch).eq('id', id);

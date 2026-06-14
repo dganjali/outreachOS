@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { forUser } from '../_lib/db';
 import { createMessageWithRetry, MODEL, extractJson } from '../_lib/llm';
+import { ensureSignOff } from '../_lib/engine';
 import { REPLY_ROUTER_SYSTEM } from '../_lib/prompts';
 import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
 import { cancelQueuedForContact, addSuppression, scheduleRetouch } from '../_lib/sequencing';
@@ -97,6 +98,10 @@ export default async function handler(req: Request, res: Response) {
     }
 
     const cls = parsed.data;
+    // Guarantee the drafted reply is signed off, same as outreach emails.
+    if (cls.suggested_response?.body) {
+      cls.suggested_response.body = ensureSignOff(cls.suggested_response.body, profile?.name ?? null);
+    }
     await scope.collection<ReplyDoc>('replies').updateById(reply_id, {
       classification: cls.classification as ReplyDoc['classification'],
       urgency: cls.urgency,

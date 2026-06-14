@@ -51,9 +51,6 @@ pipelines/day are grounded for free before any grounding charge.
 **All tier margins below use the conservative full-cost numbers.** The free
 grounding tier is upside, especially in the first months.
 
-> Note: Apollo (optional, user supplies `APOLLO_API_KEY`) is billed to the user,
-> not to us. It is not in this model.
-
 ---
 
 ## 2. Usage limits — the levers

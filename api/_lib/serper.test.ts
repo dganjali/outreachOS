@@ -1,6 +1,6 @@
 import { describe, it, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseOrganic, buildPeopleQuery, search } from './serper';
+import { parseOrganic, buildPeopleQuery, buildPeopleQueries, profileKey, search } from './serper';
 
 describe('parseOrganic', () => {
   it('extracts title/link/snippet from organic results', () => {
@@ -38,6 +38,43 @@ describe('buildPeopleQuery', () => {
     const q = buildPeopleQuery('Acme', ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']);
     assert.ok(!q.includes('"g"'));
     assert.ok(q.includes('"f"'));
+  });
+});
+
+describe('buildPeopleQueries (ICP-driven)', () => {
+  it('emits a precise query (function × seniority + negatives) and a broad net', () => {
+    const qs = buildPeopleQueries({
+      companyName: 'RBC',
+      functionKeywords: ['community investment', 'corporate citizenship'],
+      seniorityKeywords: ['manager', 'director'],
+      negativeTerms: ['president', 'chief', 'vp'],
+    });
+    // precise query has functions, seniority, negatives
+    assert.ok(qs[0].includes('"community investment"'));
+    assert.ok(qs[0].includes('"manager"'));
+    assert.ok(qs[0].includes('-president'));
+    // broad net keeps functions but NOT the seniority constraint or negatives
+    const broad = qs.find((q) => !q.includes('-president'));
+    assert.ok(broad, 'a negatives-free broad query exists');
+    assert.ok(broad!.includes('"community investment"'));
+    assert.ok(!broad!.includes('"manager"'));
+  });
+
+  it('adds a geo variant only when geo is set', () => {
+    const without = buildPeopleQueries({ companyName: 'Acme', functionKeywords: ['community'] });
+    const withGeo = buildPeopleQueries({ companyName: 'Acme', functionKeywords: ['community'], geo: 'Toronto' });
+    assert.ok(!without.some((q) => q.includes('"Toronto"')));
+    assert.ok(withGeo.some((q) => q.includes('"Toronto"')));
+  });
+});
+
+describe('profileKey', () => {
+  it('normalizes LinkedIn profile URLs so dupes collapse', () => {
+    assert.equal(
+      profileKey('https://www.linkedin.com/in/janedoe/'),
+      profileKey('https://linkedin.com/in/janedoe')
+    );
+    assert.notEqual(profileKey('https://linkedin.com/in/jane'), profileKey('https://linkedin.com/in/john'));
   });
 });
 

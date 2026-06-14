@@ -7,6 +7,8 @@ import assert from 'node:assert/strict';
 import {
   verifyDraftDeterministic,
   hasBlocker,
+  templateStrictnessDirective,
+  ensureSignOff,
   type AllowedFact,
   type DraftOutput,
 } from './engine';
@@ -96,4 +98,58 @@ test('a draft with no call-to-action gets a constraint warning', () => {
     true,
   );
   assert.equal(hasBlocker(v), false);
+});
+
+test('template-strictness directive scales from loose inspiration to near-verbatim', () => {
+  // With no exemplars there is nothing to be strict about — emit nothing.
+  assert.equal(templateStrictnessDirective(100, false), '');
+
+  const loose = templateStrictnessDirective(0, true);
+  assert.match(loose, /TEMPLATE STRICTNESS: 0\/100/);
+  assert.match(loose, /loose voice inspiration/i);
+
+  const strict = templateStrictnessDirective(100, true);
+  assert.match(strict, /TEMPLATE STRICTNESS: 100\/100/);
+  assert.match(strict, /verbatim/i);
+
+  // Out-of-range values are clamped before bucketing.
+  assert.match(templateStrictnessDirective(999, true), /100\/100/);
+});
+
+// ---------------------------------------------------------------------------
+// ensureSignOff — every email ends signed, no placeholders.
+// ---------------------------------------------------------------------------
+
+test('appends a sign-off when none is present', () => {
+  const out = ensureSignOff('Worth 15 minutes next week?', 'Justin Rui');
+  assert.match(out, /Best,\nJustin$/);
+});
+
+test('does not double up an existing sign-off', () => {
+  const body = 'Worth 15 minutes next week?\n\nBest,\nJustin';
+  assert.equal(ensureSignOff(body, 'Justin Rui'), body);
+});
+
+test('recognizes varied closings (Thanks/Cheers/Regards) without appending', () => {
+  for (const close of ['Thanks,\nJustin', 'Cheers,\nJustin', 'Warm regards,\nJustin Rui']) {
+    const body = `Quick ask.\n\n${close}`;
+    assert.equal(ensureSignOff(body, 'Justin Rui'), body, `should keep "${close}"`);
+  }
+});
+
+test('swaps a placeholder name for the real one', () => {
+  const out = ensureSignOff('Hi there.\n\nBest,\n[Your Name]', 'Justin Rui');
+  assert.ok(out.includes('Justin Rui'));
+  assert.ok(!/\[your name\]/i.test(out));
+});
+
+test('treats a trailing name line as the sign-off', () => {
+  const body = 'Quick ask about your launch.\n\nJustin';
+  assert.equal(ensureSignOff(body, 'Justin Rui'), body);
+});
+
+test('appends a bare closing when the sender name is unknown', () => {
+  const out = ensureSignOff('Worth a chat?', null);
+  assert.match(out, /Best,$/);
+  assert.ok(!/\[your name\]/i.test(out));
 });

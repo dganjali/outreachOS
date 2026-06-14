@@ -16,6 +16,7 @@
 
 import type { EmbedInputType } from '../api/_lib/embeddings';
 import type { PlanId, PlanStatus } from './plans';
+import type { ContactIcp } from './types';
 
 void ({} as EmbedInputType); // keep the import live for downstream consumers
 
@@ -48,7 +49,7 @@ export interface ProfileDoc extends BaseDoc {
   writingTone: string | null;
   linkedinData: Record<string, unknown> | null;
   linkedinEnrichedAt: Date | null;
-  linkedinSource: 'apollo' | 'web_search' | null;
+  linkedinSource: 'web_search' | null;
   onboardingStep: number;
   onboardingCompletedAt: Date | null;
   // When true, the follow-up sweeper skips this user's scheduled touches.
@@ -135,12 +136,20 @@ export interface StyleProfile {
   bannedPhrases: string[];
   // Short prose summary regenerated from the above, injected into the prompt.
   voiceSummary: string;
+  // How closely the generator should hug the persona's exemplar emails as a
+  // template: 0 = loose inspiration (borrow only the voice), 100 = follow the
+  // structure/phrasing of the closest exemplar almost verbatim. User-set via the
+  // Style step slider; the engine turns it into an explicit drafting directive.
+  templateStrictness: number;
 }
 
 /** A fresh, empty StyleProfile (persona v1 before any calibration). */
 export function emptyStyleProfile(): StyleProfile {
-  return { dimensions: {}, rules: [], bannedPhrases: [], voiceSummary: '' };
+  return { dimensions: {}, rules: [], bannedPhrases: [], voiceSummary: '', templateStrictness: DEFAULT_TEMPLATE_STRICTNESS };
 }
+
+/** Mid-scale default: lean on the exemplar voice without copying its structure. */
+export const DEFAULT_TEMPLATE_STRICTNESS = 50;
 
 export interface PersonaDoc extends BaseDoc {
   name: string;                          // "Sponsorship voice", "Recruiting voice"
@@ -151,6 +160,11 @@ export interface PersonaDoc extends BaseDoc {
   styleProfileVersion: number;           // monotonically increments on each calibration
   onboardingCompletedAt: Date | null;
   archivedAt: Date | null;
+  // Person-level (default) context facts this voice has opted OUT of. Person
+  // facts apply to every persona by default; listing an id here hides it from
+  // this voice's display AND its generation grounding, without deleting the
+  // fact globally (it stays available to other voices).
+  excludedFactIds?: string[];
 }
 
 // Immutable per-calibration snapshots — audit + rollback for a persona's voice.
@@ -196,6 +210,13 @@ export interface MissionDoc extends BaseDoc {
   targetDescription: string;
   mode: 'sponsorship' | 'bd' | 'internship' | 'recruiting' | 'sales';
   offerDetails: string | null;
+  // Optional location focus (region/country/city) for contact discovery. null =
+  // no geographic preference. See CONTACT_ENGINE.md §4.
+  geo?: string | null;
+  // Cached Ideal Contact Profile — generated once on first contact discovery and
+  // reused across this mission's targets (CONTACT_ENGINE.md §2/§8). Optional so
+  // pre-engine missions read as undefined; lazily backfilled on next run.
+  contactIcp?: ContactIcp | null;
   status: string;
   archivedAt: Date | null;
   // The persona (reusable voice) this mission drafts as. Required for new
@@ -212,8 +233,7 @@ export interface TargetDoc extends BaseDoc {
   fitReason: string | null;
   signalType: string | null;
   status: 'suggested' | 'approved' | 'rejected' | 'contacted';
-  source: 'web_search' | 'apollo' | 'csv' | 'manual';
-  apolloOrganizationId: string | null;
+  source: 'web_search' | 'csv' | 'manual';
   industry: string | null;
   employeeCount: number | null;
   headquartersLocation: string | null;
@@ -228,14 +248,13 @@ export interface ContactDoc extends BaseDoc {
   emailStatus: 'verified' | 'likely' | 'guessed' | 'none';
   // Which rung of the resolution cascade produced the email (analytics only).
   // Optional — pre-existing docs read as undefined; no migration needed.
-  emailResolver?: 'apollo' | 'email_finder' | 'scrape' | 'verifier' | 'none' | null;
+  emailResolver?: 'preexisting' | 'email_finder' | 'scrape' | 'verifier' | 'none' | null;
   linkedinUrl: string | null;
   likelyEmailPattern: string | null;
   confidence: number | null;
   reasoning: string | null;
   status: 'suggested' | 'approved' | 'rejected' | 'contacted' | 'replied';
-  source: 'web_search' | 'apollo' | 'csv' | 'manual';
-  apolloPersonId: string | null;
+  source: 'web_search' | 'csv' | 'manual';
   seniority: string | null;
   headline: string | null;
   location: string | null;
@@ -430,11 +449,9 @@ export const INDEX_SPEC: Record<string, Array<{ keys: Record<string, 1 | -1>; op
   ],
   targets: [
     { keys: { userId: 1, missionId: 1, status: 1 } },
-    { keys: { userId: 1, missionId: 1, apolloOrganizationId: 1 } },
   ],
   contacts: [
     { keys: { userId: 1, targetId: 1, status: 1 } },
-    { keys: { userId: 1, targetId: 1, apolloPersonId: 1 } },
   ],
   evidence_packs: [
     { keys: { userId: 1, targetId: 1, createdAt: -1 } },

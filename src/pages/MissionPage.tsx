@@ -339,9 +339,6 @@ export function MissionPage() {
                         </span>
                       )}
                       {t.signal_type && <span className="signal-pill">{t.signal_type}</span>}
-                      {t.source === 'apollo' && (
-                        <span className="signal-pill subtle" title="Sourced from a verified directory">verified</span>
-                      )}
                       {t.industry && <span className="signal-pill subtle">{t.industry}</span>}
                       {typeof t.employee_count === 'number' && (
                         <span className="signal-pill subtle">{t.employee_count.toLocaleString()} ppl</span>
@@ -434,9 +431,6 @@ export function MissionPage() {
                                   <span className="confidence" title="Confidence">
                                     {Math.round(c.confidence * 100)}%
                                   </span>
-                                )}
-                                {c.source === 'apollo' && (
-                                  <span className="signal-pill subtle" title="Sourced from a verified directory">verified</span>
                                 )}
                               </div>
                               <div className="contact-row-actions">

@@ -53,9 +53,6 @@ export const env = {
   GOOGLE_CLIENT_ID: () => required('GOOGLE_CLIENT_ID'),
   GOOGLE_CLIENT_SECRET: () => required('GOOGLE_CLIENT_SECRET'),
 
-  // Apollo (optional)
-  APOLLO_API_KEY: () => process.env.APOLLO_API_KEY || null,
-
   // Serper (optional) — Google SERP API for person discovery. When set, the
   // contacts agent uses deterministic search results instead of the LLM's
   // built-in web_search grounding.
