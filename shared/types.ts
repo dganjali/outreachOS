@@ -4,7 +4,7 @@
 export type MissionMode = 'sponsorship' | 'bd' | 'internship' | 'recruiting' | 'sales';
 
 export type TargetStatus = 'suggested' | 'approved' | 'rejected' | 'contacted';
-export type TargetSource = 'web_search' | 'apollo' | 'csv' | 'manual';
+export type TargetSource = 'web_search' | 'csv' | 'manual';
 
 export interface Target {
   id: string;
@@ -17,7 +17,6 @@ export interface Target {
   signal_type: string | null;
   status: TargetStatus;
   source: TargetSource;
-  apollo_organization_id: string | null;
   industry: string | null;
   employee_count: number | null;
   headquarters_location: string | null;
@@ -25,7 +24,7 @@ export interface Target {
 }
 
 export type ContactStatus = 'suggested' | 'approved' | 'rejected' | 'contacted' | 'replied';
-export type ContactSource = 'web_search' | 'apollo' | 'csv' | 'manual';
+export type ContactSource = 'web_search' | 'csv' | 'manual';
 export type EmailStatus = 'verified' | 'likely' | 'guessed' | 'none';
 
 export interface Contact {
@@ -41,7 +40,6 @@ export interface Contact {
   reasoning: string | null;
   status: ContactStatus;
   source: ContactSource;
-  apollo_person_id: string | null;
   seniority: string | null;
   headline: string | null;
   location: string | null;

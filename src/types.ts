@@ -35,7 +35,7 @@ export interface Profile {
   writing_tone: string | null;
   linkedin_data: Record<string, unknown> | null;
   linkedin_enriched_at: string | null;
-  linkedin_source: 'apollo' | 'web_search' | null;
+  linkedin_source: 'web_search' | null;
   onboarding_step: number;
   onboarding_completed_at: string | null;
   // Billing (Stripe). Absent == free tier.

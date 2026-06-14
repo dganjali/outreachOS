@@ -2,15 +2,8 @@ import type { Request, Response } from 'express';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { forUser, newId, type InsertDoc } from '../_lib/db';
 import { createMessageWithRetry, MODEL, WEB_SEARCH_TOOL, extractJson } from '../_lib/llm';
-import { CONTACTS_SYSTEM, CONTACTS_RANK_SYSTEM, CONTACTS_FROM_SERP_SYSTEM, type MissionMode } from '../_lib/prompts';
+import { CONTACTS_SYSTEM, CONTACTS_FROM_SERP_SYSTEM, type MissionMode } from '../_lib/prompts';
 import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
-import {
-  apolloEnabled,
-  searchPeople,
-  fullName,
-  normalizeEmailStatus,
-  type ApolloPerson,
-} from '../_lib/apollo';
 import { resolveCompanyDomain } from '../_lib/company-enrich';
 import { serperEnabled, searchPeople as serperSearchPeople } from '../_lib/serper';
 import { resolveEmail, type ContactEmailFields, type ResolvedEmail } from '../_lib/email-resolver';
@@ -33,20 +26,6 @@ interface ContactSuggestion {
   reasoning: string;
 }
 
-interface ApolloContactRanked {
-  apollo_person_id: string;
-  name: string;
-  role: string;
-  linkedin_url: string | null;
-  email: string | null;
-  email_status: 'verified' | 'likely' | 'guessed' | 'none';
-  seniority: string | null;
-  headline: string | null;
-  location: string | null;
-  confidence: number;
-  reasoning: string;
-}
-
 // Loop-for-another-contact budget. Discovery hands the resolver a ranked
 // candidate pool; the resolver walks it top-down keeping deliverable rows until
 // it has TARGET_DELIVERABLE of them or has attempted RESOLVE_ATTEMPT_CAP
@@ -61,14 +40,6 @@ const TITLE_HINTS_BY_MODE: Record<MissionMode, string[]> = {
   internship: ['engineering manager', 'recruiter', 'university', 'talent', 'hiring manager', 'head of engineering', 'technical recruiter'],
   recruiting: ['engineering manager', 'head of engineering', 'cto', 'vp engineering', 'director of engineering', 'recruiter', 'talent'],
   sales: ['head', 'director', 'vp', 'cto', 'cio', 'engineering manager', 'product manager', 'operations'],
-};
-
-const SENIORITIES_BY_MODE: Record<MissionMode, string[]> = {
-  sponsorship: ['c_suite', 'vp', 'director', 'head', 'manager'],
-  bd: ['c_suite', 'vp', 'director', 'head'],
-  internship: ['vp', 'director', 'head', 'manager', 'senior'],
-  recruiting: ['c_suite', 'vp', 'director', 'head', 'manager'],
-  sales: ['c_suite', 'vp', 'director', 'head', 'manager'],
 };
 
 export default async function handler(req: Request, res: Response) {
@@ -95,11 +66,10 @@ export default async function handler(req: Request, res: Response) {
       await scope.collection<TargetDoc>('targets').updateById(target._id, { domain });
     }
   }
-  const useApollo = apolloEnabled() && !!domain;
-  const useSerper = !useApollo && serperEnabled() && !!domain;
+  const useSerper = serperEnabled() && !!domain;
   // How the people were discovered (for observability). ContactDoc.source stays
-  // 'apollo' | 'web_search' — Serper-discovered people are still web_search.
-  const discoverySource = useApollo ? 'apollo' : useSerper ? 'serper' : 'web_search';
+  // 'web_search' either way — Serper-discovered people are still web_search.
+  const discoverySource = useSerper ? 'serper' : 'web_search';
 
   const run = await startRun(scope, {
     agentType: 'contacts',
@@ -111,9 +81,7 @@ export default async function handler(req: Request, res: Response) {
   try {
     const discoveryArgs = { target: { ...target, domain }, mission, mode, profile };
     let rows: Array<Omit<ContactDoc, '_id' | 'userId' | 'createdAt' | 'updatedAt'>>;
-    if (useApollo) {
-      rows = await runApolloHybrid(discoveryArgs);
-    } else if (useSerper) {
+    if (useSerper) {
       rows = await runSerperDiscovery(discoveryArgs);
     } else {
       rows = await runWebSearchOnly(discoveryArgs);
@@ -201,7 +169,6 @@ async function runWebSearchOnly(args: {
     reasoning: c.reasoning,
     status: 'suggested' as const,
     source: 'web_search' as const,
-    apolloPersonId: null,
     seniority: null,
     headline: null,
     location: null,
@@ -275,126 +242,10 @@ async function runSerperDiscovery(args: {
     reasoning: c.reasoning,
     status: 'suggested' as const,
     source: 'web_search' as const,
-    apolloPersonId: null,
     seniority: null,
     headline: null,
     location: null,
   }));
-}
-
-async function runApolloHybrid(args: {
-  target: TargetDoc;
-  mission: MissionDoc;
-  mode: MissionMode;
-  profile: ProfileDoc | null;
-}): Promise<Array<Omit<ContactDoc, '_id' | 'userId' | 'createdAt' | 'updatedAt'>>> {
-  const { target, mission, mode, profile } = args;
-  const titles = TITLE_HINTS_BY_MODE[mode];
-  const seniorities = SENIORITIES_BY_MODE[mode];
-
-  let people: ApolloPerson[];
-  try {
-    people = await searchPeople({
-      q_organization_domains: target.domain!,
-      person_titles: titles,
-      person_seniorities: seniorities,
-      contact_email_status: ['verified', 'likely_to_engage'],
-      per_page: 25,
-    });
-  } catch (err) {
-    console.error('apollo_people_failed', err);
-    return runWebSearchOnly(args);
-  }
-
-  if (people.length === 0) return runWebSearchOnly(args);
-
-  const list = people.slice(0, 25).map((p) => ({
-    apollo_person_id: p.id,
-    name: fullName(p),
-    role: p.title,
-    headline: p.headline,
-    linkedin_url: p.linkedin_url,
-    email: p.email,
-    email_status: normalizeEmailStatus(p.email_status),
-    seniority: p.seniority,
-    departments: p.departments,
-    location: [p.city, p.state, p.country].filter(Boolean).join(', ') || null,
-  }));
-
-  const rankPrompt = [
-    `TARGET ORGANIZATION`,
-    `${target.companyName} (${target.domain})`,
-    target.whyNow ? `Why now: ${target.whyNow}` : '',
-    target.fitReason ? `Fit: ${target.fitReason}` : '',
-    '',
-    `MISSION`,
-    `Mode: ${mode}`,
-    `Offer: ${mission.goal}`,
-    `Audience: ${mission.targetDescription}`,
-    '',
-    `APOLLO CANDIDATES (${list.length}):`,
-    JSON.stringify(list, null, 2),
-    '',
-    'Pick the 2-4 best fits. Preserve apollo_person_id and email/email_status verbatim. JSON only.',
-  ]
-    .filter(Boolean)
-    .join('\n');
-
-  const rankMsg = await createMessageWithRetry({
-    model: MODEL(),
-    max_tokens: 2048,
-    system: CONTACTS_RANK_SYSTEM,
-    messages: [{ role: 'user', content: rankPrompt }],
-  });
-
-  const rankParsed = extractJson<{ contacts: ApolloContactRanked[] }>(rankMsg);
-  if (!rankParsed.ok || !rankParsed.data?.contacts) {
-    return list.slice(0, CANDIDATE_POOL_CAP).map((p) => ({
-      targetId: target._id,
-      missionId: mission._id,
-      name: p.name,
-      role: p.role ?? p.headline ?? 'Unknown',
-      email: p.email ?? null,
-      emailStatus: p.email_status,
-      linkedinUrl: p.linkedin_url ?? null,
-      likelyEmailPattern: null,
-      confidence: 0.6,
-      reasoning: 'Top Apollo match by title and seniority.',
-      status: 'suggested' as const,
-      source: 'apollo' as const,
-      apolloPersonId: p.apollo_person_id ?? null,
-      seniority: p.seniority ?? null,
-      headline: p.headline ?? null,
-      location: p.location ?? null,
-    }));
-  }
-
-  const byId = new Map(list.map((p) => [p.apollo_person_id ?? '', p]));
-  const exclusions = senderExclusions(profile);
-  return rankParsed.data.contacts
-    .filter((c) => !isExcludedName(c.name ?? '', exclusions))
-    .slice(0, CANDIDATE_POOL_CAP)
-    .map((c) => {
-    const apollo = byId.get(c.apollo_person_id ?? '');
-    return {
-      targetId: target._id,
-      missionId: mission._id,
-      name: c.name,
-      role: c.role,
-      email: apollo?.email ?? c.email ?? null,
-      emailStatus: apollo?.email_status ?? c.email_status ?? 'none',
-      linkedinUrl: apollo?.linkedin_url ?? c.linkedin_url ?? null,
-      likelyEmailPattern: null,
-      confidence: clamp01(c.confidence),
-      reasoning: c.reasoning,
-      status: 'suggested' as const,
-      source: 'apollo' as const,
-      apolloPersonId: c.apollo_person_id ?? null,
-      seniority: apollo?.seniority ?? c.seniority ?? null,
-      headline: apollo?.headline ?? c.headline ?? null,
-      location: apollo?.location ?? c.location ?? null,
-    };
-  });
 }
 
 type ContactRow = Omit<ContactDoc, '_id' | 'userId' | 'createdAt' | 'updatedAt'>;

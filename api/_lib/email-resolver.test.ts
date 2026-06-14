@@ -63,22 +63,22 @@ describe('resolveEmail cascade', () => {
     assert.equal(r.likelyEmailPattern, 'first.last@acme.co'); // kept for display only
   });
 
-  it('passes a pre-trusted Apollo email through untouched (short-circuit)', async () => {
+  it('passes a pre-trusted imported email through untouched (short-circuit)', async () => {
     const existing: ContactEmailFields = {
-      email: 'apollo.person@acme.co',
+      email: 'trusted.person@acme.co',
       emailStatus: 'verified',
       likelyEmailPattern: null,
     };
     let called = false;
     const provider: EmailProvider = { enabled: () => true, findEmail: async () => { called = true; return { email: 'x@acme.co', raw: null }; } };
-    const r = await resolveEmail('Apollo Person', 'acme.co', existing, scrape([]), [provider]);
-    assert.equal(r.email, 'apollo.person@acme.co');
+    const r = await resolveEmail('Trusted Person', 'acme.co', existing, scrape([]), [provider]);
+    assert.equal(r.email, 'trusted.person@acme.co');
     assert.equal(r.emailStatus, 'verified');
-    assert.equal(r.resolver, 'apollo');
+    assert.equal(r.resolver, 'preexisting');
     assert.equal(called, false, 'finder must not be called when a trusted email exists');
   });
 
-  it('re-resolves an Apollo "guessed" email instead of trusting it', async () => {
+  it('re-resolves a "guessed" imported email instead of trusting it', async () => {
     const existing: ContactEmailFields = {
       email: 'guess@acme.co',
       emailStatus: 'guessed',

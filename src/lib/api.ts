@@ -63,12 +63,12 @@ async function authedFetch<T>(path: string, body: unknown, method: 'GET' | 'POST
 
 export const agents = {
   target: (mission_id: string, count?: number) =>
-    authedFetch<{ run_id: string; targets: Target[]; source: 'apollo' | 'web_search' }>('/api/agents/target', {
+    authedFetch<{ run_id: string; targets: Target[]; source: 'web_search' }>('/api/agents/target', {
       mission_id,
       count,
     }),
   contacts: (target_id: string) =>
-    authedFetch<{ run_id: string; contacts: Contact[]; source: 'apollo' | 'web_search' }>(
+    authedFetch<{ run_id: string; contacts: Contact[]; source: 'serper' | 'web_search' }>(
       '/api/agents/contacts',
       { target_id }
     ),
@@ -136,7 +136,7 @@ export const agents = {
     authedFetch<{
       run_id: string;
       profile: Profile;
-      source: 'apollo' | 'web_search';
+      source: 'web_search';
       facts_added: number;
     }>('/api/agents/enrich-profile', {}),
   coach: (field: CoachField, current_value: string) =>

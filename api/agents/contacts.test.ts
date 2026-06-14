@@ -21,7 +21,6 @@ function row(name: string): ContactRow {
     reasoning: 'ranked',
     status: 'suggested',
     source: 'web_search',
-    apolloPersonId: null,
     seniority: null,
     headline: null,
     location: null,

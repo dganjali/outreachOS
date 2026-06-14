@@ -19,7 +19,7 @@ The one list. Do it top to bottom and you go from "branch on disk" to "an app yo
 > Goal: the real app reachable at a URL. ~½ day of cloud setup.
 
 - [ ] **Provision the cloud** (one-time): GCP project + enable APIs (run, cloudbuild, artifactregistry, secretmanager, cloudtasks, cloudscheduler, storage, identitytoolkit, firebase) → Firebase Auth (Email/Password + Google) → MongoDB Atlas (M0 to start; **M10 ~$57/mo when you need vector search to actually work**) → Voyage AI key.
-- [ ] **Secrets → Secret Manager:** `ANTHROPIC_API_KEY`, `MONGODB_URI`, `VOYAGE_API_KEY`, `ENCRYPTION_KEY` (`openssl rand -base64 32`), `CRON_SECRET` (`openssl rand -hex 32`), `GOOGLE_CLIENT_ID/SECRET`, `FIREBASE_SERVICE_ACCOUNT_JSON`, optional `APOLLO_API_KEY`, `SERPER_API_KEY`, `EMAILFINDER_API_KEY`, `MILLIONVERIFIER_API_KEY`.
+- [ ] **Secrets → Secret Manager:** `ANTHROPIC_API_KEY`, `MONGODB_URI`, `VOYAGE_API_KEY`, `ENCRYPTION_KEY` (`openssl rand -base64 32`), `CRON_SECRET` (`openssl rand -hex 32`), `GOOGLE_CLIENT_ID/SECRET`, `FIREBASE_SERVICE_ACCOUNT_JSON`, optional `SERPER_API_KEY`, `EMAILFINDER_API_KEY`, `MILLIONVERIFIER_API_KEY`.
 - [ ] **Init the DB:** `MONGODB_URI=… npm run mongo:init` (creates collections, indexes, vector indexes).
 - [ ] **GCS bucket** + **Cloud Tasks queue** (`outreach-jobs`) + **cloud-tasks-invoker** service account.
 - [ ] **Deploy Cloud Run:** `gcloud builds submit --config=cloudbuild.yaml`, then grab the service URL.
@@ -63,7 +63,7 @@ The one list. Do it top to bottom and you go from "branch on disk" to "an app yo
 - [ ] **Pricing (grounded in real cost — a full pipeline run costs you ~$2–3, mostly web search):**
   - Free trial: 1 mission, ~10 targets, drafts only. (Costs you ~$2–3 once.)
   - Starter ~$39/mo: ~10 pipelines/mo + Gmail send. (Keep caps tight — thin margin.)
-  - Pro ~$99–149/mo: ~40 pipelines + Apollo verified emails (the upsell) + priority.
+  - Pro ~$99–149/mo: ~40 pipelines + verified emails (emailfinder.dev — the upsell) + priority.
   - Aim ~3–3.5× your loaded cost per unit for ~70% gross margin.
 - [ ] **Cut the variable cost while you're here (protects every plan's margin):**
   - [ ] Drop `WEB_SEARCH_TOOL.max_uses` 10 → ~5 (`api/_lib/anthropic.ts`) — biggest single lever.

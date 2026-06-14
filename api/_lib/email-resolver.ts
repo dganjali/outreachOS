@@ -26,9 +26,10 @@ export interface ContactEmailFields {
 export interface ResolvedEmail extends ContactEmailFields {
   // Which rung of the cascade produced this result (persisted as
   // ContactDoc.emailResolver for analytics). 'verifier' means a finder hit that
-  // passed through the MillionVerifier gate. ContactDoc.source still describes
-  // how the *person* was discovered.
-  resolver: 'apollo' | 'email_finder' | 'scrape' | 'verifier' | 'none';
+  // passed through the MillionVerifier gate; 'preexisting' means a trusted email
+  // already on the row (e.g. a CSV/manual import). ContactDoc.source still
+  // describes how the *person* was discovered.
+  resolver: 'preexisting' | 'email_finder' | 'scrape' | 'verifier' | 'none';
 }
 
 // A provider maps (name, domain) -> verified email or null.
@@ -65,7 +66,7 @@ function displayPattern(domain: string, existing: ContactEmailFields, scraped: S
 
 /**
  * Resolve a deliverable email for `name` at `domain`. Ordered cascade:
- *   1. A pre-trusted email already on the row (Apollo verified/likely) — keep.
+ *   1. A pre-trusted email already on the row (verified/likely import) — keep.
  *   2. External finder providers (emailfinder.dev) — SMTP-verified hit.
  *   3. A real email scraped from the company site that matches this person.
  *   4. Nothing → email:null, status 'none', pattern kept for display only.
@@ -80,10 +81,10 @@ export async function resolveEmail(
 ): Promise<ResolvedEmail> {
   const pattern = displayPattern(domain, existing, scraped);
 
-  // 1. Trust an email that already arrived verified/likely (e.g. from Apollo).
-  //    Apollo 'guessed'/'none' rows fall through to be re-resolved below.
+  // 1. Trust an email that already arrived verified/likely (e.g. a CSV/manual
+  //    import). 'guessed'/'none' rows fall through to be re-resolved below.
   if (existing.email && (existing.emailStatus === 'verified' || existing.emailStatus === 'likely')) {
-    return { email: existing.email, emailStatus: existing.emailStatus, likelyEmailPattern: pattern, resolver: 'apollo' };
+    return { email: existing.email, emailStatus: existing.emailStatus, likelyEmailPattern: pattern, resolver: 'preexisting' };
   }
 
   if (!domain) {

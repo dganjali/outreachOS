@@ -3,8 +3,8 @@
 // domain, returns a deliverable email or null. Charged only when a valid email
 // is found (misses are free). Docs: https://www.emailfinder.dev/reference
 //
-// This is a dumb provider client (mirrors apollo.ts). The cascade that decides
-// when to call it lives in email-resolver.ts.
+// This is a dumb provider client. The cascade that decides when to call it
+// lives in email-resolver.ts.
 
 const BASE = 'https://www.emailfinder.dev/api';
 

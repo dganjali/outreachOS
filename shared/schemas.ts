@@ -48,7 +48,7 @@ export interface ProfileDoc extends BaseDoc {
   writingTone: string | null;
   linkedinData: Record<string, unknown> | null;
   linkedinEnrichedAt: Date | null;
-  linkedinSource: 'apollo' | 'web_search' | null;
+  linkedinSource: 'web_search' | null;
   onboardingStep: number;
   onboardingCompletedAt: Date | null;
   // When true, the follow-up sweeper skips this user's scheduled touches.
@@ -212,8 +212,7 @@ export interface TargetDoc extends BaseDoc {
   fitReason: string | null;
   signalType: string | null;
   status: 'suggested' | 'approved' | 'rejected' | 'contacted';
-  source: 'web_search' | 'apollo' | 'csv' | 'manual';
-  apolloOrganizationId: string | null;
+  source: 'web_search' | 'csv' | 'manual';
   industry: string | null;
   employeeCount: number | null;
   headquartersLocation: string | null;
@@ -228,14 +227,13 @@ export interface ContactDoc extends BaseDoc {
   emailStatus: 'verified' | 'likely' | 'guessed' | 'none';
   // Which rung of the resolution cascade produced the email (analytics only).
   // Optional — pre-existing docs read as undefined; no migration needed.
-  emailResolver?: 'apollo' | 'email_finder' | 'scrape' | 'verifier' | 'none' | null;
+  emailResolver?: 'preexisting' | 'email_finder' | 'scrape' | 'verifier' | 'none' | null;
   linkedinUrl: string | null;
   likelyEmailPattern: string | null;
   confidence: number | null;
   reasoning: string | null;
   status: 'suggested' | 'approved' | 'rejected' | 'contacted' | 'replied';
-  source: 'web_search' | 'apollo' | 'csv' | 'manual';
-  apolloPersonId: string | null;
+  source: 'web_search' | 'csv' | 'manual';
   seniority: string | null;
   headline: string | null;
   location: string | null;
@@ -430,11 +428,9 @@ export const INDEX_SPEC: Record<string, Array<{ keys: Record<string, 1 | -1>; op
   ],
   targets: [
     { keys: { userId: 1, missionId: 1, status: 1 } },
-    { keys: { userId: 1, missionId: 1, apolloOrganizationId: 1 } },
   ],
   contacts: [
     { keys: { userId: 1, targetId: 1, status: 1 } },
-    { keys: { userId: 1, targetId: 1, apolloPersonId: 1 } },
   ],
   evidence_packs: [
     { keys: { userId: 1, targetId: 1, createdAt: -1 } },
