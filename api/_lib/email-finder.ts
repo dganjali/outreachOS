@@ -1,4 +1,4 @@
-// emailfinder.dev client — optional. Active only when EMAILFINDER_API_KEY is set.
+// emailfinder.dev client - optional. Active only when EMAILFINDER_API_KEY is set.
 // Real-time SMTP-verified email resolution: given a person's name + company
 // domain, returns a deliverable email or null. Charged only when a valid email
 // is found (misses are free). Docs: https://www.emailfinder.dev/reference
@@ -27,7 +27,7 @@ async function emailFinderGet<T>(path: string, params: Record<string, string>): 
   try {
     payload = text ? JSON.parse(text) : null;
   } catch {
-    /* fallthrough — non-JSON body handled by !res.ok below or defensive parse */
+    /* fallthrough - non-JSON body handled by !res.ok below or defensive parse */
   }
   if (!res.ok) {
     const detail =
@@ -58,7 +58,7 @@ export function parseFindEmailResponse(raw: unknown): string | null {
 }
 
 /**
- * Look up a verified email for a person. Never throws — logs and returns
+ * Look up a verified email for a person. Never throws - logs and returns
  * { email: null } on any failure so the resolver cascade can continue.
  */
 export async function findEmail(args: {

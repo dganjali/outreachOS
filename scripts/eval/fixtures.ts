@@ -1,4 +1,4 @@
-// Eval fixtures — persona × mission × contact × evidence, fully assembled into
+// Eval fixtures - persona × mission × contact × evidence, fully assembled into
 // engine contexts. These are hand-authored "golden" scenarios; the harness runs
 // the real engine on them and scores grounding/slop/voice/constraints.
 //
@@ -33,7 +33,7 @@ export const FIXTURES: Fixture[] = [
       exemplars: [
         {
           subject: 'sponsor slot for DevConf?',
-          body: 'Hey — I run DevConf, 1,400 engineers, most of them senior. You just shipped an API and are hiring DevRel, so the timing lines up. Want me to send the prospectus? Takes you 5 minutes to skim.',
+          body: 'Hey - I run DevConf, 1,400 engineers, most of them senior. You just shipped an API and are hiring DevRel, so the timing lines up. Want me to send the prospectus? Takes you 5 minutes to skim.',
         },
       ],
       styleProfile: {

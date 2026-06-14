@@ -1,4 +1,4 @@
-// Landing "agent flow" — an illustrative, animated pipeline of the four agents
+// Landing "agent flow" - an illustrative, animated pipeline of the four agents
 // that run on one click: Targeting → Evidence → Contacts → Sequence. A signal
 // beam travels the connectors and the active node cycles left to right. Matte
 // dark theme, hairline borders, single forest-green accent. Honors reduced motion.

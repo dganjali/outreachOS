@@ -101,7 +101,7 @@ export const SNAPSHOT_COALESCE_MS = 10 * 60 * 1000;
 /**
  * Decide whether a save warrants a new profile_versions row.
  * Rule: snapshot if nothing exists yet, if the last snapshot is >10 min old,
- * or if this save came from a non-manual source (enrich/restore — always preserve those).
+ * or if this save came from a non-manual source (enrich/restore - always preserve those).
  */
 export function shouldSnapshot(opts: {
   lastSnapshotAt: string | null;

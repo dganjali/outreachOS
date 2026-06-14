@@ -10,7 +10,7 @@ export function OnboardingRoute({ children }: { children: React.ReactNode }) {
     return <Navigate to="/sign-in" replace />;
   }
 
-  // Don't drop unverified users into onboarding — verify email first.
+  // Don't drop unverified users into onboarding - verify email first.
   if (!emailVerified) {
     return <Navigate to="/check-email" replace />;
   }

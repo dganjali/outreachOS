@@ -79,7 +79,7 @@ describe('mission quota (delete-proof monthly cap)', () => {
     assert.deepEqual(get()!.missionQuota, { period, used: 3 });
 
     // Deleting a mission does NOT touch the counter (there is no decrement path).
-    // So a follow-up create is still blocked — no infinite-missions loophole.
+    // So a follow-up create is still blocked - no infinite-missions loophole.
     const r = fakeRes();
     assert.equal(await checkMissionQuota(scope, r.res), false);
     assert.equal(r.out.status, 429);

@@ -76,7 +76,7 @@ export function PersonaStudio({ userId }: { userId: string | undefined }) {
         <div>
           <h2 className="me-section-title">Your voices</h2>
           <p className="me-section-hint">
-            A voice is a reusable way of writing the agent uses to draft. Build one per use case — sponsorship, recruiting, sales.
+            A voice is a reusable way of writing the agent uses to draft. Build one per use case - sponsorship, recruiting, sales.
           </p>
         </div>
         <button type="button" className="me-newvoice" onClick={() => setActive('new')}>
@@ -97,7 +97,7 @@ export function PersonaStudio({ userId }: { userId: string | undefined }) {
             <Mic2 size={20} />
           </span>
           <span className="me-voice-empty-title">Create your first voice</span>
-          <span className="me-voice-empty-sub">A short guided setup — name it, drop a few facts, paste an email, tune the tone.</span>
+          <span className="me-voice-empty-sub">A short guided setup - name it, drop a few facts, paste an email, tune the tone.</span>
         </button>
       ) : (
         <div className="me-voice-grid">

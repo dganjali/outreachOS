@@ -1,4 +1,4 @@
-// Persona migration — backfills the personalization layer for existing users.
+// Persona migration - backfills the personalization layer for existing users.
 //
 // For every `profiles` doc it:
 //   1. Creates a default PersonaDoc (seeded from the profile's writing tone), if
@@ -14,7 +14,7 @@
 // migration marker, so we never duplicate and never clobber data the user has
 // since created.
 //
-// NOTE: facts/exemplars are written WITHOUT embeddings — generating them needs
+// NOTE: facts/exemplars are written WITHOUT embeddings - generating them needs
 // live Vertex creds, which this offline script doesn't assume. The draft engine
 // falls back to recency when embeddings are absent; run a separate embedding
 // backfill (or let the learning loop re-embed) to enable vector retrieval.
@@ -35,7 +35,7 @@ if (!MONGODB_URI) {
   process.exit(1);
 }
 
-// Mirror of api/_lib/db.ts newId() — kept local so this script has no app deps.
+// Mirror of api/_lib/db.ts newId() - kept local so this script has no app deps.
 function newId(): string {
   return (
     Math.floor(Date.now() / 1000).toString(16).padStart(8, '0') +
@@ -44,7 +44,7 @@ function newId(): string {
 }
 
 // Split a freeform blob into atomic claims: one per non-empty line, with any
-// leading bullet/number markers stripped. Conservative — no LLM, no merging.
+// leading bullet/number markers stripped. Conservative - no LLM, no merging.
 function toClaims(blob: string | null | undefined): string[] {
   if (!blob) return [];
   return blob
@@ -104,13 +104,13 @@ async function migrateUser(db: Db, profile: Record<string, any>, stats: Stats): 
       console.log(`[dry] persona "Default" for ${userId}`);
     } else {
       // String _id (matches the app's id scheme); the driver's default type
-      // expects ObjectId, so cast — same as api/_lib/db.ts insertOne.
+      // expects ObjectId, so cast - same as api/_lib/db.ts insertOne.
       await db.collection('personas').insertOne(personaDoc as never);
     }
     stats.personasCreated += 1;
   }
 
-  // 2. Context facts — only if the user has none (don't duplicate / clobber).
+  // 2. Context facts - only if the user has none (don't duplicate / clobber).
   const factCount = await db.collection('context_facts').countDocuments({ userId });
   if (factCount === 0) {
     const factSpecs: Array<{ blob: any; type: string }> = [
@@ -144,7 +144,7 @@ async function migrateUser(db: Db, profile: Record<string, any>, stats: Stats): 
     }
   }
 
-  // 3. Style exemplars — only if the user has none.
+  // 3. Style exemplars - only if the user has none.
   const exemplarCount = await db.collection('style_exemplars').countDocuments({ userId });
   if (exemplarCount === 0) {
     const bodies = toExemplars(profile.exampleEmails);
@@ -210,7 +210,7 @@ async function main() {
       `exemplars:+${stats.exemplarsCreated} missions backfilled:${stats.missionsBackfilled} ` +
       `users already migrated:${stats.usersSkipped}`
   );
-  if (DRY_RUN) console.log('(dry run — no writes performed)');
+  if (DRY_RUN) console.log('(dry run - no writes performed)');
 }
 
 main().catch((err) => {

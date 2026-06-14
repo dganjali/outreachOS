@@ -27,7 +27,7 @@ test('counter resets after the window elapses', () => {
   const start = 5_000_000;
   for (let i = 0; i < 5; i++) consume('auth', 'ip', 5, 15 * 60_000, start);
   assert.equal(consume('auth', 'ip', 5, 15 * 60_000, start).allowed, false);
-  // Past the window — fresh budget.
+  // Past the window - fresh budget.
   const later = start + 15 * 60_000 + 1;
   assert.equal(consume('auth', 'ip', 5, 15 * 60_000, later).allowed, true);
 });
@@ -36,9 +36,9 @@ test('keys are isolated by IP and by limiter name', () => {
   __resetRateLimitStore();
   const now = 9_000_000;
   for (let i = 0; i < 5; i++) consume('auth', 'a', 5, 15 * 60_000, now);
-  // Different IP — independent budget.
+  // Different IP - independent budget.
   assert.equal(consume('auth', 'b', 5, 15 * 60_000, now).allowed, true);
-  // Same IP, different limiter namespace — independent budget.
+  // Same IP, different limiter namespace - independent budget.
   assert.equal(consume('global', 'a', 120, 60_000, now).allowed, true);
 });
 

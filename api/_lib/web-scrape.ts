@@ -57,9 +57,9 @@ export interface ScrapeResult {
 // `domain` ultimately comes from a user-controlled target row (a user can POST
 // any `domain` through the generic /api/data/targets route), and the scraper
 // turns it into a server-side fetch. Without this guard, a caller could point
-// the domain at internal infrastructure — link-local cloud metadata
+// the domain at internal infrastructure - link-local cloud metadata
 // (169.254.169.254 / metadata.google.internal), RFC1918 ranges, loopback, or
-// other internal-only services — and use the scraper as an SSRF proxy. The
+// other internal-only services - and use the scraper as an SSRF proxy. The
 // extracted-email response also gives a partial read-back channel.
 //
 // Defense: only ever connect to a host that resolves exclusively to public,
@@ -98,7 +98,7 @@ function isPrivateIp(ip: string): boolean {
     if (v === '::1' || v === '::') return true; // loopback / unspecified
     if (v.startsWith('fe80')) return true; // link-local
     if (v.startsWith('fc') || v.startsWith('fd')) return true; // unique-local fc00::/7
-    // IPv4-mapped (::ffff:a.b.c.d) — validate the embedded v4.
+    // IPv4-mapped (::ffff:a.b.c.d) - validate the embedded v4.
     const mapped = v.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
     if (mapped) return isPrivateIp(mapped[1]);
     return false;
@@ -147,7 +147,7 @@ export async function fetchPageText(url: string): Promise<string | null> {
       } catch {
         return null;
       }
-      // Only fetch over HTTP(S) — blocks file:, gopher:, ftp:, data:, etc.
+      // Only fetch over HTTP(S) - blocks file:, gopher:, ftp:, data:, etc.
       if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
 
       const pinnedIp = await resolvePublicHost(parsed.hostname);

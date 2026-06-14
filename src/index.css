@@ -93,10 +93,10 @@
   --font-mono: ui-monospace, 'JetBrains Mono', 'Berkeley Mono', SFMono-Regular, Menlo, monospace;
   --font-sans: var(--font-body);
 
-  /* type scale — denser, ~1.2 ratio anchored at 14px base */
+  /* type scale - denser, ~1.2 ratio anchored at 14px base */
   --text-xs:   0.6875rem;  /* 11 */
   --text-sm:   0.8125rem;  /* 13 */
-  --text-base: 0.875rem;   /* 14 — product UI default */
+  --text-base: 0.875rem;   /* 14 - product UI default */
   --text-md:   0.9375rem;  /* 15 */
   --text-lg:   1.0625rem;  /* 17 */
   --text-xl:   1.25rem;    /* 20 */
@@ -851,7 +851,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
   text-decoration: none;
 }
 
-/* Mission detail — overview & AI placeholder */
+/* Mission detail - overview & AI placeholder */
 .mission-overview-card {
   padding: 1.25rem 1.5rem;
   background: var(--surface);
@@ -941,7 +941,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
   z-index: 5;
 }
 
-/* Get to know you — onboarding wizard */
+/* Get to know you - onboarding wizard */
 .get-to-know-you {
   min-height: 100vh;
   display: flex;
@@ -1869,7 +1869,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
 
 .me-workshop { display: flex; flex-direction: column; gap: var(--space-3); }
 
-/* Context tab — shared facts editor */
+/* Context tab - shared facts editor */
 .me-facts { display: flex; flex-direction: column; gap: var(--space-3); }
 .me-facts-add { display: flex; gap: 6px; }
 .me-facts-add .pw-input { flex: 1; }
@@ -3078,7 +3078,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
 }
 
 /* ============================================================
- * Landing page — .ldg-* design system
+ * Landing page - .ldg-* design system
  * ============================================================ */
 .ldg-page {
   min-height: 100vh;
@@ -3313,6 +3313,14 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
 @keyframes ldgFadeUp {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
+}
+/* Voice-profile equalizer bars on the landing voice-calibration mock */
+@keyframes voicePulse {
+  0%, 100% { transform: scaleY(0.45); opacity: 0.5; }
+  50%      { transform: scaleY(1); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [style*='voicePulse'] { animation: none !important; }
 }
 .ldg-visual-row {
   display: flex;
@@ -3614,7 +3622,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
 }
 
 /* ============================================================
- * Auth pages — two-panel
+ * Auth pages - two-panel
  * ============================================================ */
 .auth-shell {
   min-height: 100vh;
@@ -3802,7 +3810,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
 .auth-info strong { color: var(--accent-hover); }
 
 /* ============================================================
- * App sidebar — logo block
+ * App sidebar - logo block
  * ============================================================ */
 .app-sidebar-brand {
   padding: 0.5rem 0.75rem 1.25rem;
@@ -3945,7 +3953,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
 }
 
 /* ============================================================
-   Dashboard redesign (flow.md §4) — first-run launchpad + active
+   Dashboard redesign (flow.md §4) - first-run launchpad + active
    ============================================================ */
 
 /* First-run launchpad */
@@ -4066,7 +4074,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
 @keyframes skeleton-shimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
 
 /* ============================================================
-   Mission Run (flow.md §7) — live pipeline progress
+   Mission Run (flow.md §7) - live pipeline progress
    ============================================================ */
 .run-view { max-width: 760px; margin: 0 auto; }
 
@@ -4084,8 +4092,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
   width: 52px; height: 52px; margin: 0 auto 1rem;
   display: grid; place-items: center;
   border-radius: 50%;
-  background: var(--accent-soft); color: var(--accent);
-  font-size: 1.4rem;
+  background: var(--accent);
 }
 .run-ready-body { color: var(--text-muted); line-height: 1.55; margin: 0.5rem 0 1rem; }
 .run-ready-fineprint { font-size: 0.8125rem; color: var(--text-subtle); margin: 0 0 1.5rem; }
@@ -4206,7 +4213,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
 .run-summary-stat { font-size: 1.0625rem; color: var(--text-muted); }
 .run-summary-stat strong { color: var(--text); font-size: 1.25rem; }
 
-/* Inbox: inline reply editor (flow.md §9 — send reply inline) */
+/* Inbox: inline reply editor (flow.md §9 - send reply inline) */
 .reply-subject-input,
 .reply-body-input {
   width: 100%;
@@ -4229,7 +4236,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
 .sequence-edit-actions { display: flex; align-items: center; gap: 0.75rem; margin-top: 0.25rem; }
 
 /* ============================================================
-   REHAUL LAYER v2 (2026-06) — Linear/Notion register.
+   REHAUL LAYER v2 (2026-06) - Linear/Notion register.
    Graphite + cool gray surfaces, sharp rectangles, hairline borders.
    Green is a *sparing* accent only. Appended last so it wins on
    equal specificity. Source of truth: DESIGN.md
@@ -4719,7 +4726,7 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
 
 
 /* ============================================================
-   LANDING REHAUL v2 (2026-06) — strip emojis, glass, gradient
+   LANDING REHAUL v2 (2026-06) - strip emojis, glass, gradient
    text, identical card grids. Hold Fraunces on hero only. Bring
    to cool graphite palette. Appended last so it wins specificity.
    ============================================================ */
@@ -4858,7 +4865,7 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
 .ldg-grad-text { background: none !important; -webkit-background-clip: initial !important; background-clip: initial !important; -webkit-text-fill-color: initial !important; color: var(--accent) !important; font-style: italic; }
 
 /* ============================================================
-   LANDING REHAUL v3 (2026-06) — editorial confidence pass.
+   LANDING REHAUL v3 (2026-06) - editorial confidence pass.
    Bigger hero, dot-grid texture, runtime trace, email specimen,
    pipeline arrows, marginalia numerals, committed-green CTA.
    ============================================================ */
@@ -5142,7 +5149,7 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
 }
 
 /* ============================================================
-   LANDING REHAUL v4 (2026-06) — DRENCHED hero + mountain scene.
+   LANDING REHAUL v4 (2026-06) - DRENCHED hero + mountain scene.
    The page now opens in deep forest green with a layered ridge
    range behind cream text. Committed/drenched color strategy
    (brand register). Bookended by the green CTA band at the foot.
@@ -5234,7 +5241,7 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
 }
 
 /* ============================================================
-   LANDING REHAUL v5 (2026-06) — carry the mountain motif through.
+   LANDING REHAUL v5 (2026-06) - carry the mountain motif through.
    Pipeline becomes a dark-green intermission band (a mid-page
    peak echoing the hero); topographic contour texture sits behind
    the dark band and faintly behind the soft sections. Page now
@@ -5282,7 +5289,7 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
 .ldg-band-dark .ldg-pipeline-step:hover .ldg-pipeline-arrow { color: oklch(0.86 0.10 150); }
 
 /* ============================================================
-   LANDING REHAUL v6 (2026-06) — de-block. Band boundaries become
+   LANDING REHAUL v6 (2026-06) - de-block. Band boundaries become
    ridgelines (the same terrain language as the hero), not hard
    horizontal cuts. Containers soften. The page reads as one
    continuous landscape, light valleys and dark ranges.
@@ -5330,7 +5337,7 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
 .ldg-cta-ridge { z-index: 0; }
 
 /* ============================================================
-   LANDING REHAUL v7 (2026-06) — Cluely simplicity. Keep the
+   LANDING REHAUL v7 (2026-06) - Cluely simplicity. Keep the
    mountain hero; make everything below it airy, big, and bold.
    Far more whitespace, larger headlines, rounder buttons,
    fewer sections (Trace + Features removed in markup).
@@ -5392,7 +5399,7 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
 }
 
 /* ============================================================
-   LANDING v8 — Cluely-style clone, OutreachOS green.
+   LANDING v8 - Cluely-style clone, OutreachOS green.
    Light, airy, big bold sans, product mockups in browser frames,
    alternating feature sections, FAQ, green CTA. Fresh cl- names
    so none of the older .ldg- cascade applies.
@@ -5647,7 +5654,7 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
 .cl-footer-bottom { max-width: 1160px; margin: 0 auto; padding: var(--space-4) var(--space-6) var(--space-7); display: flex; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); font-size: var(--text-xs); color: var(--fg-faint); border-top: 1px solid var(--border-soft); }
 
 /* ============================================================
-   LANDING v9 — bring the mountains back, Cluely-style hero.
+   LANDING v9 - bring the mountains back, Cluely-style hero.
    Full-bleed light mountain scene, big serif headline over the
    sky, sky-toned buttons. The rest of the green-Cluely page
    (features, how, modes, FAQ, CTA) is unchanged below.
@@ -5732,7 +5739,7 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
 .cl-nav.cl-scrolled { position: fixed; }
 
 /* ============================================================
-   LANDING v10 — motion. Hero entrance, scroll-reveal, mountain
+   LANDING v10 - motion. Hero entrance, scroll-reveal, mountain
    scene life, hover lifts. Opacity + transform only (no layout
    animation), ease-out, all gated by reduced-motion.
    ============================================================ */
@@ -5822,12 +5829,12 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
 .legal-foot a:hover { color: var(--fg); }
 
 /* ============================================================
-   Guided wizard (.pw-*) — the conversational persona + mission
+   Guided wizard (.pw-*) - the conversational persona + mission
    onboarding flow. One question per screen, big friendly type,
    progressive disclosure, a single overview at the end.
    Shared by PersonaWizard and the mission creation flow.
 
-   NOTE: this app is forced-dark and mixes two token systems — some
+   NOTE: this app is forced-dark and mixes two token systems - some
    tokens (--border, --accent, --primary, --ring) are bare shadcn HSL
    triplets (need hsl()) and some *-soft/-softer tokens kept light
    values. To stay correct in dark we route every color through a
@@ -6487,7 +6494,7 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
 .me-voice-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(248px, 1fr)); gap: var(--space-4); }
 
 /* Each grid cell is the wrapper; it stretches to the row's height so the card
-   button inside fills it — keeps every card in a row the same height. */
+   button inside fills it - keeps every card in a row the same height. */
 .me-voice-card-wrap { position: relative; display: flex; min-width: 0; }
 .me-personalization .me-voice-card {
   flex: 1;
@@ -6538,7 +6545,7 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
 }
 .me-voice-tag.is-ready { color: var(--w-green); background: var(--w-green-bg); border-color: var(--w-green-line); }
 
-/* Delete-voice control — sits in the card's top-right, revealed on hover/focus. */
+/* Delete-voice control - sits in the card's top-right, revealed on hover/focus. */
 .me-voice-del {
   position: absolute;
   top: 12px;
@@ -6701,7 +6708,7 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
 }
 
 /* Landing agent-flow: a signal beam that travels the connectors between nodes.
-   Thin, single-accent, matte — reads as a moving signal, not a color wash. */
+   Thin, single-accent, matte - reads as a moving signal, not a color wash. */
 @keyframes af-beam-x {
   0%   { transform: translateX(-130%); }
   100% { transform: translateX(430%); }

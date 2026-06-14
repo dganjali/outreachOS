@@ -11,7 +11,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
     return <Navigate to="/sign-in" state={{ from: location }} replace />;
   }
 
-  // Signed in but email not yet confirmed — hold at the verification gate
+  // Signed in but email not yet confirmed - hold at the verification gate
   // rather than letting them into onboarding / the app.
   if (!emailVerified) {
     return <Navigate to="/check-email" replace />;

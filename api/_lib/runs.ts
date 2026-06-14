@@ -39,7 +39,7 @@ export async function checkRateLimit(scope: UserScope, res: Response): Promise<b
     res.status(429).json({
       error: 'rate_limit_exceeded',
       scope: 'minute',
-      detail: 'Too many requests — wait a minute and retry.',
+      detail: 'Too many requests - wait a minute and retry.',
     });
     return false;
   }
@@ -102,7 +102,7 @@ export async function checkMissionQuota(scope: UserScope, res: Response): Promis
 export async function incrementMissionQuota(scope: UserScope): Promise<void> {
   const profiles = scope.collection<ProfileDoc>('profiles');
   const profile = await profiles.findOne({});
-  if (!profile) return; // no profile (legacy/edge) — nothing to stamp against
+  if (!profile) return; // no profile (legacy/edge) - nothing to stamp against
   const period = currentMonthKey();
   const q = profile.missionQuota;
   const used = q && q.period === period ? q.used + 1 : 1;

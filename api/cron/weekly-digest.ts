@@ -40,7 +40,7 @@ export default async function handler(req: Request, res: Response) {
           .countDocuments({ status: 'queued', scheduledSendAt: { $gt: now, $lte: weekAhead } }),
       ]);
 
-      // Nothing happened and nothing's coming up — don't send a noise email.
+      // Nothing happened and nothing's coming up - don't send a noise email.
       if (sentThisWeek === 0 && repliesThisWeek === 0 && draftsPending === 0 && dueNext7 === 0) {
         skipped++;
         continue;
@@ -67,7 +67,7 @@ export default async function handler(req: Request, res: Response) {
         draftsPending > 0 ? `Review your drafts: https://outreachos-495414.web.app/missions` : '',
         repliesThisWeek > 0 ? `Handle replies: https://outreachos-495414.web.app/inbox` : '',
         '',
-        `— OutreachOS`,
+        `- OutreachOS`,
       ]
         .filter((l) => l !== '')
         .join('\n');

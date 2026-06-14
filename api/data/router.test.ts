@@ -1,10 +1,10 @@
 // Unit tests for the NoSQL operator-injection hardening on the generic query
-// endpoint — SHIPMENT_AUDIT.md finding S1. Run with: npm test
+// endpoint - SHIPMENT_AUDIT.md finding S1. Run with: npm test
 //
 // These exercise the security-critical core (sanitizeFilter) directly. The
 // /query route maps a thrown InvalidFilterError to HTTP 400 { error:
 // 'invalid_filter' }, and forUser(uid).find() ANDs the authenticated userId on
-// top of the sanitized filter — so a client userId is dropped here, then
+// top of the sanitized filter - so a client userId is dropped here, then
 // overridden there.
 
 import { test } from 'node:test';
@@ -46,7 +46,7 @@ test('(c) a client-supplied userId is stripped; the authed uid wins', () => {
   assert.deepEqual(sanitized, { missionId: 'm_1' });
 
   // The route then runs forUser(authedUid).find(sanitized), which ANDs the
-  // authenticated userId on top — so the effective query is always scoped to
+  // authenticated userId on top - so the effective query is always scoped to
   // the caller regardless of what they sent.
   const authedUid = 'real-uid';
   const effective = { ...sanitized, userId: authedUid };

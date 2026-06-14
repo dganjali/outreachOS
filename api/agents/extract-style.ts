@@ -1,9 +1,9 @@
-// Extract-style agent — turns calibration signal into StyleProfile updates.
+// Extract-style agent - turns calibration signal into StyleProfile updates.
 //
 // Consumes any of: chat instructions (Stage-4 "make it less formal"), edit-deltas
 // (original AI draft vs the human-edited final), and a confirmed gold exemplar.
 // An LLM proposes a CONSERVATIVE delta; the confidence-weighted merge
-// (style-merge.ts) decides how much to believe — a single noisy sample never
+// (style-merge.ts) decides how much to believe - a single noisy sample never
 // overwrites a high-confidence dimension. Each commit bumps the persona's
 // styleProfileVersion and snapshots a PersonaVersionDoc (audit + rollback).
 

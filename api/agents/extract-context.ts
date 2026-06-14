@@ -1,9 +1,9 @@
-// extract-context agent — context-dump / file-dump smart fill for
+// extract-context agent - context-dump / file-dump smart fill for
 // "What makes you worth a reply?" (SubstanceStep).
 //
 // Accepts either:
-//   • text  — a pasted blob (bio, LinkedIn copy-paste, etc.)
-//   • asset_id — a previously uploaded profile asset (PDF, DOCX, TXT, MD, RTF)
+//   • text  - a pasted blob (bio, LinkedIn copy-paste, etc.)
+//   • asset_id - a previously uploaded profile asset (PDF, DOCX, TXT, MD, RTF)
 // Exactly one of the two must be supplied.
 //
 // Extracted facts are persisted PERSON-LEVEL so they survive across every voice
@@ -23,7 +23,7 @@ import type { ContextFactDoc, ProfileAssetDoc } from '../../shared/schemas';
 const MAX_TEXT_CHARS = 30_000;
 
 // ---------------------------------------------------------------------------
-// Gemini flat schema — no recursion, no $ref, no allOf.
+// Gemini flat schema - no recursion, no $ref, no allOf.
 // ---------------------------------------------------------------------------
 const FACTS_SCHEMA = {
   type: 'object',
@@ -119,7 +119,7 @@ export default async function handler(req: Request, res: Response) {
     }
 
     // ---- 2. Extract facts via LLM -------------------------------------------
-    const userPrompt = `CONTEXT DUMP:\n\n${rawText}\n\nExtract up to 25 atomic proof facts. JSON only.`;
+    const userPrompt = `CONTEXT DUMP:\n\n${rawText}\n\nExtract up to 25 atomic facts. Cover BOTH who the sender is AND what they offer (deliverables, benefits, tiers, audience) - if this is a sponsorship/partnership/offering document, the benefits and audience facts are the most important. JSON only.`;
 
     const r = await generateJson<FactsOut>({
       model: MODEL(),
@@ -152,7 +152,7 @@ export default async function handler(req: Request, res: Response) {
       try {
         embedding = await embedOne(f.claim, 'document');
       } catch {
-        // Best-effort — skip on failure; facts are still useful without vectors.
+        // Best-effort - skip on failure; facts are still useful without vectors.
       }
 
       const doc: InsertDoc<ContextFactDoc> = {

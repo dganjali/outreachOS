@@ -1,4 +1,4 @@
-// Eval harness — runs the real engine over the fixtures and scores the output,
+// Eval harness - runs the real engine over the fixtures and scores the output,
 // so "is it slop?" is measured, not vibed. Emits a scorecard JSON and diffs the
 // aggregate against the committed baseline to catch regressions when prompts or
 // the pipeline change.
@@ -6,7 +6,7 @@
 // Run with:  npm run eval                    (score + diff vs baseline)
 //            npm run eval -- --update-baseline   (write current as the new baseline)
 //
-// Requires live Vertex (Gemini) creds — the engine makes real generate/critique
+// Requires live Vertex (Gemini) creds - the engine makes real generate/critique
 // calls. Without creds it fails fast with guidance.
 
 /* eslint-disable no-console */

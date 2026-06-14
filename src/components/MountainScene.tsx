@@ -83,7 +83,7 @@ export function MountainScene({ className }: { className?: string }) {
         <ellipse cx="1080" cy="560" rx="560" ry="44" fill="oklch(0.86 0.04 150)" opacity="0.09" filter="url(#ms-mist)" />
       </g>
 
-      {/* ridge 5 — farthest */}
+      {/* ridge 5 - farthest */}
       <path
         d="M0,420 L180,360 L340,402 L520,300 L720,382 L900,318 L1120,392 L1320,338 L1440,402 L1440,900 L0,900 Z"
         fill="oklch(0.33 0.045 162)"
@@ -105,7 +105,7 @@ export function MountainScene({ className }: { className?: string }) {
         d="M0,690 L200,640 L420,702 L640,608 L880,690 L1100,640 L1340,702 L1440,680 L1440,900 L0,900 Z"
         fill="oklch(0.205 0.058 158)"
       />
-      {/* ridge 1 — front, darkest */}
+      {/* ridge 1 - front, darkest */}
       <path
         d="M0,782 L240,740 L480,800 L720,718 L960,792 L1200,742 L1440,790 L1440,900 L0,900 Z"
         fill="oklch(0.155 0.052 159)"

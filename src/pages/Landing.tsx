@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, Target, FileText, Inbox as InboxIcon, Check, ArrowUpRight } from 'lucide-react';
+import { ArrowRight, Target, FileText, Inbox as InboxIcon, Check, ArrowUpRight, AudioLines, MessagesSquare, Repeat } from 'lucide-react';
 import { Logo } from '../components/Logo';
-import { BrowserFrame, HeroAppMock, PipelineMock, DraftMock, InboxMock } from '../components/AppMockups';
+import { BrowserFrame, HeroAppMock, PipelineMock, DraftMock, InboxMock, VoiceCalibrationMock } from '../components/AppMockups';
 import { GenerativeMountains } from '../components/GenerativeMountains';
 import { AgentFlow } from '../components/AgentFlow';
 import { Button } from '@/components/ui/button';
@@ -19,13 +19,17 @@ import { PLANS, PLAN_ORDER } from '../../shared/plans';
 const REPLACES = ['Apollo', 'LinkedIn', 'ChatGPT', 'Spreadsheets', 'Gmail'];
 
 const HOW = [
-  { step: '01', title: 'Tell us the mission', body: 'Pick a mode, say what you are sending and who you want to reach, and set a voice from your own facts and tone — what you enter is what the agent cites.' },
+  { step: '01', title: 'Tell us the mission', body: 'Pick a mode, say what you are sending and who you want to reach, and set a voice from your own facts and tone. What you enter is what the agent cites.' },
   { step: '02', title: 'Agents do the legwork', body: 'Targeting, evidence, contacts, and sequence agents run in one click. They research the web for the right companies and people, then verify the details.' },
   { step: '03', title: 'Review, send, follow up', body: 'Approve drafts in your voice and send via Gmail. Follow-ups go out on their cadence and stop the moment you mark a contact as replied.' },
 ];
 
 const MODES = [
-  { title: 'Sponsorship', blurb: 'Get devtools, brands, and platforms to sponsor your event or community.' },
+  {
+    title: 'Sponsorship',
+    blurb: 'Get devtools, brands, and platforms to sponsor your event or community.',
+    examples: ['DevTools', 'Cloud platforms', 'API companies', 'Dev communities', 'Open-source brands'],
+  },
   { title: 'BD / Partnerships', blurb: 'Land integration, co-marketing, and channel deals that move the needle.' },
   { title: 'Internship / Job', blurb: 'Reach hiring managers with proof of fit, not another generic ask.' },
   { title: 'Recruiting', blurb: 'Source senior candidates with messages tied to their actual work.' },
@@ -37,7 +41,7 @@ const FEATURES = [
     eyebrow: 'Targeting',
     icon: Target,
     title: 'The right companies, ranked by why-now.',
-    body: 'The targeting agent finds high-fit companies and scores each on a real reason to reach out now — a funding round, a launch, a hiring signal. No scraping, no guessing.',
+    body: 'The targeting agent finds high-fit companies and scores each on a real reason to reach out now: a funding round, a launch, a hiring signal. No scraping, no guessing.',
     bullets: ['Web research, ranked by fit and recency', 'Verified emails and the actual decision-maker', 'Evidence sourced per company, with citations'],
     url: 'app.outreachos.com/missions',
     mock: <PipelineMock />,
@@ -46,7 +50,7 @@ const FEATURES = [
     eyebrow: 'Drafts',
     icon: FileText,
     title: 'Personalization with receipts.',
-    body: 'Every line is anchored to a sourced bullet, so personalization is not a Mad Lib — the model cannot flatter what it has not read. You review, tweak, and send in your voice.',
+    body: 'Every line is anchored to a sourced bullet, so personalization is not a Mad Lib. The model cannot flatter what it has not read. You review, tweak, and send in your voice.',
     bullets: ['Each claim tied to a citation', 'Written in your tone, from your profile', 'A 3-touch sequence, ready to send'],
     url: 'app.outreachos.com/draft',
     mock: <DraftMock />,
@@ -62,10 +66,16 @@ const FEATURES = [
   },
 ];
 
+const VOICE_POINTS = [
+  { icon: MessagesSquare, title: 'Plain-English edits', body: 'No settings, no sliders. Say what feels off and the agent does the rest.' },
+  { icon: AudioLines, title: 'Learns the rule, not the line', body: 'It captures the pattern behind your fix — tone, length, what to cut — as a reusable voice.' },
+  { icon: Repeat, title: 'Carries everywhere', body: 'Your voice threads through every future draft, sequence, and follow-up automatically.' },
+];
+
 const FAQ = [
   { q: 'Do I need a data-provider subscription?', a: 'No. The agents research the open web to find high-fit companies and the right decision-makers, then verify contact details. Just connect Gmail and go.' },
   { q: 'How does it send email?', a: 'Through your own Gmail with send-only access. OutreachOS can send the emails you approve, and it can never read your inbox.' },
-  { q: 'Is it autonomous, or do I stay in control?', a: 'Initial emails always wait for your approval. After you send, follow-ups go out on cadence and stop the moment a contact replies — with a suppression list as a backstop.' },
+  { q: 'Is it autonomous, or do I stay in control?', a: 'Initial emails always wait for your approval. After you send, follow-ups go out on cadence and stop the moment a contact replies, with a suppression list as a backstop.' },
   { q: 'What does it run on?', a: 'Google Gemini powers the agents. Your data lives in your account; emails send from your Gmail.' },
 ];
 
@@ -142,7 +152,7 @@ export function Landing() {
 
   return (
     <div className="relative min-h-dvh bg-background text-foreground [overflow-x:clip]">
-      {/* Smooth matte color ground — soft, low-opacity green/slate fog so the page
+      {/* Smooth matte color ground - soft, low-opacity green/slate fog so the page
           reads as tinted material rather than flat black. Fixed, behind content. */}
       <div aria-hidden className="bg-matte-ambient pointer-events-none fixed inset-0 -z-10" />
 
@@ -159,6 +169,7 @@ export function Landing() {
             <a href="#features" className="transition-colors hover:text-foreground">Features</a>
             <a href="#how" className="transition-colors hover:text-foreground">How it works</a>
             <a href="#agents" className="transition-colors hover:text-foreground">Agents</a>
+            <a href="#voice" className="transition-colors hover:text-foreground">Voice</a>
             <a href="#modes" className="transition-colors hover:text-foreground">Modes</a>
             <a href="#pricing" className="transition-colors hover:text-foreground">Pricing</a>
             <a href="#faq" className="transition-colors hover:text-foreground">FAQ</a>
@@ -201,14 +212,14 @@ export function Landing() {
 
           <div className="mx-auto max-w-3xl text-center">
             <Reveal as="div" delay={0}>
-              <h1 className="text-balance font-display font-semibold leading-[1.03] tracking-[-0.035em] text-foreground text-[clamp(2.6rem,6.2vw,4.75rem)]">
-                Outreach that runs itself — and still sounds like you.
+              <h1 className="text-balance font-display font-semibold leading-[1.03] tracking-[-0.035em] text-foreground text-[clamp(2.4rem,5.4vw,4rem)]">
+                Outreach that runs itself. And still sounds like you.
               </h1>
             </Reveal>
             <Reveal as="div" delay={90}>
               <p className="mx-auto mt-6 max-w-xl text-pretty text-lg leading-relaxed text-muted-foreground">
-                Fully automated end to end — and still unmistakably you. Every company researched, every
-                line sourced, every email in your voice. Not the generic AI slop everyone else sends.
+                Every company researched, every line sourced, every email in your voice, not the generic
+                AI slop everyone else sends.
               </p>
             </Reveal>
             <Reveal as="div" delay={180} className="mt-9 flex flex-wrap items-center justify-center gap-3">
@@ -228,7 +239,7 @@ export function Landing() {
             </Reveal>
           </div>
 
-          {/* hero product shot — matte frame, single soft shadow, no gradient ring or glow */}
+          {/* hero product shot - matte frame, single soft shadow, no gradient ring or glow */}
           <Reveal as="div" delay={340} className="relative mx-auto mt-12 max-w-5xl md:mt-14">
             <BrowserFrame url="app.outreachos.com/missions" bodyClassName="p-0">
               <HeroAppMock />
@@ -255,7 +266,7 @@ export function Landing() {
           </div>
         </section>
 
-        {/* How it works — the simple 3-step loop, before the deep feature dives */}
+        {/* How it works - the simple 3-step loop, before the deep feature dives */}
         <section id="how">
           <div className="mx-auto max-w-6xl px-5 py-20 md:px-8 md:py-24">
             <Reveal>
@@ -276,13 +287,13 @@ export function Landing() {
           </div>
         </section>
 
-        {/* Agents — illustrative animated pipeline, bridging the 3 steps and the deep dives */}
+        {/* Agents - illustrative animated pipeline, bridging the 3 steps and the deep dives */}
         <section id="agents" className="section-tint border-t border-border/70">
           <div className="mx-auto max-w-6xl px-5 py-16 md:px-8 md:py-20">
             <Reveal>
               <SectionHead
                 title="Four agents. One click."
-                sub="Targeting, evidence, contacts, and sequence run as a single pipeline — each handing off to the next, every claim sourced along the way."
+                sub="Targeting, evidence, contacts, and sequence run as a single pipeline, each handing off to the next, every claim sourced along the way."
               />
             </Reveal>
             <Reveal delay={80}>
@@ -291,13 +302,13 @@ export function Landing() {
           </div>
         </section>
 
-        {/* Features — the deep dives behind each step */}
+        {/* Features - the deep dives behind each step */}
         <section id="features" className="border-t border-border/70">
           <div className="mx-auto max-w-6xl px-5 py-20 md:px-8 md:py-24">
             <Reveal>
               <SectionHead
                 title="Inside the pipeline."
-                sub="Automated at every step, sourced at every step — so it moves on its own without ever sending slop in your name."
+                sub="Automated at every step, sourced at every step, so it moves on its own without ever sending slop in your name."
               />
             </Reveal>
             <div className="flex flex-col gap-16 md:gap-20">
@@ -329,6 +340,46 @@ export function Landing() {
                 </Reveal>
               ))}
             </div>
+          </div>
+        </section>
+
+        {/* Voice calibration - the marquee demo: correct a draft, it learns your voice */}
+        <section id="voice" className="section-tint border-t border-border/70">
+          <div className="mx-auto max-w-6xl px-5 py-20 md:px-8 md:py-24">
+            <Reveal>
+              <div className="mb-10 max-w-2xl">
+                <span className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                  <AudioLines className="h-4 w-4 text-primary" /> Voice calibration
+                </span>
+                <h2 className="mt-4 text-balance font-display text-3xl font-semibold tracking-[-0.02em] text-foreground md:text-[2.5rem] md:leading-[1.08]">
+                  Fix one draft. It sounds like you on every draft after.
+                </h2>
+                <p className="mt-4 max-w-xl text-base leading-relaxed text-muted-foreground">
+                  Tell the agent what's off in plain English. It learns the rule behind your edit, not just the line, and
+                  threads that voice from targeting through every draft and follow-up. Watch it live.
+                </p>
+              </div>
+            </Reveal>
+            <Reveal delay={80}>
+              <BrowserFrame url="app.outreachos.com/draft" bodyClassName="p-0">
+                <VoiceCalibrationMock />
+              </BrowserFrame>
+            </Reveal>
+            <Reveal delay={140}>
+              <div className="mt-6 grid gap-3 sm:grid-cols-3">
+                {VOICE_POINTS.map((p) => (
+                  <div key={p.title} className="flex items-start gap-3 rounded-xl border border-border bg-card p-5">
+                    <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-primary/30 bg-primary/10 text-primary">
+                      <p.icon className="h-4 w-4" />
+                    </span>
+                    <div>
+                      <h3 className="text-sm font-semibold text-foreground">{p.title}</h3>
+                      <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{p.body}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Reveal>
           </div>
         </section>
 
@@ -483,6 +534,7 @@ export function Landing() {
               <h4 className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground/70">Product</h4>
               <a href="#features" className="text-muted-foreground transition-colors hover:text-foreground">Features</a>
               <a href="#how" className="text-muted-foreground transition-colors hover:text-foreground">How it works</a>
+              <a href="#voice" className="text-muted-foreground transition-colors hover:text-foreground">Voice</a>
               <a href="#modes" className="text-muted-foreground transition-colors hover:text-foreground">Modes</a>
               <a href="#pricing" className="text-muted-foreground transition-colors hover:text-foreground">Pricing</a>
               <a href="#faq" className="text-muted-foreground transition-colors hover:text-foreground">FAQ</a>

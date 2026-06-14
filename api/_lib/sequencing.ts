@@ -65,7 +65,7 @@ export async function scheduleFollowups(args: {
       await sent.insertOne(row as InsertDoc<SentMessageDoc>);
       scheduled++;
     } catch {
-      // unique (sequenceId, touchIndex) collision — already scheduled.
+      // unique (sequenceId, touchIndex) collision - already scheduled.
     }
   }
   return scheduled;
@@ -137,6 +137,6 @@ export async function addSuppression(
       note,
     } as InsertDoc<SuppressionDoc>);
   } catch {
-    // unique (userId, email) — already suppressed.
+    // unique (userId, email) - already suppressed.
   }
 }

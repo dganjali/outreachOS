@@ -1,7 +1,7 @@
 // Firebase Auth replacement for the old Supabase auth context.
 // API surface preserved: { session, user, profile, loading, signOut, refreshProfile }
 // so pages don't all need to change. The exposed `user` object mimics
-// Supabase's user shape — it has `id` and `email` (mapped from Firebase's
+// Supabase's user shape - it has `id` and `email` (mapped from Firebase's
 // `uid`/`email`), and the underlying Firebase user is kept as `firebaseUser`
 // for anything that needs the SDK directly.
 
@@ -92,7 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setFirebaseUser(u ?? null);
       setEmailVerified(u?.emailVerified ?? false);
       // Re-raise `loading` while we (re)fetch the profile. This callback also
-      // fires on sign-in and on hourly token refresh — moments when `loading`
+      // fires on sign-in and on hourly token refresh - moments when `loading`
       // is already false. Without re-raising it there's a render where session
       // is truthy but profile is still null/stale, and the route gates read
       // that as "not onboarded" and flash /onboarding before the fetch lands.

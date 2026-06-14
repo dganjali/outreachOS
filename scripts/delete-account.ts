@@ -1,7 +1,7 @@
 // One-off admin tool: HARD-DELETE a user account and ALL of its data.
 //
 // Usage:
-//   Dry run (default — prints what WOULD be deleted, changes nothing):
+//   Dry run (default - prints what WOULD be deleted, changes nothing):
 //     npx tsx --env-file=.env scripts/delete-account.ts <email>
 //   Execute the deletion (irreversible):
 //     npx tsx --env-file=.env scripts/delete-account.ts <email> --confirm
@@ -12,7 +12,7 @@
 //   3. the Firebase auth user itself.
 //
 // userId is denormalized on every doc (BaseDoc), so a flat deleteMany per
-// collection is exhaustive — no transitive (mission/target) walks needed.
+// collection is exhaustive - no transitive (mission/target) walks needed.
 
 import { MongoClient } from 'mongodb';
 import { initializeApp, cert, getApps } from 'firebase-admin/app';

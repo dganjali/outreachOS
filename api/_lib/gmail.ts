@@ -13,8 +13,8 @@ const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1';
 const REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
 
 // gmail.send is the ONLY Gmail scope in Google's "sensitive" tier (no CASA).
-// Everything else that touches the mailbox — readonly, modify, and even
-// compose (it manages draft content) — is "restricted" and triggers a paid
+// Everything else that touches the mailbox - readonly, modify, and even
+// compose (it manages draft content) - is "restricted" and triggers a paid
 // annual security assessment. So we send only; "drafts" are stored in-app and
 // never pushed to the user's Gmail.
 export const GMAIL_SCOPES = [
@@ -165,7 +165,7 @@ export async function getActiveAccessToken(uid: string): Promise<{ accessToken: 
  * Strip CR/LF (and other control chars) from a value destined for an email
  * header. Without this, a newline in `toEmail`/`subject`/etc. (e.g. a
  * client-supplied `to_override`) would let the caller inject arbitrary headers
- * — Bcc, Reply-To — into the message Gmail sends on the user's behalf.
+ * - Bcc, Reply-To - into the message Gmail sends on the user's behalf.
  */
 function sanitizeHeader(s: string): string {
   // Collapse CR, LF, and any other C0/C1 control char to a single space.

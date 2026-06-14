@@ -8,7 +8,7 @@ import { extractText, stripRtf, isLowQualityText } from './file-extract.js';
 // ---------------------------------------------------------------------------
 // Pass-through: TXT and MD
 // ---------------------------------------------------------------------------
-describe('extractText — TXT pass-through', () => {
+describe('extractText - TXT pass-through', () => {
   it('returns UTF-8 string for text/plain MIME', async () => {
     const content = 'Built a 1,400-person developer conference in 2023 with 62% senior engineers.';
     const buf = Buffer.from(content, 'utf8');
@@ -41,7 +41,7 @@ describe('extractText — TXT pass-through', () => {
 // ---------------------------------------------------------------------------
 // RTF strip
 // ---------------------------------------------------------------------------
-describe('extractText — RTF strip', () => {
+describe('extractText - RTF strip', () => {
   it('strips RTF control words and returns readable text', async () => {
     // Minimal RTF with a recognizable fact embedded.
     const rtf = String.raw`{\rtf1\ansi\deff0{\fonttbl{\f0 Times New Roman;}}` +
@@ -79,7 +79,7 @@ describe('stripRtf', () => {
 });
 
 // ---------------------------------------------------------------------------
-// isLowQualityText — the OCR-fallback trigger for PDFs
+// isLowQualityText - the OCR-fallback trigger for PDFs
 // ---------------------------------------------------------------------------
 describe('isLowQualityText', () => {
   it('flags text shorter than the minimum', () => {
@@ -88,13 +88,13 @@ describe('isLowQualityText', () => {
 
   it('accepts a healthy résumé text layer', () => {
     const good =
-      'Alex Chen — Senior Engineer at Acme. Built payments infrastructure for 10 million users. ' +
+      'Alex Chen - Senior Engineer at Acme. Built payments infrastructure for 10 million users. ' +
       'Raised a $4M seed round in 2023. Speaks at QCon and led a team of 8 engineers.';
     assert.equal(isLowQualityText(good), false);
   });
 
   it('flags mojibake from a broken font/CID encoding', () => {
-    // The kind of soup pdf-parse emits for a PDF with no ToUnicode map — long
+    // The kind of soup pdf-parse emits for a PDF with no ToUnicode map - long
     // enough to pass the length check, but almost no readable characters.
     const garbage = '��'.repeat(40);
     assert.equal(isLowQualityText(garbage), true);
@@ -107,9 +107,9 @@ describe('isLowQualityText', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Unsupported type — must throw with code unsupported_file_type
+// Unsupported type - must throw with code unsupported_file_type
 // ---------------------------------------------------------------------------
-describe('extractText — unsupported type', () => {
+describe('extractText - unsupported type', () => {
   it('throws unsupported_file_type for unknown MIME with unknown extension', async () => {
     const buf = Buffer.from('GIF89a...', 'utf8');
     await assert.rejects(
@@ -138,9 +138,9 @@ describe('extractText — unsupported type', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Empty text — must throw with code text_empty
+// Empty text - must throw with code text_empty
 // ---------------------------------------------------------------------------
-describe('extractText — empty text', () => {
+describe('extractText - empty text', () => {
   it('throws text_empty for a .txt file with only whitespace', async () => {
     const buf = Buffer.from('   \n\t  ', 'utf8');
     await assert.rejects(

@@ -2,15 +2,15 @@ import { supabase } from '../supabaseClient';
 import type { ProfileAsset, ProfileAssetKind } from '../types';
 
 const BUCKET = 'profile-assets';
-export const MAX_ASSET_BYTES = 20 * 1024 * 1024; // 20MB — must match server-side cap in parse-resume.ts
+export const MAX_ASSET_BYTES = 20 * 1024 * 1024; // 20MB - must match server-side cap in parse-resume.ts
 
-// Server-side OCR (Gemini inline data) caps the raw file at 14MB — base64
+// Server-side OCR (Gemini inline data) caps the raw file at 14MB - base64
 // inflation (~33%) would otherwise push the request past Vertex's ~20MB limit.
 // So any image larger than this can't be OCR'd as-is. We recompress in the
 // browser before upload to land comfortably under the cap; `OCR_TARGET_BYTES`
 // is the size we aim for (well below 14MB, leaving headroom for base64).
 const OCR_TARGET_BYTES = 9 * 1024 * 1024;
-// Longest edge we keep when recompressing — high enough that OCR text stays
+// Longest edge we keep when recompressing - high enough that OCR text stays
 // crisp, low enough to shrink oversized phone screenshots/photos.
 const MAX_IMAGE_EDGE = 4000;
 
@@ -20,7 +20,7 @@ const ACCEPTED_MIME: Record<ProfileAssetKind, string[]> = {
   case_study: ['application/pdf'],
   screenshot: ['image/png', 'image/jpeg', 'image/webp'],
   // context_dump accepts PDF, DOCX, TXT, MD, RTF. Note: .md and .rtf files
-  // often have an empty file.type — the existing `if (file.type && ...)` guard
+  // often have an empty file.type - the existing `if (file.type && ...)` guard
   // already lets empty types through, so extension-only detection works fine.
   context_dump: [
     'application/pdf',
@@ -31,7 +31,7 @@ const ACCEPTED_MIME: Record<ProfileAssetKind, string[]> = {
     'text/x-markdown',
     'text/rtf',
     'application/rtf',
-    // Images / screenshots — extracted via OCR (Gemini) server-side.
+    // Images / screenshots - extracted via OCR (Gemini) server-side.
     'image/png',
     'image/jpeg',
     'image/webp',
@@ -65,14 +65,14 @@ function safeExtension(name: string, mime: string): string {
  * Recompress an oversized image so server-side OCR (which caps inline data at
  * 14MB) can read it. Returns the original file untouched when it's not a
  * canvas-decodable raster, is already small enough, or can't be decoded (e.g.
- * HEIC, which browsers can't draw — the server then surfaces a clear size error).
+ * HEIC, which browsers can't draw - the server then surfaces a clear size error).
  *
  * Downscales the longest edge to `MAX_IMAGE_EDGE` and re-encodes as JPEG,
  * stepping quality down until the result fits `OCR_TARGET_BYTES`. Text stays
  * legible at these settings; a 15MB PNG screenshot lands around ~1MB.
  */
 async function downscaleImageForOcr(file: File): Promise<File> {
-  // Detect images by MIME *or* extension — screenshots often arrive with an
+  // Detect images by MIME *or* extension - screenshots often arrive with an
   // empty file.type, which a MIME-only check would miss.
   const ext = file.name.slice(file.name.lastIndexOf('.') + 1).toLowerCase();
   const looksLikeImage =
@@ -83,7 +83,7 @@ async function downscaleImageForOcr(file: File): Promise<File> {
   try {
     bitmap = await createImageBitmap(file);
   } catch {
-    return file; // Undecodable (e.g. HEIC) — let the server report the size issue.
+    return file; // Undecodable (e.g. HEIC) - let the server report the size issue.
   }
 
   try {
@@ -104,7 +104,7 @@ async function downscaleImageForOcr(file: File): Promise<File> {
       quality -= 0.1;
       blob = await canvasToBlob(canvas, quality);
     }
-    if (!blob || blob.size >= file.size) return file; // No win — keep original.
+    if (!blob || blob.size >= file.size) return file; // No win - keep original.
 
     const baseName = file.name.replace(/\.[^./\\]+$/, '');
     return new File([blob], `${baseName}.jpg`, { type: 'image/jpeg', lastModified: Date.now() });
@@ -146,7 +146,7 @@ export async function uploadAsset(opts: {
   }
 
   const ext = safeExtension(file.name, file.type);
-  // Path hint — the server will derive the real GCS path from `kind` (in this
+  // Path hint - the server will derive the real GCS path from `kind` (in this
   // hint) and ignore the rest. We read the actual path back from upload().
   const pathHint = `${userId}/${kind}/${randomSegment()}.${ext}`;
   const { data: uploaded, error: upErr } = await supabase.storage.from(BUCKET).upload(pathHint, file, {
@@ -155,7 +155,7 @@ export async function uploadAsset(opts: {
   });
   if (upErr || !uploaded) throw new Error(upErr?.message ?? 'upload_failed');
 
-  // Use the path the server actually stored at — not the client-side hint.
+  // Use the path the server actually stored at - not the client-side hint.
   const storedPath = uploaded.path;
 
   const { data: row, error: insErr } = await supabase
@@ -180,7 +180,7 @@ export async function uploadAsset(opts: {
 
 export async function deleteAsset(asset: ProfileAsset): Promise<void> {
   // Remove storage object first; if the row delete fails, the user can retry.
-  // If the storage delete fails (already gone), continue — the row is the source of truth in the UI.
+  // If the storage delete fails (already gone), continue - the row is the source of truth in the UI.
   await supabase.storage.from(BUCKET).remove([asset.storage_path]).catch(() => undefined);
   const { error } = await supabase.from('profile_assets').delete().eq('id', asset.id);
   if (error) throw new Error(error.message);

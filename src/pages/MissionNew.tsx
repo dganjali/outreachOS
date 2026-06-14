@@ -1,11 +1,11 @@
-// Mission creation — a configure-before-launch wizard.
+// Mission creation - a configure-before-launch wizard.
 //
 // You can no longer spin up a voice and immediately fire a mission. The flow is:
-//   1. Content      — what you're sending and who you want to reach
-//   2. Personalization — pick an existing voice, or build one via the guided
+//   1. Content      - what you're sending and who you want to reach
+//   2. Personalization - pick an existing voice, or build one via the guided
 //                        PersonaWizard (the same flow as ME → Personalization)
-//   3. Review       — see everything, then launch
-// A mission is only created on the final "Launch" — nothing fires half-built.
+//   3. Review       - see everything, then launch
+// A mission is only created on the final "Launch" - nothing fires half-built.
 
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
@@ -36,14 +36,14 @@ export function MissionNew() {
   const [step, setStep] = useState<Step>(1);
   const [dir, setDir] = useState<'forward' | 'back'>('forward');
 
-  // Step 1 — content
+  // Step 1 - content
   const [name, setName] = useState('');
   const [mode, setMode] = useState<MissionMode>('sponsorship');
   const [whatSending, setWhatSending] = useState('');
   const [whoAndWhy, setWhoAndWhy] = useState('');
   const [geo, setGeo] = useState('');
 
-  // Step 2 — personalization
+  // Step 2 - personalization
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [personaId, setPersonaId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -149,7 +149,7 @@ export function MissionNew() {
                   <h2 className="pw-q">What's this mission?</h2>
                   <p className="pw-q-hint">
                     {isWelcome
-                      ? "Tell the agent what you're offering and who you want to reach — it'll find targets, contacts, and draft the emails."
+                      ? "Tell the agent what you're offering and who you want to reach - it'll find targets, contacts, and draft the emails."
                       : "Define what you're sending and who you want to reach. The agent does the rest."}
                   </p>
                 </div>
@@ -217,7 +217,7 @@ export function MissionNew() {
                     className="pw-input"
                     value={geo}
                     onChange={(e) => setGeo(e.target.value)}
-                    placeholder="e.g. 'Toronto, Canada' — scopes contacts to a region"
+                    placeholder="e.g. 'Toronto, Canada' - scopes contacts to a region"
                   />
                 </label>
               </div>
@@ -272,7 +272,7 @@ export function MissionNew() {
               <div className="pw-step pw-overview">
                 <div className="pw-q-block">
                   <h2 className="pw-q">Ready to launch.</h2>
-                  <p className="pw-q-hint">Quick check — edit anything before the agent starts.</p>
+                  <p className="pw-q-hint">Quick check - edit anything before the agent starts.</p>
                 </div>
 
                 <section className="pw-ov-row">

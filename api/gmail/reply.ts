@@ -51,7 +51,7 @@ export default async function handler(req: Request, res: Response) {
       inReplyTo: reply.gmailMessageId ? `<${reply.gmailMessageId}>` : undefined,
     });
 
-    // Replying resolves the thread — mark it handled.
+    // Replying resolves the thread - mark it handled.
     await scope.collection<ReplyDoc>('replies').updateById(reply_id, { handled: true });
 
     return res.status(200).json({

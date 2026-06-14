@@ -1,4 +1,4 @@
-// Refine agent — the Stage-4 (and runtime) canvas chat editor.
+// Refine agent - the Stage-4 (and runtime) canvas chat editor.
 //
 // Two modes:
 //   - span:       rewrite ONLY the highlighted span per the instruction, leave
@@ -62,7 +62,7 @@ export default async function handler(req: Request, res: Response) {
   const system =
     mode === 'span'
       ? `You edit one cold outreach email. Rewrite ONLY the highlighted span to satisfy the instruction; reproduce the rest of the body EXACTLY as given (no other changes). Preserve the sender's voice. Output the FULL updated subject + body as JSON.`
-      : `You rewrite one cold outreach email to satisfy the instruction while preserving the sender's voice and any factual claims. Keep it tight and grounded — do not invent facts. Output the updated subject + body as JSON.`;
+      : `You rewrite one cold outreach email to satisfy the instruction while preserving the sender's voice and any factual claims. Keep it tight and grounded - do not invent facts. Output the updated subject + body as JSON.`;
 
   const userPrompt = [
     `SENDER STYLE:\n${styleBlock(sp)}`,

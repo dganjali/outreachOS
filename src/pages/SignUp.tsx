@@ -25,7 +25,7 @@ export function SignUp() {
     }
     // A brand-new email/password account is always unverified, so route every
     // signup to the verification gate. /check-email auto-forwards to onboarding
-    // the moment the email is confirmed — going to onboarding here would let an
+    // the moment the email is confirmed - going to onboarding here would let an
     // unverified user in and cause the onboarding↔verify flicker.
     navigate('/check-email', { replace: true, state: { email } });
   }

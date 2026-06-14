@@ -47,7 +47,7 @@ export interface ContactSuggestion {
 // Loop-for-another-contact budget. Discovery hands the resolver a ranked
 // candidate pool; the resolver walks it top-down keeping deliverable rows until
 // it has TARGET_DELIVERABLE of them or has attempted RESOLVE_ATTEMPT_CAP
-// candidates (the per-target cost ceiling — finder/verifier calls cost credits).
+// candidates (the per-target cost ceiling - finder/verifier calls cost credits).
 const TARGET_DELIVERABLE = 3;
 const RESOLVE_ATTEMPT_CAP = 8;
 const CANDIDATE_POOL_CAP = 10;
@@ -116,7 +116,7 @@ export default async function handler(req: Request, res: Response) {
     await completeRun(scope, run._id, {
       count: inserted.length,
       source: discoverySource,
-      // Decision-log summary (CONTACT_ENGINE.md §9) — observability for why the
+      // Decision-log summary (CONTACT_ENGINE.md §9) - observability for why the
       // pool looked the way it did, without per-contact schema churn.
       sizeTier: sizeTier ?? 'unknown',
       candidates: suggestions.length,
@@ -184,7 +184,7 @@ async function getTargetSize(scope: Scope, target: TargetDoc, domain: string | n
 }
 
 // ---------------------------------------------------------------------------
-// Discovery — produce raw candidate suggestions. Scoring/ranking happens once,
+// Discovery - produce raw candidate suggestions. Scoring/ranking happens once,
 // after, in rankCandidates.
 // ---------------------------------------------------------------------------
 
@@ -226,7 +226,7 @@ async function runWebSearchOnly(args: DiscoveryArgs): Promise<ContactSuggestion[
     ...icpContextLines(icp, sizeTier),
     target.domain
       ? `Company domain for email patterns: ${target.domain}`
-      : 'WARNING: no domain on file — use web_search to find the official company website first.',
+      : 'WARNING: no domain on file - use web_search to find the official company website first.',
     '',
     'Find 3-6 people matching the ICP function at THIS company (not the sender). Favor the program owners (managers/directors) over execs. Use web_search on company site, LinkedIn public pages, press, blog. Output JSON only.',
   ]
@@ -331,7 +331,7 @@ function negativeTermsForQuery(band: Band): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// Ranking — score every candidate, drop the misses, sort by reply-likelihood.
+// Ranking - score every candidate, drop the misses, sort by reply-likelihood.
 // ---------------------------------------------------------------------------
 
 type ContactRow = Omit<ContactDoc, '_id' | 'userId' | 'createdAt' | 'updatedAt'>;
@@ -406,7 +406,7 @@ export function rankCandidates(
 }
 
 // ---------------------------------------------------------------------------
-// Email resolution (unchanged) — walk the ranked pool keeping deliverable rows.
+// Email resolution (unchanged) - walk the ranked pool keeping deliverable rows.
 // ---------------------------------------------------------------------------
 
 // Injectable so the budget walk is unit-testable without network. Defaults wire

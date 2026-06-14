@@ -1,4 +1,4 @@
-// Targeting agent — finds organizations to outreach.
+// Targeting agent - finds organizations to outreach.
 // Mongo + Express edition.
 
 import type { Request, Response } from 'express';
@@ -26,7 +26,7 @@ interface TargetSuggestion {
   signal_type: string;
 }
 
-// Companies already surfaced for a mission — used to keep re-runs fresh.
+// Companies already surfaced for a mission - used to keep re-runs fresh.
 interface AlreadyTargeted {
   names: string[];
   domains: Set<string>;
@@ -39,7 +39,7 @@ const EXCLUDE_PROMPT_CAP = 60;
 function alreadyTargetedLine(prior: AlreadyTargeted): string {
   if (prior.names.length === 0) return '';
   const list = prior.names.slice(0, EXCLUDE_PROMPT_CAP).join(', ');
-  return `Already covered in this mission — DO NOT include these; find different companies: ${list}`;
+  return `Already covered in this mission - DO NOT include these; find different companies: ${list}`;
 }
 
 // True if a candidate matches a company already surfaced for the mission, by

@@ -48,7 +48,7 @@ export function SettingsPage() {
   }
 
   async function togglePause() {
-    // Must update by profile id — the shim's update().eq() only routes ids, so
+    // Must update by profile id - the shim's update().eq() only routes ids, so
     // the old .eq('user_id', ...) form failed silently and the toggle never
     // actually persisted.
     if (!profileId) {
@@ -64,7 +64,7 @@ export function SettingsPage() {
         .update({ pause_followups: next })
         .eq('id', profileId);
       if (err) {
-        setPaused(!next); // revert — server state did not change
+        setPaused(!next); // revert - server state did not change
         toast.error(`Could not ${next ? 'pause' : 'resume'} follow-ups: ${err.message}`);
         return;
       }
@@ -210,7 +210,7 @@ export function SettingsPage() {
 
       <SettingsSection
         title="Plan & billing"
-        hint="Your plan sets how many missions you can launch each month and how many agent runs you get per day. Upgrade any time — changes take effect immediately."
+        hint="Your plan sets how many missions you can launch each month and how many agent runs you get per day. Upgrade any time - changes take effect immediately."
       >
         <PlanBilling />
       </SettingsSection>
@@ -238,7 +238,7 @@ export function SettingsPage() {
                 </div>
                 <div className="mt-0.5 text-xs text-muted-foreground">
                   {integration
-                    ? integration.provider_account_email ?? '—'
+                    ? integration.provider_account_email ?? '-'
                     : 'Required to send outreach from your address.'}
                 </div>
                 {integration?.last_error && (

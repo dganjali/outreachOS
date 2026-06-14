@@ -1,4 +1,4 @@
-# MONETIZATION.md — pricing, usage limits, and Stripe
+# MONETIZATION.md - pricing, usage limits, and Stripe
 
 Plan for charging for OutreachOS: the unit cost model (post Gemini/Vertex swap),
 usage limits and where to enforce them, subscription tiers, and the Stripe
@@ -27,9 +27,9 @@ hit Google Search*, not by tokens.
 | Targeting (`target.ts`) | yes | 8K | 3K | $0.010 | $0.035 | **~$0.045** |
 | Evidence (`evidence.ts`) | yes | 6K | 1.5K | $0.006 | $0.035 | **~$0.041** |
 | Contacts (`contacts.ts`) | yes | 6K | 1K | $0.004 | $0.035 | **~$0.039** |
-| Sequence (`sequence.ts`) | no | 4K | 1.5K | $0.005 | — | **~$0.005** |
-| Embedding | no | 0.5K | — | ~$0.0001 | — | ~$0 |
-| Reply classify (`reply.ts`) | no | 2K | 0.5K | ~$0.002 | — | ~$0.002 |
+| Sequence (`sequence.ts`) | no | 4K | 1.5K | $0.005 | - | **~$0.005** |
+| Embedding | no | 0.5K | - | ~$0.0001 | - | ~$0 |
+| Reply classify (`reply.ts`) | no | 2K | 0.5K | ~$0.002 | - | ~$0.002 |
 
 ### Per target and per pipeline
 A fully processed target = evidence + contacts + sequence (+ embeds):
@@ -53,7 +53,7 @@ grounding tier is upside, especially in the first months.
 
 ---
 
-## 2. Usage limits — the levers
+## 2. Usage limits - the levers
 
 Five things we can meter or cap. The first two are the real cost levers.
 
@@ -146,13 +146,13 @@ const PLAN_LIMITS = {
    - load the user's plan + `usage.targetsThisPeriod`,
    - if `targetsThisPeriod + needTargets > targetsPerMonth` and no top-up credit:
      return `402 { error: 'quota_exceeded', plan, upgradeTo }`.
-2. **`api/agents/pipeline.ts`** — replace the `TOP_N` / `TARGET_COUNT` constants
+2. **`api/agents/pipeline.ts`** - replace the `TOP_N` / `TARGET_COUNT` constants
    with `min(planTargetsPerRun, remainingQuota)`; increment
    `usage.targetsThisPeriod` per target actually processed.
-3. **`api/agents/target.ts`** — clamp `desired` (line 47) to the plan's per-run cap.
-4. **`api/agents/contacts.ts`** — slice returned contacts to `contactsPerTarget`.
-5. **`MissionNew` / mission create** — block past `missions` cap (Free/Starter).
-6. **Frontend** — surface a usage meter (extend the dashboard `.stat-strip`,
+3. **`api/agents/target.ts`** - clamp `desired` (line 47) to the plan's per-run cap.
+4. **`api/agents/contacts.ts`** - slice returned contacts to `contactsPerTarget`.
+5. **`MissionNew` / mission create** - block past `missions` cap (Free/Starter).
+6. **Frontend** - surface a usage meter (extend the dashboard `.stat-strip`,
    reuse the existing "runs today" pattern) and gate run buttons with an upgrade
    modal when `402` comes back.
 
@@ -165,20 +165,20 @@ limit" exists; quota just adds a `402` path that says "upgrade" instead of "wait
 ## 6. Stripe implementation
 
 ### Products / Prices (create in Stripe dashboard or via API)
-- `price_starter_monthly`, `price_pro_monthly`, `price_scale_monthly` — recurring.
-- `price_target_pack` — one-time ($15) or a metered price for overage.
+- `price_starter_monthly`, `price_pro_monthly`, `price_scale_monthly` - recurring.
+- `price_target_pack` - one-time ($15) or a metered price for overage.
 - Free has no Stripe object.
 
 ### Secrets (Secret Manager → Cloud Run env)
 `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, and the `STRIPE_PRICE_*` ids.
 
 ### Endpoints (mount in `server/index.ts` like the other handlers)
-- `POST /api/billing/checkout` — auth required; create a Checkout Session
+- `POST /api/billing/checkout` - auth required; create a Checkout Session
   (`mode: 'subscription'`, the chosen price, `client_reference_id = userId`,
   success/cancel URLs); return the URL; frontend redirects.
-- `POST /api/billing/portal` — create a Billing Portal session so users manage or
+- `POST /api/billing/portal` - create a Billing Portal session so users manage or
   cancel; return URL.
-- `POST /api/billing/webhook` — **raw body** (not `express.json`) so the Stripe
+- `POST /api/billing/webhook` - **raw body** (not `express.json`) so the Stripe
   signature verifies. Handle:
   - `checkout.session.completed` → set plan + `stripeCustomerId/SubscriptionId`,
     status active, period dates.
@@ -217,7 +217,7 @@ subscription ids. That also keeps PCI scope minimal.
    anti-abuse and cost-blowout guard.
 
 ## 8. Open decisions
-- Annual pricing (typically 2 months free) — defer to step 2.
+- Annual pricing (typically 2 months free) - defer to step 2.
 - Whether Free requires a connected Gmail before running (reduces tire-kicker
   cost; recommend yes).
 - Team seats: Scale lists 3, but seat/workspace model isn't built yet; treat as

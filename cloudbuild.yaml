@@ -1,10 +1,10 @@
-# Cloud Build pipeline — builds the API image and deploys to Cloud Run.
+# Cloud Build pipeline - builds the API image and deploys to Cloud Run.
 # Trigger this from a push to main (set up via gcloud builds triggers create).
 #
 # Substitutions (set in the trigger or pass via --substitutions):
-#   _SERVICE       — Cloud Run service name (default: outreachos-api)
-#   _REGION        — GCP region (default: us-central1)
-#   _AR_REPO       — Artifact Registry repo for images (default: outreachos)
+#   _SERVICE       - Cloud Run service name (default: outreachos-api)
+#   _REGION        - GCP region (default: us-central1)
+#   _AR_REPO       - Artifact Registry repo for images (default: outreachos)
 
 steps:
   # 1. Build the image.

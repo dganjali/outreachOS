@@ -1,4 +1,4 @@
-// Unit tests for the personalization engine's deterministic verifier — the
+// Unit tests for the personalization engine's deterministic verifier - the
 // grounding contract that makes the difference between personalization and
 // slop. No LLM/DB: these are pure functions. Run with: npm test
 
@@ -57,7 +57,7 @@ test('an unattributed claim (empty or "none" factId) is a fabrication blocker', 
 
 test('a banned phrase is a blocker (case-insensitive)', () => {
   const v = verifyDraftDeterministic(
-    draft({ body: 'I hope this finds you well. Saw your Series B — worth 15 min?' }),
+    draft({ body: 'I hope this finds you well. Saw your Series B - worth 15 min?' }),
     FACTS,
     { bannedPhrases: ['I hope this finds you well'] },
   );
@@ -79,7 +79,7 @@ test('a draft with no claims and no banned phrases has no blockers', () => {
 
 test('deliverability heuristics (spam words) warn but never block', () => {
   const v = verifyDraftDeterministic(
-    draft({ body: 'Act now! This is a limited time risk-free offer — worth 15 min next week?' }),
+    draft({ body: 'Act now! This is a limited time risk-free offer - worth 15 min next week?' }),
     FACTS,
     { bannedPhrases: [] },
   );
@@ -101,7 +101,7 @@ test('a draft with no call-to-action gets a constraint warning', () => {
 });
 
 test('template-strictness directive scales from loose inspiration to near-verbatim', () => {
-  // With no exemplars there is nothing to be strict about — emit nothing.
+  // With no exemplars there is nothing to be strict about - emit nothing.
   assert.equal(templateStrictnessDirective(100, false), '');
 
   const loose = templateStrictnessDirective(0, true);
@@ -117,7 +117,7 @@ test('template-strictness directive scales from loose inspiration to near-verbat
 });
 
 // ---------------------------------------------------------------------------
-// ensureSignOff — every email ends signed, no placeholders.
+// ensureSignOff - every email ends signed, no placeholders.
 // ---------------------------------------------------------------------------
 
 test('appends a sign-off when none is present', () => {

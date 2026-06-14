@@ -3,7 +3,7 @@
 //
 // Run with:  npm run mongo:init
 //
-// Idempotent — safe to re-run; existing indexes are skipped.
+// Idempotent - safe to re-run; existing indexes are skipped.
 
 import { MongoClient } from 'mongodb';
 import { INDEX_SPEC, VECTOR_INDEX_SPEC } from '../shared/schemas';

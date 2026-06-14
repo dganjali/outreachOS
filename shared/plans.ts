@@ -1,9 +1,9 @@
-// Plan catalog — the single source of truth for monetization tiers and the
+// Plan catalog - the single source of truth for monetization tiers and the
 // limits each tier unlocks. Imported by BOTH the server (rate limiting, Stripe
 // price mapping, quota enforcement) and the React client (pricing/upgrade UI),
 // so keep it dependency-free (no env, no Node, no Stripe types).
 //
-// Stripe price ids are NOT here — they live in server env (api/_lib/env.ts) and
+// Stripe price ids are NOT here - they live in server env (api/_lib/env.ts) and
 // are mapped to plan ids in api/billing/stripe.ts, because they differ per
 // environment (test vs live) and must never ship to the browser bundle.
 
@@ -15,12 +15,12 @@ export type PlanId = 'free' | 'starter' | 'pro' | 'scale';
 export type PlanStatus = 'active' | 'trialing' | 'past_due' | 'canceled' | 'incomplete';
 
 export interface PlanLimits {
-  /** Headline value metric — missions a user may launch per calendar month. */
+  /** Headline value metric - missions a user may launch per calendar month. */
   missionsPerMonth: number;
-  /** Cost guard — agent runs (LLM + web-search calls) allowed per rolling 24h. */
+  /** Cost guard - agent runs (LLM + web-search calls) allowed per rolling 24h. */
   agentRunsPerDay: number;
   /**
-   * Burst guard — agent runs per rolling 60s. Must stay >= 20 for every plan:
+   * Burst guard - agent runs per rolling 60s. Must stay >= 20 for every plan:
    * one mission pipeline legitimately fires ~12 agent calls/minute, so a lower
    * cap would rate-limit the app's own orchestrator mid-run.
    */

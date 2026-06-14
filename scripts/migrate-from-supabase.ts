@@ -1,4 +1,4 @@
-// Stub data migration script — Supabase Postgres → MongoDB Atlas.
+// Stub data migration script - Supabase Postgres → MongoDB Atlas.
 //
 // I'm leaving this as a deliberate stub. Filling it in properly requires
 // looking at the actual user/row counts; running an untested script against
@@ -7,7 +7,7 @@
 // Run with:  npm run migrate:from-supabase
 //
 // Pre-reqs:
-//   - SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY env vars (temporary — for the
+//   - SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY env vars (temporary - for the
 //     read-side of the migration only)
 //   - MONGODB_URI env var
 //   - Firebase service account credentials configured (we need to import
@@ -23,7 +23,7 @@ This script is a stub. Implement the migration in this order:
      pulled from the Supabase 'encrypted_password' bcrypt column. Build a map:
        supabaseUuid -> firebaseUid
   3. For each Supabase table, read all rows and transform:
-       - id -> _id (keep the uuid string as-is — Mongo accepts arbitrary _id)
+       - id -> _id (keep the uuid string as-is - Mongo accepts arbitrary _id)
        - user_id -> userId, but map through the supabase->firebase uid map
        - snake_case -> camelCase for every other field
        - created_at / updated_at strings -> new Date(...)

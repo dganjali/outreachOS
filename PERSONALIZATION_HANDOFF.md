@@ -1,6 +1,6 @@
-# Personalization Engine — Handoff
+# Personalization Engine - Handoff
 
-> **Purpose:** everything needed to continue this work seamlessly in a new chat —
+> **Purpose:** everything needed to continue this work seamlessly in a new chat -
 > the vision, the approved plan, what's built & verified, what's left, and the
 > refined onboarding spec. Read this top-to-bottom and you have full context.
 
@@ -21,21 +21,21 @@ regex-scraped JSON, one global profile, and the richest taste signal (human edit
 before send) is discarded.
 
 The fix is a **taste layer**: a structured, versioned, confidence-weighted
-persona the engine *reads* at generation and the learning loop *writes* — voice
-carried by **exemplars (few-shot), not adjectives** — plus a **grounded
+persona the engine *reads* at generation and the learning loop *writes* - voice
+carried by **exemplars (few-shot), not adjectives** - plus a **grounded
 generate→verify→revise engine** that attacks slop at its three sources:
 fabrication, generic regression-to-mean, and unverified output.
 
 ## 2. Confirmed product decisions
 
 From the planning Q&A (all four chosen as recommended):
-1. **Layered persona data** — shared person-level identity/proof (entered once),
+1. **Layered persona data** - shared person-level identity/proof (entered once),
    per-persona voice/offer/exemplars on top.
-2. **Tiered anti-slop** — full generate→verify→revise loop in onboarding; on the
+2. **Tiered anti-slop** - full generate→verify→revise loop in onboarding; on the
    bulk pipeline a single critique pass that revises only if a `block` fires.
-3. **Full phased build** — Phase 1 foundation → Phase 2 onboarding flow →
+3. **Full phased build** - Phase 1 foundation → Phase 2 onboarding flow →
    Phase 3 learning loop.
-4. **Exemplar + conservative rules** calibration — the confirmed draft becomes a
+4. **Exemplar + conservative rules** calibration - the confirmed draft becomes a
    gold exemplar; explicit chat instructions become rules; one draft never
    overwrites high-confidence dimensions.
 
@@ -65,18 +65,18 @@ a cached static prefix. Engine reads it; learning loop writes it.
 > **cloud** to verify at runtime (live Vertex + Atlas + the app): the LLM stages,
 > the migration, the eval scores, and the onboarding/calibration UX. See §9.
 
-### Phase 1 — LLM foundation  ✅ DONE (see §4)
+### Phase 1 - LLM foundation  ✅ DONE (see §4)
 - 1a Gemini adapter upgrade (structured output, model tiering, caching passthrough).
 - 1b Layered persona data model + indexes.
-- 1c Grounded generation engine (assemble → generate → verify → revise) — now the
+- 1c Grounded generation engine (assemble → generate → verify → revise) - now the
   **live pipeline path** (`sequence.ts` drafts the initial email through
   `runDraftEngine`, keeps follow-ups). Deterministic verifier reuses the shared
   `deliverability.ts` checks + a CTA heuristic. Full observe-telemetry
   (`fact_ids`/`exemplar_ids`/`claims`/`violations`/`persona_version`) on `agent_runs`.
-- 1d Eval harness ✅ — `npm run eval` (`scripts/eval/`), pure scorers in
+- 1d Eval harness ✅ - `npm run eval` (`scripts/eval/`), pure scorers in
   `api/_lib/eval-scorers.ts` (unit-tested), baseline diff.
 
-### Phase 2 — Taste onboarding flow  ✅ DONE (full spec in §6)
+### Phase 2 - Taste onboarding flow  ✅ DONE (full spec in §6)
 - Agents: `api/agents/onboard-questions.ts`, `refine.ts` (span + structural),
   `extract-style.ts` (calibration → confidence-weighted StyleProfile + PersonaVersion).
 - Persona **gate in `MissionNew`** (mandatory: a mission can't be created without a
@@ -85,7 +85,7 @@ a cached static prefix. Engine reads it; learning loop writes it.
   "your voice" legibility surface. (Calibration here is contact-free; the same
   refine canvas is intended for reuse on real drafts in `MissionPage`.)
 
-### Phase 3 — Runtime learning loop  ✅ DONE
+### Phase 3 - Runtime learning loop  ✅ DONE
 - Edit-delta capture (keystone): `originalSubject`/`originalBody` on the sequence,
   `draftSubject`/`draftBody` on `sent_messages` (captured at send); `saveTouch`
   preserves the original.
@@ -95,7 +95,7 @@ a cached static prefix. Engine reads it; learning loop writes it.
 - Reply→outcome stats: `api/_lib/outcomes.ts` credits per-`ContextFact.replyStats`
   + per-exemplar `outcome` using engine telemetry, wired into `reply.ts` (replied)
   and `gmail/send.ts` (sent).
-- "Your voice" legibility surface — in the ME → Voice tab.
+- "Your voice" legibility surface - in the ME → Voice tab.
 - **Not done (deliberate):** Vertex `CachedContent` *create* helper (the
   `cachedContent` passthrough exists; wiring a real cached prefix is a perf
   optimization left for when cost is measured).
@@ -105,7 +105,7 @@ a cached static prefix. Engine reads it; learning loop writes it.
 ## 4. What's built & verified (Phase 1, commit `90d8d64`)
 
 All verified by `npm run server:typecheck` (clean except **pre-existing**
-`stripe`×2 + `server/index.ts`×28 errors — not ours) and `npm test` (**85/85
+`stripe`×2 + `server/index.ts`×28 errors - not ours) and `npm test` (**85/85
 pass**).
 
 | Area | File(s) | What |
@@ -122,7 +122,7 @@ the HTTP `draft.ts`/`critique.ts` handlers, DB assembly + vector retrieval of
 exemplars/facts into an `AssembledContext`, and `runs.ts` telemetry wiring.
 
 ### Key code contracts to know
-- **`AssembledContext`** (engine.ts) is the engine's input — the caller (a draft
+- **`AssembledContext`** (engine.ts) is the engine's input - the caller (a draft
   agent) does all DB/retrieval and hands in `{ mode, recipient, missionGoal,
   audience, whyNow?, allowedFacts[], exemplars[], styleProfile, maxWords?,
   minWords? }`. Engine stays pure of DB/HTTP → testable.
@@ -136,7 +136,7 @@ exemplars/facts into an `AssembledContext`, and `runs.ts` telemetry wiring.
 
 ## 5. What's left (in depth)
 
-### Task 3 — Persona migration  ✅ WRITTEN (needs live Atlas to RUN)
+### Task 3 - Persona migration  ✅ WRITTEN (needs live Atlas to RUN)
 `scripts/migrate-personas.ts` + `npm run migrate:personas` (supports `-- --dry-run`).
 For each `profiles` doc: create a default `PersonaDoc` (voiceSummary seeded from
 `writingTone`) if the user has none; convert freeform `proofPoints`/`achievements`
@@ -145,13 +145,13 @@ number markers stripped); `exampleEmails` → `StyleExemplarDoc` (`source:
 'user-provided'`, split on `---` lines); backfill `missions.personaId`. Idempotent
 + non-destructive: per-user guards key off "does the user already have any persona
 / fact / exemplar" so re-runs never duplicate or clobber. **Facts/exemplars are
-written WITHOUT embeddings** (offline script, no Vertex) — the draft engine falls
+written WITHOUT embeddings** (offline script, no Vertex) - the draft engine falls
 back to recency; a later embedding-backfill enables vector retrieval. Still needs
 a live Atlas to run/verify, then re-run `npm run mongo:init` on the cluster to
 create the new indexes + vector indexes.
 
-### Task 4 — Draft agent  ✅ DONE (needs live Vertex+Atlas to RUN end-to-end)
-`api/agents/draft.ts` — the HTTP entry to the engine. Loads contact→target→
+### Task 4 - Draft agent  ✅ DONE (needs live Vertex+Atlas to RUN end-to-end)
+`api/agents/draft.ts` - the HTTP entry to the engine. Loads contact→target→
 mission→persona, assembles `AssembledContext` (allowedFacts = relevance-ranked
 context facts via `context_fact_vector_idx` + latest evidence-pack bullets, with
 recency fallback; exemplars via `style_exemplar_vector_idx` with recency fallback;
@@ -161,24 +161,24 @@ draft). Wired in `server/index.ts` (`POST /api/agents/draft`) + `agents.draft()`
 `src/lib/api.ts`. `'draft'` added to `AgentRunDoc.agentType`. Legacy missions with
 `personaId:null` fall back to the user's default persona (or `emptyStyleProfile()`).
 
-### Task 5 — Eval harness  (`scripts/eval/`, `npm run eval`)
+### Task 5 - Eval harness  (`scripts/eval/`, `npm run eval`)
 Fixtures (`persona × mission × contact × evidence`) → run `runDraftEngine` →
 scorers: grounding % (claims with valid supported `factId`), slop-flag count,
 `voiceMatchScore` (judge + cosine of draft↔exemplar centroid), constraint pass.
 Emit scorecard JSON; diff vs a committed baseline to catch regressions.
 **Needs live Vertex.** This is how "is it slop" stops being vibes.
 
-### Task 6 — Taste onboarding flow + agents  → **see §6 for the authoritative spec**
+### Task 6 - Taste onboarding flow + agents  → **see §6 for the authoritative spec**
 New agents (all Gemini `responseJsonSchema`): `api/agents/onboard-questions.ts`,
 `api/agents/refine.ts` (span + structural rewrite), `api/agents/extract-style.ts`
 (calibration → StyleProfile deltas). `api/agents/draft.ts` (the HTTP draft
-handler) is **already built** — see Task 4; onboarding Stage 4 calls it with
+handler) is **already built** - see Task 4; onboarding Stage 4 calls it with
 `tier:'onboarding'`. Add the new agent endpoints to `src/lib/api.ts`. UI: persona
 selector/gate in
 `src/pages/MissionNew.tsx`; the ME tab (`src/pages/Me.tsx` + `me/Workshop.tsx`)
 becomes the taste-onboarding home; Stage 4 canvas+chatbox component.
 
-### Task 7 — Learning loop + pipeline integration
+### Task 7 - Learning loop + pipeline integration
 - **Edit-delta capture (keystone, do early):** persist the original AI draft
   immutably (`originalSubject`/`originalBody` on the sequence) + store both
   `draftBody`+`finalBody` on `sent_messages`; fix `saveTouch` in
@@ -194,14 +194,14 @@ becomes the taste-onboarding home; Stage 4 canvas+chatbox component.
 - "Your voice" legibility surface (StyleProfile + exemplars + per-dim confidence
   + reply stats).
 
-### Task 8 — Verification
+### Task 8 - Verification
 Unit tests (claim-attribution already done; add banned-phrase edge cases,
 confidence-merge math, migration). Commit eval baseline. Keep
 `server:typecheck` + `npm test` + `npm run build` green.
 
 ---
 
-## 6. Taste onboarding — authoritative spec (latest)
+## 6. Taste onboarding - authoritative spec (latest)
 
 > This refines/supersedes the earlier Phase-2 outline. It is the design to build.
 
@@ -209,24 +209,24 @@ confidence-merge math, migration). Commit eval baseline. Keep
 - Editable **any time** in the ME tab.
 - The **context dump is a separate section** from the onboarding-process section.
 - **Personas:** start with just the **default**; users can **add more** if they
-  want — this supports different use cases (sponsorship vs recruiting vs sales).
+  want - this supports different use cases (sponsorship vs recruiting vs sales).
 - The taste onboarding can be filled out anytime in ME, but is **made mandatory
   in mission creation for sending emails.**
 
 **Step-by-step onboarding process:**
 
-1. **Frame** — choose persona / mode.
-2. **Substance / who you are** — resume, links → populate **context facts**.
+1. **Frame** - choose persona / mode.
+2. **Substance / who you are** - resume, links → populate **context facts**.
    - Supports **file dump, voice dump,** etc.
    - This step is **saved into the overall (person-level) profile**; within the
      step the user can **import the previous directly.**
    - Why it reappears here (vs the ME section): (1) in case they didn't fill it
-     out, (2) they're using it for a different purpose — so they can **import
+     out, (2) they're using it for a different purpose - so they can **import
      from the ME section and optionally add on, or do it from scratch.**
    - This step is purely about **understanding who they are.**
 3. **Ask clarifying questions** (adaptive, LLM-generated from gaps/contradictions).
-4. **Style** — exemplar emails; maybe a few questions about tone, etc.
-5. **Feedback (calibrate a real draft)** — the engine generates **one full draft**.
+4. **Style** - exemplar emails; maybe a few questions about tone, etc.
+5. **Feedback (calibrate a real draft)** - the engine generates **one full draft**.
    - **Canvas UI with a chatbox on the side.**
    - The user can: **highlight a part and tell it to rewrite that specific part**,
      **generate entirely from the chatbox**, or **edit freely** themselves.
@@ -236,7 +236,7 @@ confidence-merge math, migration). Commit eval baseline. Keep
    - Stored in memory → **builds the "taste persona" over time.**
    - *Future:* swipe left/right (good draft / bad draft, each followed by a "why"
      for further calibration and taste profiling).
-6. **Confirm and commit** —
+6. **Confirm and commit** -
    - Save the **gold-standard exemplar.**
    - **Derive conservative rules** from what the user put in the chatbox
      (e.g. "make it less formal").
@@ -245,7 +245,7 @@ confidence-merge math, migration). Commit eval baseline. Keep
 **Mapping to the code/data model:**
 - Person-level substance → `ContextFactDoc(scope:'person')` (+ resume via existing
   `parse-resume.ts`/`profile_assets`; voice dump → facts with
-  `provenance:'dictation'` — **context only, not style**).
+  `provenance:'dictation'` - **context only, not style**).
 - Persona-level voice → `PersonaDoc.styleProfile` (+ persona-scoped facts).
 - Exemplars → `StyleExemplarDoc` (`source:'user-provided'` then
   `'stage4-confirmed'`, later `'earned-winner'`).
@@ -264,15 +264,15 @@ npm run build              # vite frontend build.
 npm run mongo:init         # creates collections + indexes + vector indexes (run after schema changes).
 ```
 
-- **Cannot verify end-to-end in this environment** — the LLM stages, migration,
+- **Cannot verify end-to-end in this environment** - the LLM stages, migration,
   eval, and pipeline need live **Vertex (Gemini)**, **MongoDB Atlas**, and the
   running app. Build to compile + unit-test pure logic; "it works" needs cloud creds.
 - **Pre-existing typecheck errors are not ours:** `api/billing/{stripe,webhook}.ts`
   (can't resolve `stripe` types) and `server/index.ts` (duplicate `@types/express`
   in `server/node_modules`). Don't chase these.
 - **Gemini structured output:** schemas must be **flat** (no recursion); use
-  `responseJsonSchema` (raw JSON Schema) — confirmed supported in `@google/genai`
-  2.8. Don't combine `responseJsonSchema` with `tools` (web search) — mutually
+  `responseJsonSchema` (raw JSON Schema) - confirmed supported in `@google/genai`
+  2.8. Don't combine `responseJsonSchema` with `tools` (web search) - mutually
   exclusive (llm.ts enforces this).
 - **Reply visibility:** Gmail is send-only scope today → the app can't see most
   replies, so the reply-based signal is weak. Lean on edit-deltas + chat

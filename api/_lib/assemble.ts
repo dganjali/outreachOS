@@ -58,7 +58,7 @@ export async function assembleDraftContext(
     excludedFactIds: persona?.excludedFactIds ?? [],
   });
   const exemplarDocs = persona ? await fetchExemplars(uid, persona._id, mission.goal) : [];
-  // Sender identity — anchors a real sign-off on every email (engine.ts).
+  // Sender identity - anchors a real sign-off on every email (engine.ts).
   const profile = await scope.collection<ProfileDoc>('profiles').findOne();
 
   const ctx: AssembledContext = {
@@ -96,7 +96,7 @@ export async function assembleAllowedFacts(
   opts: { excludedFactIds?: string[] } = {}
 ): Promise<AllowedFact[]> {
   const facts: AllowedFact[] = [];
-  // Default (person-level) facts this voice opted out of — drop them from
+  // Default (person-level) facts this voice opted out of - drop them from
   // grounding so a cleared default never resurfaces in a generated email.
   const excluded = new Set(opts.excludedFactIds ?? []);
 

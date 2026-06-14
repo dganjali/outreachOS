@@ -28,15 +28,15 @@ function firebaseApp(): App {
 }
 
 export interface AuthedUser {
-  id: string;       // Firebase UID — used as `userId` on every Mongo doc.
+  id: string;       // Firebase UID - used as `userId` on every Mongo doc.
   email: string | null;
 }
 
 // Server-side orchestration (the pipeline runner) needs to invoke an agent
 // handler on behalf of an already-authenticated user without a Firebase token.
 // It attaches the verified user under this symbol on a synthetic in-process
-// request. A symbol key is unforgeable over the wire — it can't appear in JSON
-// body, headers, or query — so a network client can never set it; only the
+// request. A symbol key is unforgeable over the wire - it can't appear in JSON
+// body, headers, or query - so a network client can never set it; only the
 // internal invoker does. See api/_lib/internal-invoke.ts.
 export const INTERNAL_USER = Symbol('internalUser');
 
@@ -82,7 +82,7 @@ export function requireCronSecret(req: Request, res: Response): boolean {
   return true;
 }
 
-/** Length-safe, constant-time string comparison — avoids leaking the secret via
+/** Length-safe, constant-time string comparison - avoids leaking the secret via
  *  early-exit timing on `!==`. Returns false on any length mismatch. */
 function constantTimeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a, 'utf8');

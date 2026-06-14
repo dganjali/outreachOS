@@ -3,7 +3,7 @@
 
 import type { ProfileDoc } from '../../shared/schemas';
 
-/** Lowercased names/orgs/projects the sender is affiliated with — never target these. */
+/** Lowercased names/orgs/projects the sender is affiliated with - never target these. */
 export function senderExclusions(profile: ProfileDoc | null): string[] {
   const out = new Set<string>();
   const add = (s: string | null | undefined) => {
@@ -50,7 +50,7 @@ export function isValidDomain(domain: string | null | undefined): boolean {
   if (!/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/.test(d)) return false;
   // Reject IP literals and internal-only suffixes. A real company web domain
   // has an alphabetic TLD; `169.254.169.254` (cloud metadata) and friends do
-  // not. This is the first line of an SSRF defense — see web-scrape.ts for the
+  // not. This is the first line of an SSRF defense - see web-scrape.ts for the
   // connection-time guard that is authoritative.
   const tld = d.slice(d.lastIndexOf('.') + 1);
   if (!/^[a-z]{2,}$/.test(tld)) return false; // numeric/short TLD → not a real domain

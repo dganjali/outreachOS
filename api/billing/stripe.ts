@@ -52,7 +52,7 @@ export function planForPriceId(priceId: string | null | undefined): PlanId | nul
 
 /**
  * Service-role lookup of a profile by its Stripe customer id. Used by the
- * webhook, which has no user JWT — so it bypasses forUser() and queries the
+ * webhook, which has no user JWT - so it bypasses forUser() and queries the
  * collection directly (the customer id is the trust anchor).
  */
 export async function profileByCustomerId(customerId: string): Promise<ProfileDoc | null> {

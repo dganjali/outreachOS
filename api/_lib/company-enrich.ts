@@ -11,7 +11,7 @@ interface DomainLookupRow {
   domain: string;
 }
 
-// Domains that are never a company's own website — search results love to rank
+// Domains that are never a company's own website - search results love to rank
 // these for a brand query, so we skip them when picking a domain off Serper.
 const AGGREGATOR_DOMAINS = [
   'linkedin.com', 'twitter.com', 'x.com', 'facebook.com', 'instagram.com',

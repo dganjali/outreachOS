@@ -1,4 +1,4 @@
-// POST /api/billing/webhook — Stripe webhook. Mounted with a RAW body parser
+// POST /api/billing/webhook - Stripe webhook. Mounted with a RAW body parser
 // (see server/index.ts) because signature verification needs the exact bytes.
 //
 // This is the source of truth that flips a user's plan: Checkout and the portal
@@ -77,7 +77,7 @@ export default async function handler(req: Request, res: Response) {
     }
   } catch (err) {
     console.error('[billing] webhook handler error', event.type, (err as Error).message);
-    // 500 so Stripe retries — the event is valid, our processing failed.
+    // 500 so Stripe retries - the event is valid, our processing failed.
     return res.status(500).json({ error: 'handler_error' });
   }
 

@@ -1,4 +1,4 @@
-// LEGACY SHIM — kept for import-path stability after the Supabase → Mongo +
+// LEGACY SHIM - kept for import-path stability after the Supabase → Mongo +
 // Firebase Auth migration. New code should import { db } from './lib/db' and
 // the firebase/auth SDK directly.
 //

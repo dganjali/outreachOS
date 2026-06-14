@@ -8,7 +8,7 @@
 // self-test that fires when the package index is loaded (same pattern as
 // api/agents/parse-resume.ts).
 //
-// @ts-expect-error — no types ship for the inner path
+// @ts-expect-error - no types ship for the inner path
 import pdfParse from 'pdf-parse/lib/pdf-parse.js';
 import mammoth from 'mammoth';
 import { ocrTranscribe } from './llm';
@@ -21,7 +21,7 @@ const MIN_CHARS = 50;
  *
  * @param buf      Raw file bytes.
  * @param mime     MIME type as reported by the client (may be empty / null).
- * @param fileName Original file name — used to detect extension when MIME is empty.
+ * @param fileName Original file name - used to detect extension when MIME is empty.
  * @returns        The extracted text (trimmed).
  * @throws         `Error` with code `unsupported_file_type` or `text_empty`.
  */
@@ -43,7 +43,7 @@ export async function extractText(buf: Buffer, mime: string | null, fileName: st
       text = await ocrSafely(buf, mimeNorm || 'application/pdf', text);
     }
   } else if (isImage(mimeNorm, ext)) {
-    // Images are pure pixels — OCR is the only path to text.
+    // Images are pure pixels - OCR is the only path to text.
     text = await ocrSafely(buf, mimeNorm || imageMimeForExt(ext), '');
   } else if (isDocx(mimeNorm, ext)) {
     const result = await mammoth.extractRawText({ buffer: buf });
@@ -60,7 +60,7 @@ export async function extractText(buf: Buffer, mime: string | null, fileName: st
 
   if (!text || text.length < MIN_CHARS) {
     throw Object.assign(
-      new Error('No readable text found, even after OCR — is the file blank or corrupt?'),
+      new Error('No readable text found, even after OCR - is the file blank or corrupt?'),
       { code: 'text_empty' }
     );
   }
@@ -86,7 +86,7 @@ async function ocrSafely(buf: Buffer, mime: string, prev: string): Promise<strin
     }
     return ocr.length > prev.length ? ocr : prev;
   } catch (err) {
-    // A too-large file is an actionable user error, not a "no text" miss —
+    // A too-large file is an actionable user error, not a "no text" miss -
     // propagate it so the caller surfaces the real reason instead of the
     // misleading generic "no readable text" message.
     if ((err as { code?: string })?.code === 'ocr_too_large') throw err;
@@ -197,7 +197,7 @@ function imageMimeForExt(ext: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// RTF stripper — no new dep. Handles pasted résumés well enough.
+// RTF stripper - no new dep. Handles pasted résumés well enough.
 // ---------------------------------------------------------------------------
 
 /**
@@ -288,7 +288,7 @@ export function stripRtf(rtf: string): string {
         else if (next === '-') out += '­'; // soft hyphen
         else if (next === '_') out += '‑'; // non-breaking hyphen
         // Bare \newline / \return in RTF source = ignored whitespace.
-        // Any other non-alpha (e.g. \%, \$) — emit it literally since
+        // Any other non-alpha (e.g. \%, \$) - emit it literally since
         // it's likely an accidental backslash in user-typed RTF content.
         else if (next !== '\n' && next !== '\r') out += next;
         i++;

@@ -1,4 +1,4 @@
-// TEMPORARY visual-verification harness — not part of the app. Deleted after
+// TEMPORARY visual-verification harness - not part of the app. Deleted after
 // screenshotting. ?edit=1 opens edit mode (bundle fetch fails offline → empty
 // overview, lets us see Overview + Calibrate without a backend).
 import { PersonaWizard } from '../components/persona/PersonaWizard';

@@ -5,8 +5,8 @@ import * as THREE from 'three';
  * GenerativeMountains
  *
  * A slowly-undulating particle terrain for the landing hero, generated with a
- * Perlin-noise vertex shader (three.js). Rendered as a field of soft dots —
- * mostly white with subtle green highlights on the crests — over the dark hero
+ * Perlin-noise vertex shader (three.js). Rendered as a field of soft dots -
+ * mostly white with subtle green highlights on the crests - over the dark hero
  * gradient, fading out at the top (horizon) so it dissolves cleanly.
  *
  * Built to run on all devices:
@@ -213,7 +213,7 @@ export function GenerativeMountains({ className }: { className?: string }) {
     };
 
     if (reduceMotion) {
-      // Static, fully-formed terrain — no animation loop.
+      // Static, fully-formed terrain - no animation loop.
       material.uniforms.time.value = 1.0;
       renderOnce();
     } else {

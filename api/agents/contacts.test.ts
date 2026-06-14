@@ -93,7 +93,7 @@ describe('resolvePoolWithBudget', () => {
 });
 
 // ---------------------------------------------------------------------------
-// rankCandidates — the end-to-end "right people" behavior on the reported bank
+// rankCandidates - the end-to-end "right people" behavior on the reported bank
 // example: drop the off-function execs, keep the program owners, sort by
 // reply-likelihood, populate seniority.
 // ---------------------------------------------------------------------------
@@ -115,7 +115,7 @@ function suggestion(name: string, role: string): ContactSuggestion {
 const target = { _id: 't1', companyName: 'Big Bank' } as TargetDoc;
 const mission = { _id: 'm1', mode: 'sponsorship' } as MissionDoc;
 
-describe('rankCandidates — the bank example at enterprise size', () => {
+describe('rankCandidates - the bank example at enterprise size', () => {
   // A community-investment-flavored sponsorship ICP.
   const icp = {
     ...defaultContactIcp('sponsorship'),
@@ -156,7 +156,7 @@ describe('rankCandidates — the bank example at enterprise size', () => {
   });
 });
 
-describe('rankCandidates — never returns an empty target', () => {
+describe('rankCandidates - never returns an empty target', () => {
   const icp = defaultContactIcp('bd'); // partnerships, caps at director
   it('falls back to above-cap people when the band disqualifies everyone', () => {
     // Off-function AND above-cap → disqualified in the strict pass; the fallback

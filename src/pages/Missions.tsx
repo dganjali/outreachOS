@@ -81,7 +81,7 @@ export function Missions() {
       const { data: ms, error: qErr } = await query;
       if (qErr) throw qErr;
       const list = (ms ?? []) as Mission[];
-      // Two batched queries instead of two per mission — the per-mission
+      // Two batched queries instead of two per mission - the per-mission
       // fan-out was a major contributor to exhausting browser connections
       // (ERR_INSUFFICIENT_RESOURCES) on accounts with many missions.
       const ids = list.map((m) => m.id);

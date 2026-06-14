@@ -104,7 +104,7 @@ export interface Persona {
   onboarding_completed_at: string | null;
   archived_at: string | null;
   created_at?: string;
-  // Person-level (default) fact ids this voice has opted out of — see PersonaDoc.
+  // Person-level (default) fact ids this voice has opted out of - see PersonaDoc.
   excluded_fact_ids?: string[];
 }
 

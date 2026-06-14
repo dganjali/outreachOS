@@ -1,5 +1,5 @@
 // Unit tests for the storage-path IDOR hardening on the signed-download and
-// object-remove endpoints — SHIPMENT_AUDIT.md finding S2. Run with: npm test
+// object-remove endpoints - SHIPMENT_AUDIT.md finding S2. Run with: npm test
 //
 // These exercise the security-critical predicate (ownsStoragePath) directly.
 // The /_storage/sign-download and /_storage/remove routes call it with the
@@ -15,14 +15,14 @@ const UID = 'alice123';
 
 test("(a) a path under the caller's own users/{uid}/ prefix is allowed", () => {
   assert.equal(ownsStoragePath(UID, `users/${UID}/resume/1717000000_resume.pdf`), true);
-  // Dots inside a filename segment are fine — only a bare `..` segment
+  // Dots inside a filename segment are fine - only a bare `..` segment
   // traverses, and storage.ts can legitimately produce names like this.
   assert.equal(ownsStoragePath(UID, `users/${UID}/case_study/1717000000_my..notes.pdf`), true);
 });
 
 test('(b) a path under a different uid is rejected (the IDOR)', () => {
   assert.equal(ownsStoragePath(UID, 'users/bob456/resume/1717000000_resume.pdf'), false);
-  // A uid that the caller's uid is a prefix of must not match — the trailing
+  // A uid that the caller's uid is a prefix of must not match - the trailing
   // slash in the required prefix guards this.
   assert.equal(ownsStoragePath(UID, `users/${UID}extra/resume/x.pdf`), false);
 });

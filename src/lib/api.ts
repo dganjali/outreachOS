@@ -201,6 +201,8 @@ export interface PipelineTargetView {
   evidence: PipelineStepStatus;
   contacts: PipelineStepStatus;
   sequence: PipelineStepStatus;
+  contact_ids: string[];
+  sequences: PipelineStepStatus[];
   best_contact_id: string | null;
 }
 
@@ -211,19 +213,20 @@ export interface PipelineRunView {
   phase: 'targeting' | 'processing' | 'done';
   note: string | null;
   error: string | null;
-  config: { target_count: number; top_n: number };
-  cursor: { target_index: number; step: PipelineStep } | null;
+  config: { target_count: number; top_n: number; top_contacts: number };
+  cursor: { target_index: number; step: PipelineStep; contact_index?: number } | null;
   targets: PipelineTargetView[];
   started_at: string;
   completed_at: string | null;
 }
 
 export const pipeline = {
-  start: (mission_id: string, count?: number, top_n?: number) =>
+  start: (mission_id: string, count?: number, top_n?: number, top_contacts?: number) =>
     authedFetch<{ data: PipelineRunView; already_running?: boolean }>('/api/agents/pipeline', {
       mission_id,
       count,
       top_n,
+      top_contacts,
     }),
   status: (run_id: string) =>
     authedFetch<{ data: PipelineRunView }>(`/api/agents/pipeline?run_id=${encodeURIComponent(run_id)}`, null, 'GET'),

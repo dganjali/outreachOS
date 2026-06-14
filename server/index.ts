@@ -1,4 +1,4 @@
-// Express entry point — Cloud Run target.
+// Express entry point - Cloud Run target.
 // Replaces the per-file Vercel handler model. Each former api/**/handler.ts
 // is now an Express handler that we mount here.
 
@@ -50,7 +50,7 @@ app.disable('x-powered-by');
 
 // Stripe webhook MUST receive the raw body for signature verification, so it is
 // registered with express.raw BEFORE the global JSON parser below (and before
-// the global rate limiter — Stripe retries from a small set of IPs).
+// the global rate limiter - Stripe retries from a small set of IPs).
 app.post('/api/billing/webhook', express.raw({ type: 'application/json' }), wrap(billingWebhook));
 
 // Body parsing. File uploads go straight to GCS via signed URLs, so every JSON
@@ -63,7 +63,7 @@ app.use(
     verify: (_req, _res, buf) => {
       if (buf.length === 0) return; // empty body is fine (GET / no-body POST)
       const first = buf[0];
-      // 0x7b '{'  0x5b '['  — anything else (a bare string/number/quote) is
+      // 0x7b '{'  0x5b '['  - anything else (a bare string/number/quote) is
       // not a payload any endpoint accepts; fail fast as malformed.
       if (first !== 0x7b && first !== 0x5b) {
         throw new SyntaxError('Body must be a JSON object or array');
@@ -85,7 +85,7 @@ app.use((err: Error & { type?: string; status?: number }, _req: Request, res: Re
 });
 
 // Baseline security response headers. Conservative set that won't interfere
-// with the SPA / Firebase / Three.js (no strict CSP — add one at the CDN/LB
+// with the SPA / Firebase / Three.js (no strict CSP - add one at the CDN/LB
 // layer where script origins are known). HSTS is safe because the service is
 // HTTPS-only behind Cloud Run.
 app.use((_req: Request, res: Response, next: NextFunction) => {
@@ -144,7 +144,7 @@ app.post('/api/cron/send-due-touches', wrap(cronSendDueTouches));
 app.post('/api/cron/weekly-digest', wrap(cronWeeklyDigest));
 
 // Local-filesystem storage driver (dev, when no real GCS bucket). Token-authed
-// via the HMAC query param baked into the signed URL — no Firebase bearer — so
+// via the HMAC query param baked into the signed URL - no Firebase bearer - so
 // they sit OUTSIDE the /api/data auth router. PUT body arrives as a raw Buffer.
 app.put('/api/storage-local/put', express.raw({ type: '*/*', limit: '25mb' }), wrap(localPutHandler));
 app.get('/api/storage-local/get', wrap(localGetHandler));

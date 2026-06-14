@@ -246,7 +246,7 @@ export function Inbox() {
           </div>
           <h3 className="text-lg font-semibold text-foreground">No replies recorded</h3>
           <p className="max-w-md text-sm leading-relaxed text-muted-foreground">
-            Replies land directly in your Gmail inbox — OutreachOS sends from your account and
+            Replies land directly in your Gmail inbox - OutreachOS sends from your account and
             never reads your mail. When someone writes back, open their contact on the mission
             page and hit &ldquo;Mark replied&rdquo; so their scheduled follow-ups stop.
           </p>
@@ -274,7 +274,7 @@ export function Inbox() {
                     {r.urgency === 'high' && <span className={pill('red')}>urgent</span>}
                   </div>
                   <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                    {r.received_at ? timeAgo(r.received_at) : '—'}
+                    {r.received_at ? timeAgo(r.received_at) : '-'}
                   </span>
                 </header>
 

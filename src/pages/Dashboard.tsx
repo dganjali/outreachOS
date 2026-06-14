@@ -341,7 +341,7 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* Focus band — the hero region. Action cards when there's something to do,
+      {/* Focus band - the hero region. Action cards when there's something to do,
           a clean "caught up" panel with a primary CTA otherwise. */}
       {focusItems.length > 0 ? (
         <section className="grid gap-3 sm:grid-cols-2" aria-label="Needs your attention">
@@ -488,7 +488,7 @@ export function Dashboard() {
             <SectionHeader title="This week" />
             <dl className="panel grid grid-cols-3 divide-x divide-border/60 overflow-hidden">
               <StatCell icon={Users} label="Contacted" value={String(stats.contacted)} />
-              <StatCell icon={TrendingUp} label="Reply rate" value={responseRate === null ? '—' : `${responseRate}%`} />
+              <StatCell icon={TrendingUp} label="Reply rate" value={responseRate === null ? '-' : `${responseRate}%`} />
               <StatCell
                 icon={Zap}
                 label="Runs today"

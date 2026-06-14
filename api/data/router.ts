@@ -29,7 +29,7 @@ router.use(async (req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-// Helper — after the auth middleware, uid is guaranteed.
+// Helper - after the auth middleware, uid is guaranteed.
 function uidOf(req: Request): string {
   return req.uid as string;
 }
@@ -53,7 +53,7 @@ router.post('/_storage/sign-download', async (req, res) => {
   const uid = uidOf(req);
   const { path, ttlSeconds } = (req.body ?? {}) as { path?: string; ttlSeconds?: number };
   if (!path) return res.status(400).json({ error: 'missing_path' });
-  // SHIPMENT_AUDIT.md S2 — only sign downloads for objects the caller owns.
+  // SHIPMENT_AUDIT.md S2 - only sign downloads for objects the caller owns.
   if (!ownsStoragePath(uid, path)) return res.status(403).json({ error: 'forbidden' });
   const url = await signedDownloadUrl(path, ttlSeconds ?? 600);
   return res.json({ data: { url } });
@@ -63,7 +63,7 @@ router.post('/_storage/remove', async (req, res) => {
   const uid = uidOf(req);
   const { paths } = (req.body ?? {}) as { paths?: string[] };
   const list = paths ?? [];
-  // SHIPMENT_AUDIT.md S2 — fail closed: if any path isn't under the caller's
+  // SHIPMENT_AUDIT.md S2 - fail closed: if any path isn't under the caller's
   // own users/{uid}/ prefix, reject the whole batch and delete nothing.
   if (!list.every((p) => ownsStoragePath(uid, p))) {
     return res.status(403).json({ error: 'forbidden' });
@@ -172,7 +172,7 @@ router.post('/:collection', async (req, res) => {
   const doc = { _id: newId(), ...stripOwnership(body) };
   const created = await scope.collection(collection as CollectionName).insertOne(doc as any);
   // Count the launch only after a successful insert so a failed create doesn't
-  // burn quota. The counter is monotonic — deletes never refund it.
+  // burn quota. The counter is monotonic - deletes never refund it.
   if (collection === COL.missions) await incrementMissionQuota(scope);
   res.status(201).json({ data: created });
 });
@@ -203,12 +203,12 @@ router.delete('/:collection/:id', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Filter sanitization — SHIPMENT_AUDIT.md finding S1 (NoSQL operator injection).
+// Filter sanitization - SHIPMENT_AUDIT.md finding S1 (NoSQL operator injection).
 //
 // The frontend shim (src/lib/db.ts `deepKeyMap`) deliberately preserves
 // `$`-prefixed keys, so client-supplied Mongo query operators survive the trip
 // to the server. Ownership is injected server-side by forUser(uid).find(),
-// which ANDs `userId: uid` at the top level — so this is NOT a cross-tenant
+// which ANDs `userId: uid` at the top level - so this is NOT a cross-tenant
 // read. But an unrestricted operator set still lets a caller run `$where`
 // (arbitrary JS → CPU DoS) or `$regex` (ReDoS) within their own data scope.
 //
@@ -216,7 +216,7 @@ router.delete('/:collection/:id', async (req, res) => {
 // reject everything else with a 400 (so bugs surface instead of silently
 // dropping). The allowlist is exactly what the Query builder in src/lib/db.ts
 // emits ($in, $ne, $gte) plus the obvious safe siblings. No $where / $expr /
-// $function / $accumulator / $regex — none are used by any caller.
+// $function / $accumulator / $regex - none are used by any caller.
 const ALLOWED_OPERATORS: ReadonlySet<string> = new Set([
   '$eq', '$ne', '$gt', '$gte', '$lt', '$lte', '$in', '$nin',
 ]);
@@ -245,7 +245,7 @@ export function sanitizeFilter(f: Record<string, unknown>): Record<string, unkno
     // Ownership is server-injected; any client value here is ignored.
     if (key === 'userId') continue;
     // A real field name never starts with '$'. A top-level operator
-    // ($where, $or, $expr, ...) is an injection vector — reject it.
+    // ($where, $or, $expr, ...) is an injection vector - reject it.
     if (key.startsWith('$')) throw new InvalidFilterError();
     out[key] = sanitizeValue(value);
   }
@@ -264,7 +264,7 @@ function sanitizeValue(value: unknown): unknown {
   if (!isPlainObject(value)) return value;
   const keys = Object.keys(value);
   const hasOperator = keys.some((k) => k.startsWith('$'));
-  if (!hasOperator) return value; // sub-document equality — no operators present
+  if (!hasOperator) return value; // sub-document equality - no operators present
   for (const k of keys) {
     if (!k.startsWith('$')) throw new InvalidFilterError(); // operator/field mix
     if (!ALLOWED_OPERATORS.has(k)) throw new InvalidFilterError();
@@ -279,7 +279,7 @@ function stripOwnership<T extends object>(o: T): T {
 }
 
 // ---------------------------------------------------------------------------
-// Storage path ownership — SHIPMENT_AUDIT.md finding S2 (IDOR on signed
+// Storage path ownership - SHIPMENT_AUDIT.md finding S2 (IDOR on signed
 // downloads / deletes).
 //
 // Objects live at `users/{uid}/{kind}/{filename}` (see api/_lib/storage.ts).
@@ -290,8 +290,8 @@ function stripOwnership<T extends object>(o: T): T {
 //
 // Strict by construction so traversal / encoding tricks can't smuggle a path
 // out of the caller's prefix. Real paths (storage.ts) only ever contain
-// [A-Za-z0-9._/-] — the upload helper maps /[^A-Za-z0-9._-]/g -> '_' and
-// prefixes a timestamp — so none of the characters/segments rejected below can
+// [A-Za-z0-9._/-] - the upload helper maps /[^A-Za-z0-9._-]/g -> '_' and
+// prefixes a timestamp - so none of the characters/segments rejected below can
 // appear in a legitimate path (no false positives).
 export function ownsStoragePath(uid: string, path: string): boolean {
   if (typeof uid !== 'string' || uid.length === 0) return false;

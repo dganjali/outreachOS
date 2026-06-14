@@ -1,8 +1,8 @@
-// The Context tab — what the agent knows about *you*, shared across every voice.
+// The Context tab - what the agent knows about *you*, shared across every voice.
 //
 // One source of truth: person-level context facts (the same facts your Voices
 // read when drafting). Add a fact here and any voice can cite it; add one in a
-// voice and it shows up here. No web-scraped guesses — everything is entered or
+// voice and it shows up here. No web-scraped guesses - everything is entered or
 // confirmed by you. Identity + links round it out.
 
 import { useRef, useState } from 'react';
@@ -102,7 +102,7 @@ export function ContextTab({
     try {
       await onAutofill();
     } catch (e) {
-      setAutofillError(e instanceof Error ? e.message : 'Autofill failed — try again.');
+      setAutofillError(e instanceof Error ? e.message : 'Autofill failed - try again.');
     } finally {
       setAutofilling(false);
     }
@@ -132,7 +132,7 @@ export function ContextTab({
 
       <Panel
         title="Facts"
-        hint="The concrete things the agent can cite — what you've built, real numbers, credentials. Shared across every voice; facts you add in a voice show up here too."
+        hint="The concrete things the agent can cite - what you've built, real numbers, credentials. Shared across every voice; facts you add in a voice show up here too."
         open={open.facts}
         score={scorePanel(form, facts.length, 'facts')}
         onToggle={() => toggle('facts')}
@@ -150,7 +150,7 @@ export function ContextTab({
 
       <Panel
         title="Links & files"
-        hint="Links and files the agent can mine for facts. Grab from LinkedIn or drop a résumé — both add facts under Facts above."
+        hint="Links and files the agent can mine for facts. Grab from LinkedIn or drop a résumé - both add facts under Facts above."
         open={open.links}
         score={scorePanel(form, facts.length, 'links')}
         onToggle={() => toggle('links')}
@@ -177,7 +177,7 @@ export function ContextTab({
           </button>
           <p className="section-hint">
             Pulls public, sourceable facts from your LinkedIn and adds them to Facts above. Review and
-            prune anything off — nothing is sent without your say-so.
+            prune anything off - nothing is sent without your say-so.
           </p>
           {autofillError && <p className="pw-error">{autofillError}</p>}
         </div>
@@ -202,7 +202,7 @@ export function ContextTab({
 }
 
 // ---------------------------------------------------------------------------
-// Facts editor — manual add + Smart fill (paste / upload → extract) + chip list
+// Facts editor - manual add + Smart fill (paste / upload → extract) + chip list
 // ---------------------------------------------------------------------------
 function FactsEditor({
   userId,
@@ -247,7 +247,7 @@ function FactsEditor({
       setDumpText('');
       onFactsChanged();
     } catch (e) {
-      setExtractError(e instanceof Error ? e.message : 'Extraction failed — try again.');
+      setExtractError(e instanceof Error ? e.message : 'Extraction failed - try again.');
     } finally {
       setExtracting(false);
     }
@@ -265,7 +265,7 @@ function FactsEditor({
       const asset = await uploadAsset({ userId, kind: 'context_dump', file });
       await runExtract({ assetId: asset.id });
     } catch (e) {
-      setExtractError(e instanceof Error ? e.message : 'Upload failed — try again.');
+      setExtractError(e instanceof Error ? e.message : 'Upload failed - try again.');
       setExtracting(false);
     }
   }
@@ -279,7 +279,7 @@ function FactsEditor({
             <Sparkles size={13} /> Smart fill
           </span>
         </div>
-        <p className="pw-smartfill-hint">Paste your resume, bio, or any context — or drop a file — and we'll pull the facts out.</p>
+        <p className="pw-smartfill-hint">Paste your resume, bio, or any context - or drop a file - and we'll pull the facts out.</p>
         <textarea
           className="pw-input pw-textarea"
           rows={3}
@@ -309,7 +309,7 @@ function FactsEditor({
           />
           <FileText size={14} className="pw-smartfill-dropzone-icon" />
           <span className="pw-smartfill-dropzone-label">
-            {extracting ? 'Reading…' : 'Drop a PDF, DOCX, image or screenshot — scanned files are OCR’d'}
+            {extracting ? 'Reading…' : 'Drop a PDF, DOCX, image or screenshot - scanned files are OCR’d'}
           </span>
         </div>
         <button
@@ -325,7 +325,7 @@ function FactsEditor({
       </div>
 
       <div className="pw-or-divider">
-        <span>— or add one —</span>
+        <span>- or add one -</span>
       </div>
 
       <div className="me-facts-add">
@@ -344,7 +344,7 @@ function FactsEditor({
       {loading ? (
         <p className="pw-empty">Loading your facts…</p>
       ) : facts.length === 0 ? (
-        <p className="pw-empty">No facts yet — paste your background above, or add one by hand.</p>
+        <p className="pw-empty">No facts yet - paste your background above, or add one by hand.</p>
       ) : (
         <div className="pw-chips">
           {facts.map((f) => (
@@ -363,7 +363,7 @@ function FactsEditor({
 }
 
 // ---------------------------------------------------------------------------
-// Résumé file box — same pipeline as Smart fill: upload → extract-context →
+// Résumé file box - same pipeline as Smart fill: upload → extract-context →
 // person-level facts. Dropping a résumé pulls its facts into the profile.
 // ---------------------------------------------------------------------------
 function ResumeDropzone({
@@ -395,10 +395,10 @@ function ResumeDropzone({
       setResult(
         facts.length > 0
           ? `Added ${facts.length} fact${facts.length === 1 ? '' : 's'} from your résumé.`
-          : 'Read your résumé — no new facts found.'
+          : 'Read your résumé - no new facts found.'
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Upload failed — try again.');
+      setError(e instanceof Error ? e.message : 'Upload failed - try again.');
     } finally {
       setExtracting(false);
     }
@@ -430,7 +430,7 @@ function ResumeDropzone({
         />
         {extracting ? <Loader2 size={14} className="pw-spin pw-smartfill-dropzone-icon" /> : <FileText size={14} className="pw-smartfill-dropzone-icon" />}
         <span className="pw-smartfill-dropzone-label">
-          {extracting ? 'Reading your résumé…' : 'Drop your résumé (PDF, DOCX, image) — we’ll pull the facts out'}
+          {extracting ? 'Reading your résumé…' : 'Drop your résumé (PDF, DOCX, image) - we’ll pull the facts out'}
         </span>
       </div>
       {result && <p className="section-hint">{result}</p>}

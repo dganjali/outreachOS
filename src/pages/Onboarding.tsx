@@ -22,7 +22,7 @@ export function Onboarding() {
   const [linkedinUrl, setLinkedinUrl] = useState(profile?.linkedin_url ?? '');
 
   // Gmail connect (optional step). Connection happens in a popup so the OAuth
-  // round-trip (which lands on /settings) doesn't blow away onboarding state —
+  // round-trip (which lands on /settings) doesn't blow away onboarding state -
   // we just poll status and close the popup once it's connected.
   const [gmailConnected, setGmailConnected] = useState(false);
   const [gmailChecking, setGmailChecking] = useState(false);
@@ -58,7 +58,7 @@ export function Onboarding() {
       const { url } = await gmail.start();
       const popup = window.open(url, 'gmail-oauth', 'width=520,height=680');
       if (!popup) {
-        // Popup blocked — fall back to a full redirect (lands on /settings).
+        // Popup blocked - fall back to a full redirect (lands on /settings).
         window.location.href = url;
         return;
       }
@@ -67,7 +67,7 @@ export function Onboarding() {
         try {
           connected = (await gmail.status()).connected;
         } catch {
-          /* transient — keep polling */
+          /* transient - keep polling */
         }
         if (connected) {
           window.clearInterval(poll);
@@ -99,7 +99,7 @@ export function Onboarding() {
 
   async function upsertProfile(updates: Partial<Profile>) {
     // The db shim reports failures via the returned `error` instead of
-    // throwing. Every call here must be checked — a swallowed write error made
+    // throwing. Every call here must be checked - a swallowed write error made
     // onboarding "complete" without persisting onboarding_completed_at, so the
     // route gates bounced the user straight back into onboarding.
     if (!user?.id) throw new Error('Not signed in. Please sign in again.');
@@ -218,6 +218,7 @@ export function Onboarding() {
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="e.g. Alex Chen"
+                    autoComplete="name"
                     autoFocus
                   />
                 </div>
@@ -232,7 +233,7 @@ export function Onboarding() {
                 <div className="field">
                   <label>Email</label>
                   <div className="get-to-know-you-email-display">
-                    {user?.email ?? '—'}
+                    {user?.email ?? '-'}
                   </div>
                   <p style={{ marginTop: '0.5rem', fontSize: '0.875rem', color: 'var(--text-muted)' }}>
                     We’ll use this for your account. You can change it later in Settings.
@@ -254,6 +255,7 @@ export function Onboarding() {
                     value={occupation}
                     onChange={(e) => setOccupation(e.target.value)}
                     placeholder="e.g. Head of Partnerships, Student"
+                    autoComplete="organization-title"
                     autoFocus
                   />
                 </div>
@@ -304,7 +306,7 @@ export function Onboarding() {
                     </div>
                   </div>
                   <p className="section-hint">
-                    Optional, and you can do it later in Settings. OutreachOS can only <strong>send</strong> — it never reads your inbox — and you approve every email before it goes out.
+                    Optional, and you can do it later in Settings. OutreachOS can only <strong>send</strong> - it never reads your inbox - and you approve every email before it goes out.
                   </p>
                   {gmailError && (
                     <p role="alert" className="auth-alert" style={{ marginTop: '0.5rem' }}>
@@ -340,10 +342,11 @@ export function Onboarding() {
                     value={linkedinUrl}
                     onChange={(e) => setLinkedinUrl(e.target.value)}
                     placeholder="https://www.linkedin.com/in/..."
+                    autoComplete="url"
                     autoFocus
                   />
                   <p className="section-hint">
-                    Stored on your profile for reference. You'll add your own facts and tone when you set up a voice — nothing is auto-generated about you.
+                    Stored on your profile for reference. You'll add your own facts and tone when you set up a voice - nothing is auto-generated about you.
                   </p>
                 </div>
                 <div className="field">
@@ -354,6 +357,7 @@ export function Onboarding() {
                     value={resumeUrl}
                     onChange={(e) => setResumeUrl(e.target.value)}
                     placeholder="https://..."
+                    autoComplete="url"
                   />
                 </div>
                 <div className="get-to-know-you-skip">

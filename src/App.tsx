@@ -67,7 +67,7 @@ function App() {
           />
           <Route path="/check-email" element={<CheckEmail />} />
           {/* Firebase email action handler (verify email, password reset,
-              email recovery). Public + ungated — users may arrive here signed
+              email recovery). Public + ungated - users may arrive here signed
               out, on a different device. See AuthAction.tsx for why it exists. */}
           <Route path="/auth/action" element={<AuthAction />} />
           <Route path="/wizard-preview" element={<WizardPreview />} />

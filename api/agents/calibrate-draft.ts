@@ -1,4 +1,4 @@
-// Calibrate-draft agent — generates ONE real draft for the persona-onboarding
+// Calibrate-draft agent - generates ONE real draft for the persona-onboarding
 // calibration step. Instead of asking the user to write/paste an email, we run
 // the full personalization engine once so calibration always starts from a
 // genuine draft to react to.
@@ -8,12 +8,12 @@
 //   2. If none exists yet (fresh account), we SYNTHESIZE a representative
 //      recipient from the persona's own offer/audience (and most-recent mission,
 //      if any) so the user still reacts to a real-looking draft. The user never
-//      has to write their own — they only give feedback, which is learned as
+//      has to write their own - they only give feedback, which is learned as
 //      taste via extract-style (chat_instructions → StyleProfile).
 //
 // Unlike draft.ts (which drafts as the *contact's mission* persona), this forces
 // the persona currently being calibrated, so the onboarding draft reflects the
-// voice under construction — facts, exemplars, and style profile all included.
+// voice under construction - facts, exemplars, and style profile all included.
 
 import type { Request, Response } from 'express';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
@@ -116,7 +116,7 @@ export default async function handler(req: Request, res: Response) {
     const profile = await scope.collection<ProfileDoc>('profiles').findOne();
     // Reuse the persona's grounding (facts + exemplars), ranked against the
     // offer. No real target ⇒ a synthetic id yields no evidence bullets, just
-    // the persona's context bank — which is exactly the cold-start surface.
+    // the persona's context bank - which is exactly the cold-start surface.
     const rankQuery = goal || audience || persona.name;
     const facts = await assembleAllowedFacts(scope, user.id, persona._id, '__calibrate_synthetic__', rankQuery, {
       excludedFactIds: persona.excludedFactIds ?? [],
@@ -214,7 +214,7 @@ async function synthesizeRecipient(args: {
     '- A plausible full name.',
     '- A role/title that fits the target functions and seniority band above.',
     '- A plausible (made-up) company that fits the audience.',
-    '- A short, concrete "why now" trigger (a recent move, launch, hire, or signal) — one clause, no more.',
+    '- A short, concrete "why now" trigger (a recent move, launch, hire, or signal) - one clause, no more.',
     'This is a stand-in example, not a real lead. Output JSON only.',
   ]
     .filter(Boolean)

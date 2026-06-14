@@ -49,8 +49,8 @@ export function PlanBilling() {
   // Surface the Checkout redirect result (?billing=success|cancelled).
   useEffect(() => {
     const status = new URLSearchParams(location.search).get('billing');
-    if (status === 'success') toast.success('Subscription active — your new limits are live.');
-    if (status === 'cancelled') toast('Checkout cancelled — no charge made.');
+    if (status === 'success') toast.success('Subscription active - your new limits are live.');
+    if (status === 'cancelled') toast('Checkout cancelled - no charge made.');
   }, [location.search]);
 
   async function upgrade(plan: PlanId) {

@@ -1,4 +1,4 @@
-// Unit tests for the eval scorers — pure math, no LLM/DB. Run with: npm test
+// Unit tests for the eval scorers - pure math, no LLM/DB. Run with: npm test
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

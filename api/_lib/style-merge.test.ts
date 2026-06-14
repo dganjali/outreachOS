@@ -1,4 +1,4 @@
-// Unit tests for the confidence-weighted StyleProfile merge — the guarantee
+// Unit tests for the confidence-weighted StyleProfile merge - the guarantee
 // that one noisy sample can't wreck a learned voice. Pure math. Run: npm test
 
 import { test } from 'node:test';
@@ -20,7 +20,7 @@ test('a new dimension is added with the delta confidence', () => {
 test('a LOW-confidence sample barely moves a HIGH-confidence dimension', () => {
   const cur = profile({ dimensions: { formality: { value: 0.2, confidence: 0.9, source: 'onboarding' } } });
   const out = mergeStyleProfile(cur, { dimensions: { formality: { value: 1.0, confidence: 0.1 } } }, 'edit');
-  // weighted avg = (0.2*0.9 + 1.0*0.1)/(1.0) = 0.28 — stays close to 0.2, NOT 1.0
+  // weighted avg = (0.2*0.9 + 1.0*0.1)/(1.0) = 0.28 - stays close to 0.2, NOT 1.0
   assert.ok(out.dimensions.formality.value < 0.3, `expected <0.3, got ${out.dimensions.formality.value}`);
   // confidence ratchets up, never down
   assert.ok(out.dimensions.formality.confidence >= 0.9);
@@ -68,6 +68,6 @@ test('out-of-range confidences are clamped to [0,1]', () => {
 
 test('templateStrictness (a user-set knob) is preserved across calibration', () => {
   const cur = profile({ templateStrictness: 90 });
-  // A delta from extract-style never carries strictness — it must survive untouched.
+  // A delta from extract-style never carries strictness - it must survive untouched.
   assert.equal(mergeStyleProfile(cur, { voiceSummary: 'updated' }, 's').templateStrictness, 90);
 });

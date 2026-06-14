@@ -1,11 +1,11 @@
-// Ideal Contact Profile (ICP-People) — the adaptive spec of WHO to reach at a
+// Ideal Contact Profile (ICP-People) - the adaptive spec of WHO to reach at a
 // target (CONTACT_ENGINE.md §2/§7/§8).
 //
 // Two layers:
-//   • MODE_ICP_PRIOR — the deterministic "who actually replies" model per mode.
+//   • MODE_ICP_PRIOR - the deterministic "who actually replies" model per mode.
 //     This is the seniority philosophy (owner/manager band, capped) we never let
 //     the LLM drift away from.
-//   • synthesizeContactIcp — one LLM call per mission that ADAPTS the function
+//   • synthesizeContactIcp - one LLM call per mission that ADAPTS the function
 //     set + geo to the specific offer/audience, seeded by the prior. Seniority
 //     stays from the prior (the LLM is bad at the band philosophy and would
 //     re-introduce exec bias); per-target size shifting happens later in
@@ -53,11 +53,11 @@ export const MODE_ICP_PRIOR: Record<MissionMode, Prior> = {
     functions: ['software engineering', 'engineering', 'data', 'machine learning', 'product', 'design'],
     functionKeywords: ['engineer', 'developer', 'data', 'machine learning', 'designer', 'product'],
     seniority: { idealLevels: ['senior_ic', 'lead'], maxLevel: 'manager' },
-    // Exclude in-house recruiters/HR — you're poaching builders, not pitching a
+    // Exclude in-house recruiters/HR - you're poaching builders, not pitching a
     // recruiting service. (Flip these to flip the mode; CONTACT_ENGINE.md §7.)
     disqualifierKeywords: [...COMMON_DISQUALIFIERS, 'recruiter', 'talent acquisition', 'sourcer', 'human resources'],
     routerOk: false,
-    rationale: 'Candidate sourcing: reach the ICs and team leads you would hire — matched on function and level — not company decision-makers or in-house recruiters.',
+    rationale: 'Candidate sourcing: reach the ICs and team leads you would hire - matched on function and level - not company decision-makers or in-house recruiters.',
   },
   sales: {
     functions: ['operations', 'engineering', 'product', 'marketing', 'growth', 'finance', 'it'],
@@ -138,7 +138,7 @@ export function normalizeIcp(mode: MissionMode, geo: string | null | undefined, 
   return {
     functions: functions.length ? functions : base.functions,
     functionKeywords: functionKeywords.length ? functionKeywords : base.functionKeywords,
-    seniority: base.seniority, // prior wins — never LLM-controlled
+    seniority: base.seniority, // prior wins - never LLM-controlled
     disqualifierKeywords,
     routerOk: base.routerOk,
     geo: { preferred: geo?.trim() || null, scope, strict: base.geo.strict },

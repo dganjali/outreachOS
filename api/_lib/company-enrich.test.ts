@@ -47,7 +47,7 @@ describe('parseEmployeeCount', () => {
     assert.equal(parseEmployeeCount('Startup · 42 employees'), 42);
   });
   it('returns null when there is no headcount', () => {
-    assert.equal(parseEmployeeCount('Acme — the official website'), null);
+    assert.equal(parseEmployeeCount('Acme - the official website'), null);
     assert.equal(parseEmployeeCount(''), null);
   });
 });

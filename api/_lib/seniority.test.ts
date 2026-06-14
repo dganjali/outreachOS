@@ -106,7 +106,7 @@ describe('matchFunctions & geoFitScore', () => {
 });
 
 // The headline scenario: at an enterprise these are the actual reported titles.
-describe('scoreContact — the bank example at enterprise size', () => {
+describe('scoreContact - the bank example at enterprise size', () => {
   const score = (title: string) => scoreContact({ title, icp: COMMUNITY_ICP, sizeTier: 'enterprise' });
 
   it('drops the off-function execs (too high up)', () => {
@@ -152,10 +152,10 @@ describe('scoreContact — the bank example at enterprise size', () => {
   });
 });
 
-describe('scoreContact — size relativity', () => {
+describe('scoreContact - size relativity', () => {
   it('keeps the founder/CEO at a startup but not at an enterprise', () => {
-    // ICP that genuinely allows execs (maxLevel cxo) so the SIZE band — not the
-    // ICP cap — is what differentiates the two cases.
+    // ICP that genuinely allows execs (maxLevel cxo) so the SIZE band - not the
+    // ICP cap - is what differentiates the two cases.
     const icp: ContactIcp = {
       ...COMMUNITY_ICP,
       functions: ['marketing', 'brand'],

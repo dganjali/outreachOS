@@ -36,7 +36,7 @@ export function CsvImport({ missionId, onImported }: Props) {
     const fitIdx = findIdx(header, ['fit', 'fit_reason', 'reason']);
 
     if (nameIdx === -1) {
-      // No header row — treat each line as a company name.
+      // No header row - treat each line as a company name.
       return [lines[0], ...rest].map((l): ParsedRow => ({ company_name: l }));
     }
 

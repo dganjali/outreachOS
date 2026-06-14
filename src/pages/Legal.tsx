@@ -1,7 +1,7 @@
 // Privacy Policy and Terms of Service. These pages exist primarily to satisfy
 // Google OAuth verification (the consent screen links here) and to be honest
 // with users about what the app does with their data. They are intentionally
-// plain, public, and unauthenticated. Not legal advice — have counsel review
+// plain, public, and unauthenticated. Not legal advice - have counsel review
 // before relying on these commercially.
 
 import { Link } from 'react-router-dom';

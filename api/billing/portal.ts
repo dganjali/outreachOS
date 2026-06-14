@@ -1,4 +1,4 @@
-// POST /api/billing/portal — open the Stripe customer billing portal so the
+// POST /api/billing/portal - open the Stripe customer billing portal so the
 // user can update their card, switch plans, or cancel. Returns { url }.
 
 import type { Request, Response } from 'express';

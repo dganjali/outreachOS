@@ -1,4 +1,4 @@
-// Pure scorers for the eval harness (scripts/eval). Kept here — not in scripts/ —
+// Pure scorers for the eval harness (scripts/eval). Kept here - not in scripts/ -
 // so they run under the unit-test runner (api/**/*.test.ts). Given an engine
 // result + its grounding context, they turn "is it slop?" into numbers:
 // grounding %, slop-flag count, constraint pass, voice match. No LLM, no DB.
@@ -15,7 +15,7 @@ export interface ScoreInput {
 }
 
 export interface Scorecard {
-  groundingRate: number; // 0..1 — claims attributed to a real allowed fact
+  groundingRate: number; // 0..1 - claims attributed to a real allowed fact
   ungroundedClaims: number;
   slopFlags: number; // banned_phrase + slop + voice_mismatch violations
   blockViolations: number;

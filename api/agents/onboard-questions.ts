@@ -1,4 +1,4 @@
-// Onboarding agent — adaptive clarifying questions (Stage 3).
+// Onboarding agent - adaptive clarifying questions (Stage 3).
 //
 // Reads everything gathered so far (persona frame + context facts + exemplars)
 // and asks the 3–5 questions with the highest information gain: gaps in the
@@ -34,7 +34,7 @@ const SCHEMA = {
   required: ['questions'],
 } as const;
 
-const SYSTEM = `You help a user build a reusable outreach persona. Given what we already know about them (their substance/facts, their offer/audience, and example emails), ask the 3–5 questions that would most improve the personalization — prioritize: missing proof/specifics that would make emails concrete, contradictions to resolve, and gaps in voice. Do NOT ask things already answered. Each question must be answerable in 1–2 sentences. For each, give a short "why" (what it unlocks). Output JSON only.`;
+const SYSTEM = `You help a user build a reusable outreach persona. Given what we already know about them (their substance/facts, their offer/audience, and example emails), ask the 3–5 questions that would most improve the personalization - prioritize: missing proof/specifics that would make emails concrete, contradictions to resolve, and gaps in voice. Do NOT ask things already answered. Each question must be answerable in 1–2 sentences. For each, give a short "why" (what it unlocks). Output JSON only.`;
 
 export default async function handler(req: Request, res: Response) {
   if (req.method !== 'POST') return methodNotAllowed(res, ['POST']);

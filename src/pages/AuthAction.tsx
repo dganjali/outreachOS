@@ -1,7 +1,7 @@
 // Custom Firebase email action handler.
 //
 // Firebase's DEFAULT verification link is a plain GET that completes
-// verification server-side the instant it's fetched — so a mail provider's
+// verification server-side the instant it's fetched - so a mail provider's
 // link scanner / prefetcher (Gmail, Outlook Safe Links, corporate proxies)
 // silently verifies the account before the user does anything. That's what
 // made signup "skip" verification.
@@ -14,8 +14,8 @@
 // consume the code), so even a JS-executing scanner can't complete the action.
 //
 // Customizing the action URL routes EVERY email action through this page, so it
-// handles all modes — verifyEmail, resetPassword, recoverEmail, and
-// verifyAndChangeEmail — not just verification.
+// handles all modes - verifyEmail, resetPassword, recoverEmail, and
+// verifyAndChangeEmail - not just verification.
 
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
@@ -45,7 +45,7 @@ function friendlyError(code: string): string {
     case 'auth/user-not-found':
       return 'We couldn’t find an account for this link.';
     case 'auth/weak-password':
-      return 'Choose a stronger password — at least 8 characters.';
+      return 'Choose a stronger password - at least 8 characters.';
     default:
       return 'Something went wrong with this link. Request a new one and try again.';
   }
@@ -99,7 +99,7 @@ export function AuthAction() {
 }
 
 // ---------------------------------------------------------------------------
-// Email verification — the prefetch-proof path. The code is only consumed when
+// Email verification - the prefetch-proof path. The code is only consumed when
 // the user clicks the button; the upfront checkActionCode is read-only.
 // ---------------------------------------------------------------------------
 function VerifyEmail({ oobCode }: { oobCode: string }) {
@@ -133,7 +133,7 @@ function VerifyEmail({ oobCode }: { oobCode: string }) {
     try {
       await applyActionCode(auth, oobCode);
       // Same browser they signed up in? Refresh the flag and drop them straight
-      // into setup. Different device? Show success and point them to sign in —
+      // into setup. Different device? Show success and point them to sign in -
       // their original tab is polling and will continue on its own.
       if (auth.currentUser) {
         await reloadUser();
@@ -153,13 +153,13 @@ function VerifyEmail({ oobCode }: { oobCode: string }) {
         title="Email verified"
         subtitle={
           <>
-            {email ? <strong>{email}</strong> : 'Your email'} is confirmed — you’re all set.
+            {email ? <strong>{email}</strong> : 'Your email'} is confirmed - you’re all set.
           </>
         }
         footer={<Link to="/sign-in">Continue to sign in</Link>}
       >
         <p className={INFO_CLASS}>
-          If you started signing up in another tab, you can return to it — it’ll continue
+          If you started signing up in another tab, you can return to it - it’ll continue
           automatically now that you’re verified.
         </p>
       </AuthShell>
@@ -207,7 +207,7 @@ function VerifyEmail({ oobCode }: { oobCode: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Password reset — verifyPasswordResetCode is read-only; the reset only happens
+// Password reset - verifyPasswordResetCode is read-only; the reset only happens
 // on submit. Routed here because the custom action URL covers all email actions.
 // ---------------------------------------------------------------------------
 function ResetPassword({ oobCode }: { oobCode: string }) {
@@ -332,7 +332,7 @@ function ResetPassword({ oobCode }: { oobCode: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Email-change recovery — undo an email change. Button-gated for the same
+// Email-change recovery - undo an email change. Button-gated for the same
 // prefetch-safety reason as verification.
 // ---------------------------------------------------------------------------
 function RecoverEmail({ oobCode }: { oobCode: string }) {

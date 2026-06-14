@@ -1,7 +1,7 @@
-# DESIGN.md — OutreachOS design system
+# DESIGN.md - OutreachOS design system
 
 Register: **product** (design serves the task). Identity: **Linear/Notion register**
-— cool graphite + near-white surfaces, Inter throughout, sharp rectangles,
+- cool graphite + near-white surfaces, Inter throughout, sharp rectangles,
 hairline borders, near-invisible elevation. Forest green is retained as a
 *sparing* accent only (one identity moment per screen at most). Light theme.
 
@@ -38,8 +38,8 @@ links, focus rings, and `--mission-progress-bar`. Nothing else. No green hero
 washes, no `--accent-soft` backgrounds on whole cards.
 
 ## Typography
-- `--font-body: Inter` — **everything** in product UI. Headings, labels, body.
-- `--font-display: Fraunces` — *only* on Landing hero + the marketing-side
+- `--font-body: Inter` - **everything** in product UI. Headings, labels, body.
+- `--font-display: Fraunces` - *only* on Landing hero + the marketing-side
   long-form headings on the auth shell. Forbidden in app UI.
 - `--font-mono` for IDs/data/emails.
 - Fixed rem scale anchored at **14px base** (`--text-base: 0.875rem`), ~1.2 ratio.
@@ -92,7 +92,7 @@ washes, no `--accent-soft` backgrounds on whole cards.
 - Focus ring (2px green halo on inputs / buttons)
 - Selection (`::selection` background)
 - `.mission-progress-bar` (the only filled green strip)
-- Landing hero (Fraunces + green gradient — brand-register exception)
+- Landing hero (Fraunces + green gradient - brand-register exception)
 
 Outside these, the design is monochrome-graphite. If you're tempted to add green
 elsewhere, you're degrading the accent. Use weight or border instead.

@@ -20,7 +20,7 @@ export function CheckEmail() {
   const [resendError, setResendError] = useState<string | null>(null);
 
   // Firebase's cached `currentUser.emailVerified` does NOT flip when the user
-  // clicks the verification link in another tab — only a `reload()` refreshes
+  // clicks the verification link in another tab - only a `reload()` refreshes
   // it. Poll reloadUser() so we advance automatically instead of forcing the
   // user to manually refresh until it "lets them in".
   useEffect(() => {
@@ -41,7 +41,7 @@ export function CheckEmail() {
     };
   }, [user, reloadUser, navigate]);
 
-  // Already verified (e.g. landed here after the fact) — move along.
+  // Already verified (e.g. landed here after the fact) - move along.
   if (user && emailVerified) {
     return <Navigate to="/onboarding" replace />;
   }

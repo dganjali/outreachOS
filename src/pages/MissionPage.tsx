@@ -141,7 +141,7 @@ export function MissionPage() {
   );
 
   // Batched: one email_sequences request for ALL contacts (was 1 per contact,
-  // and — because "no sequence" was stored as undefined — the old per-contact
+  // and - because "no sequence" was stored as undefined - the old per-contact
   // effect refired endlessly for any contact without a draft, flooding the API.
   const contactIdsKey = useMemo(() => allContacts.map((c) => c.id).sort().join(','), [allContacts]);
   useEffect(() => {
@@ -446,7 +446,7 @@ export function MissionPage() {
                                     <button
                                       type="button"
                                       className="btn-secondary small"
-                                      title="They wrote back in Gmail — stop their scheduled follow-ups"
+                                      title="They wrote back in Gmail - stop their scheduled follow-ups"
                                       onClick={() => markContactReplied(c)}
                                     >
                                       Mark replied
@@ -588,7 +588,7 @@ function SequenceCard({ sequence, contact }: { sequence: EmailSequence; contact:
             <div className="email-override">
               <label>
                 {contact.likely_email_pattern
-                  ? `Recipient email (no verified address — pattern suggests ${contact.likely_email_pattern})`
+                  ? `Recipient email (no verified address - pattern suggests ${contact.likely_email_pattern})`
                   : 'Recipient email (no verified address on file)'}
                 <input
                   type="email"
@@ -615,7 +615,7 @@ function SequenceCard({ sequence, contact }: { sequence: EmailSequence; contact:
             disabled={!contact.email && !overrideEmail}
             disabledReason={
               !contact.email && !overrideEmail
-                ? 'No email for this contact — enter a recipient address above'
+                ? 'No email for this contact - enter a recipient address above'
                 : undefined
             }
           />

@@ -1,4 +1,4 @@
-// Durable, resumable pipeline orchestration — the server-side replacement for
+// Durable, resumable pipeline orchestration - the server-side replacement for
 // the old browser-driven run (which executed ~16 agent calls in the tab and
 // died on close).
 //
@@ -8,7 +8,7 @@
 //     performs exactly ONE unit of work and returns the next run state. No I/O
 //     to Mongo lives in it, so it is trivially unit-testable with fake executors.
 //   • The driver loop persists after every step and writes a heartbeat, so a
-//     dropped connection or a restarted instance loses nothing — any later poll
+//     dropped connection or a restarted instance loses nothing - any later poll
 //     re-drives the run from its cursor (`resumeIfStale`).
 
 import { forUser, newId, type UserScope } from './db';
@@ -23,6 +23,8 @@ import sequenceHandler from '../agents/sequence';
 
 export const DEFAULT_TARGET_COUNT = 8;
 export const DEFAULT_TOP_N = 5;
+export const DEFAULT_TOP_CONTACTS = 1;
+export const MAX_TOP_CONTACTS = 5;
 
 const PACE_MS = 2_500; // gap between steps so a per-minute cap doesn't stall us
 const MINUTE_RETRY_WAIT_MS = 35_000;
@@ -36,7 +38,7 @@ export class PipelineRateLimitError extends Error {} // per-minute: retryable
 export class PipelineDailyLimitError extends Error {} // per-day: pause the run
 
 // ---------------------------------------------------------------------------
-// Executors — the side-effecting calls the reducer drives. Real ones reuse the
+// Executors - the side-effecting calls the reducer drives. Real ones reuse the
 // existing agent handlers verbatim via in-process invocation; tests pass fakes.
 // ---------------------------------------------------------------------------
 export interface PipelineExecutors {
@@ -127,6 +129,8 @@ export async function advancePipeline(run: PipelineRunDoc, exec: PipelineExecuto
       evidence: 'queued',
       contacts: 'queued',
       sequence: 'queued',
+      contactIds: [],
+      sequences: [],
       bestContactId: null,
     }));
     r.phase = 'processing';
@@ -160,14 +164,17 @@ export async function advancePipeline(run: PipelineRunDoc, exec: PipelineExecuto
     try {
       const contacts = await exec.contacts(t.targetId);
       step(t, 'contacts', 'done');
-      const best = [...contacts].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))[0];
-      if (!best) {
+      // Pursue the top contacts by reply-likelihood, capped at the run's setting.
+      const ranked = [...contacts].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
+      t.contactIds = ranked.slice(0, Math.max(1, r.config.topContacts)).map((c) => c.id);
+      t.bestContactId = t.contactIds[0] ?? null;
+      t.sequences = t.contactIds.map(() => 'queued');
+      if (t.contactIds.length === 0) {
         step(t, 'sequence', 'failed');
         toNextTarget(r);
       } else {
-        t.bestContactId = best.id;
-        r.cursor = { ...r.cursor, step: 'sequence' };
-        r.note = `Drafting a personalized email for ${t.name}…`;
+        r.cursor = { ...r.cursor, step: 'sequence', contactIndex: 0 };
+        r.note = draftNote(t, 0);
       }
     } catch (e) {
       if (e instanceof PipelineRateLimitError) throw e;
@@ -179,23 +186,42 @@ export async function advancePipeline(run: PipelineRunDoc, exec: PipelineExecuto
     return r;
   }
 
-  // r.cursor.step === 'sequence'
+  // r.cursor.step === 'sequence' - draft one contact per advance so a rate limit
+  // or daily cap pauses cleanly between drafts and resumes at this contactIndex.
+  const ci = r.cursor.contactIndex ?? 0;
+  const contactId = t.contactIds[ci];
   try {
-    if (!t.bestContactId) throw new Error('no_contact');
-    await exec.sequence(t.bestContactId);
-    step(t, 'sequence', 'done');
+    if (!contactId) throw new Error('no_contact');
+    await exec.sequence(contactId);
+    t.sequences[ci] = 'done';
   } catch (e) {
     if (e instanceof PipelineRateLimitError) throw e;
     if (e instanceof PipelineDailyLimitError) return pauseForDaily(r);
-    step(t, 'sequence', 'failed');
+    t.sequences[ci] = 'failed';
   }
+  const nextCi = ci + 1;
+  if (nextCi < t.contactIds.length) {
+    r.cursor = { ...r.cursor, step: 'sequence', contactIndex: nextCi };
+    r.note = draftNote(t, nextCi);
+    return r;
+  }
+  // All contacts attempted - the target's draft step is done if any succeeded.
+  step(t, 'sequence', t.sequences.some((s) => s === 'done') ? 'done' : 'failed');
   toNextTarget(r);
   return r;
 }
 
+// Note shown while drafting; names the contact position when pursuing several.
+function draftNote(t: PipelineRunDoc['targets'][number], contactIndex: number): string {
+  const total = t.contactIds.length;
+  return total > 1
+    ? `Drafting personalized emails for ${t.name} (${contactIndex + 1} of ${total})…`
+    : `Drafting a personalized email for ${t.name}…`;
+}
+
 function pauseForDaily(r: PipelineRunDoc): PipelineRunDoc {
   r.status = 'paused';
-  r.note = "Daily agent-run limit reached — finished targets are ready; the rest resume tomorrow.";
+  r.note = "Daily agent-run limit reached - finished targets are ready; the rest resume tomorrow.";
   return r; // cursor preserved so a later run resumes exactly here
 }
 
@@ -217,7 +243,7 @@ function persistableFields(r: PipelineRunDoc) {
 
 const PIPELINE_RUNS = 'pipeline_runs' as const;
 
-// Runs currently being driven *in this process* — prevents a start and a
+// Runs currently being driven *in this process* - prevents a start and a
 // concurrent resume-poll from double-driving the same run.
 const active = new Set<string>();
 
@@ -236,7 +262,7 @@ async function driveLoop(scope: UserScope, runId: string, exec: PipelineExecutor
       next = await advancePipeline(run, exec);
     } catch (e) {
       if (e instanceof PipelineRateLimitError) {
-        // Per-minute throttle — pace and retry the same cursor a few times.
+        // Per-minute throttle - pace and retry the same cursor a few times.
         const tries = ((run as PipelineRunDoc & { _minuteRetries?: number })._minuteRetries ?? 0) + 1;
         await scope.collection<PipelineRunDoc>(PIPELINE_RUNS).updateById(runId, {
           note: 'Pacing requests, resuming shortly…',
@@ -283,6 +309,7 @@ export interface StartPipelineArgs {
   missionId: string;
   targetCount?: number;
   topN?: number;
+  topContacts?: number;
   exec?: PipelineExecutors; // tests inject; prod uses realExecutors
 }
 
@@ -298,6 +325,7 @@ export async function startPipeline(args: StartPipelineArgs): Promise<PipelineRu
     config: {
       targetCount: Math.min(Math.max(args.targetCount ?? DEFAULT_TARGET_COUNT, 1), 25),
       topN: Math.min(Math.max(args.topN ?? DEFAULT_TOP_N, 1), 15),
+      topContacts: Math.min(Math.max(args.topContacts ?? DEFAULT_TOP_CONTACTS, 1), MAX_TOP_CONTACTS),
     },
     targets: [],
     cursor: null,

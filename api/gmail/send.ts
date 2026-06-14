@@ -47,7 +47,7 @@ export default async function handler(req: Request, res: Response) {
     return res.status(400).json({ error: 'invalid_recipient_email' });
   }
 
-  // Suppression guard — never send (or draft) to a suppressed address.
+  // Suppression guard - never send (or draft) to a suppressed address.
   if (mode === 'send' && (await isSuppressed(scope, toEmail))) {
     return res.status(409).json({ error: 'suppressed', message: 'This address is on your suppression list.' });
   }
@@ -142,7 +142,7 @@ export default async function handler(req: Request, res: Response) {
       inReplyTo: priorMessageId ?? undefined,
     };
 
-    // Drafts are kept in OutreachOS only — pushing them into the user's Gmail
+    // Drafts are kept in OutreachOS only - pushing them into the user's Gmail
     // would need the restricted gmail.compose scope. The user reviews the draft
     // here and clicks Send (gmail.send) when ready.
     let result: { messageId: string; threadId: string; draftId?: string };

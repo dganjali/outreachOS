@@ -1,4 +1,4 @@
-// POST /api/billing/checkout — start a Stripe Checkout session to subscribe to
+// POST /api/billing/checkout - start a Stripe Checkout session to subscribe to
 // a paid plan. Body: { plan: 'pro' | 'scale' }. Returns { url } to redirect to.
 
 import type { Request, Response } from 'express';

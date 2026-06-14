@@ -1,7 +1,7 @@
-// Server-side pipeline endpoints — the durable replacement for the browser
+// Server-side pipeline endpoints - the durable replacement for the browser
 // orchestration in src/pages/MissionRun.tsx.
 //
-//   POST /api/agents/pipeline            { mission_id, count?, top_n? } → starts a run
+//   POST /api/agents/pipeline            { mission_id, count?, top_n?, top_contacts? } → starts a run
 //   GET  /api/agents/pipeline?run_id=…   → current run state (self-heals stale runs)
 //   GET  /api/agents/pipeline?mission_id=… → latest run for a mission (for reload)
 //   POST /api/agents/pipeline/cancel     { run_id } → stop a run
@@ -22,10 +22,11 @@ export default async function handler(req: Request, res: Response) {
   const scope = forUser(user.id);
 
   if (req.method === 'POST') {
-    const { mission_id, count, top_n } = (req.body ?? {}) as {
+    const { mission_id, count, top_n, top_contacts } = (req.body ?? {}) as {
       mission_id?: string;
       count?: number;
       top_n?: number;
+      top_contacts?: number;
     };
     if (!mission_id) return res.status(400).json({ error: 'missing_mission_id' });
 
@@ -42,7 +43,13 @@ export default async function handler(req: Request, res: Response) {
       return res.status(200).json({ data: serialize(existing as PipelineRunDoc), already_running: true });
     }
 
-    const run = await startPipeline({ user, missionId: mission_id, targetCount: count, topN: top_n });
+    const run = await startPipeline({
+      user,
+      missionId: mission_id,
+      targetCount: count,
+      topN: top_n,
+      topContacts: top_contacts,
+    });
     return res.status(201).json({ data: serialize(run) });
   }
 

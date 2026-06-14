@@ -1,4 +1,4 @@
-// Serper client — optional. Active only when SERPER_API_KEY is set.
+// Serper client - optional. Active only when SERPER_API_KEY is set.
 // A deterministic Google SERP API used for person discovery: we run
 // LinkedIn-scoped queries and hand the organic results to the LLM to rank.
 // This replaces the LLM's opaque built-in web_search grounding for discovery.
@@ -130,9 +130,9 @@ export function buildPeopleQueries(spec: PeopleQuerySpec): string[] {
   const negClause = neg ? ` ${neg}` : '';
 
   const queries: string[] = [];
-  // 1. function × seniority, with negatives — the precise owner-band query.
+  // 1. function × seniority, with negatives - the precise owner-band query.
   queries.push(`site:linkedin.com/in${funcClause}${senClause} ${company}${negClause}`.trim());
-  // 2. function-only, NO negatives — a broad net so an oddly-titled or
+  // 2. function-only, NO negatives - a broad net so an oddly-titled or
   //    on-function senior owner still appears; the scorer ranks them, not the query.
   queries.push(`site:linkedin.com/in${funcClause} ${company}`.trim());
   // 3. geo variant of the precise query, when a location focus is set.

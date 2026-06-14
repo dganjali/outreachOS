@@ -1,6 +1,6 @@
 // Seniority taxonomy, title parsing, size-relative banding, and the composite
 // reply-likelihood score. The deterministic core of the Contact Discovery
-// Engine (CONTACT_ENGINE.md §3/§5) — no network, no LLM, fully unit-testable.
+// Engine (CONTACT_ENGINE.md §3/§5) - no network, no LLM, fully unit-testable.
 //
 // This is where the "contacts are too high up" problem is actually solved: a raw
 // title becomes a normalized seniority rank, the acceptable band shifts with the
@@ -34,7 +34,7 @@ export type GeoScopeTag = 'global' | 'regional' | 'national' | null;
 export interface ParsedTitle {
   level: SeniorityLevel | null; // null = couldn't classify
   rank: number; // 0 when level is null (treated as "unknown", neutral)
-  isRouter: boolean; // coordinator / assistant / EA — a gatekeeper, not the owner
+  isRouter: boolean; // coordinator / assistant / EA - a gatekeeper, not the owner
   scope: GeoScopeTag; // "Global"/"Regional" qualifiers amplify effective seniority
 }
 
@@ -81,16 +81,16 @@ function classifyLevel(title: string): SeniorityLevel | null {
   // Director / Head of … (head treated as director-equivalent)
   if (/\bdirector\b/.test(title) || /\bhead\s+(of|,)\b/.test(title) || /\bhead\b/.test(title)) return 'director';
 
-  // Senior <function> Manager — "Senior Community Investment Manager"
+  // Senior <function> Manager - "Senior Community Investment Manager"
   if (/\b(senior|sr\.?)\b[\w\s,&./-]*\bmanager\b/.test(title)) return 'senior_manager';
 
   // Manager
   if (/\bmanager\b/.test(title) || /\bmgr\b/.test(title)) return 'manager';
 
-  // Lead — "BD Lead", "Team Lead", "Engineering Lead"
+  // Lead - "BD Lead", "Team Lead", "Engineering Lead"
   if (/\blead\b/.test(title)) return 'lead';
 
-  // Senior IC — principal/staff or "Senior <role>"
+  // Senior IC - principal/staff or "Senior <role>"
   if (/\b(principal|staff)\b/.test(title)) return 'senior_ic';
   if (/\b(senior|sr\.?)\b/.test(title)) return 'senior_ic';
 
@@ -136,7 +136,7 @@ export function sizeTierFromCount(count: number | null | undefined): SizeTier | 
 
 /**
  * Combine the mission ICP's desired band with the target's size band. The size
- * band only ever makes the cap STRICTER — so a mode that wants directors still
+ * band only ever makes the cap STRICTER - so a mode that wants directors still
  * gets program managers at an enterprise, and the cap drops execs.
  */
 export function effectiveBand(icp: ContactIcp, sizeTier: SizeTier | null): Band {
@@ -151,7 +151,7 @@ export function effectiveBand(icp: ContactIcp, sizeTier: SizeTier | null): Band 
 }
 
 // ---------------------------------------------------------------------------
-// Function matching — does the title/headline sit in the right function?
+// Function matching - does the title/headline sit in the right function?
 // ---------------------------------------------------------------------------
 
 const STOPWORDS = new Set(['and', 'the', 'of', 'for', 'to', 'in', 'on', '&', 'a']);
@@ -168,7 +168,7 @@ export function matchFunctions(text: string, functions: string[]): string[] {
       out.push(fn);
       continue;
     }
-    // Phrase not verbatim — accept if a distinctive (>3 char) word matches.
+    // Phrase not verbatim - accept if a distinctive (>3 char) word matches.
     const words = phrase.split(/[\s/&-]+/).filter((w) => w.length > 3 && !STOPWORDS.has(w));
     if (words.some((w) => hay.includes(w))) out.push(fn);
   }
@@ -183,7 +183,7 @@ export function matchFunctions(text: string, functions: string[]): string[] {
 export function geoFitScore(location: string | null | undefined, geo: ContactIcp['geo']): number {
   if (!geo?.preferred) return 1; // no preference → everyone fits
   const loc = (location ?? '').toLowerCase();
-  if (!loc) return 0.6; // unknown location — don't punish hard, just slightly
+  if (!loc) return 0.6; // unknown location - don't punish hard, just slightly
   const tokens = geo.preferred
     .toLowerCase()
     .split(/[\s,]+/)
@@ -209,7 +209,7 @@ export interface ScoreInput {
   icp: ContactIcp;
   sizeTier: SizeTier | null;
   // Allow keeping a candidate above the size cap (only when the pool would
-  // otherwise be empty). Surfaced with a flag — never silent.
+  // otherwise be empty). Surfaced with a flag - never silent.
   allowAboveCap?: boolean;
 }
 
@@ -224,11 +224,11 @@ export interface ScoredContact {
 }
 
 function seniorityBandFit(r: number, band: Band): number {
-  if (r === 0) return 0.5; // unknown level — neutral
+  if (r === 0) return 0.5; // unknown level - neutral
   if (r > band.hardMax) return 0;
   if (r >= band.idealMin && r <= band.idealMax) return 1;
   if (r < band.idealMin) return Math.max(0.3, 1 - (band.idealMin - r) * 0.15); // too junior, gentle
-  return Math.max(0.1, 1 - (r - band.idealMax) * 0.3); // above ideal but ≤ cap — too senior
+  return Math.max(0.1, 1 - (r - band.idealMax) * 0.3); // above ideal but ≤ cap - too senior
 }
 
 /**
@@ -242,7 +242,7 @@ export function scoreContact(input: ScoreInput): ScoredContact {
   const text = `${title ?? ''} ${headline ?? ''}`.trim();
   const reasons: string[] = [];
 
-  // Hard filter 1 — explicit non-seniority disqualifiers (former/retired/intern…
+  // Hard filter 1 - explicit non-seniority disqualifiers (former/retired/intern…
   // and any title substring the ICP listed). Seniority is handled by the band,
   // not these, so they stay size-independent.
   const lowered = text.toLowerCase();
@@ -255,7 +255,7 @@ export function scoreContact(input: ScoreInput): ScoredContact {
   const matched = matchFunctions(text, icp.functions);
   const aboveCap = parsed.rank > band.hardMax;
 
-  // Hard filter 2 — above the size cap AND off-function. A senior exec in the
+  // Hard filter 2 - above the size cap AND off-function. A senior exec in the
   // WRONG function (a Global CMO for a community-investment mission) is the
   // classic "too high up" miss → drop. An above-cap person who IS on-function
   // ("SVP, Community") is kept as a low-ranked fallback, never silently dropped.
@@ -267,8 +267,8 @@ export function scoreContact(input: ScoreInput): ScoredContact {
   const funcScore = matched.length >= 1 ? 1 : 0.3;
   let bandScore = seniorityBandFit(parsed.rank, band);
   if (aboveCap) {
-    bandScore = 0.2; // on-function but above cap — strong penalty, not elimination
-    reasons.push('above cap but on-function — kept as down-ranked fallback');
+    bandScore = 0.2; // on-function but above cap - strong penalty, not elimination
+    reasons.push('above cap but on-function - kept as down-ranked fallback');
   }
   const geoScore = geoFitScore(location, icp.geo);
   const conf = clamp01(input.llmConfidence ?? 0.5);

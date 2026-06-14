@@ -9,7 +9,7 @@ function optional(name: string, fallback = ''): string {
 }
 
 export const env = {
-  // Gemini (Vertex AI) — the agent LLM. Auth is via Application Default
+  // Gemini (Vertex AI) - the agent LLM. Auth is via Application Default
   // Credentials (the Cloud Run runtime service account), so no API key here.
   // Two tiers: flash is the cheap default (research, judging, extraction); pro
   // is reserved for the quality-critical draft generation step (the one call
@@ -22,7 +22,7 @@ export const env = {
   // Vertex AI region for generateContent. gemini-2.5-* live in us-central1.
   VERTEX_LOCATION: () => optional('VERTEX_LOCATION', 'us-central1'),
 
-  // Anthropic (legacy — optional, kept so old config doesn't crash boot)
+  // Anthropic (legacy - optional, kept so old config doesn't crash boot)
   ANTHROPIC_API_KEY: () => optional('ANTHROPIC_API_KEY'),
   ANTHROPIC_MODEL: () => optional('ANTHROPIC_MODEL', 'claude-sonnet-4-5'),
 
@@ -34,7 +34,7 @@ export const env = {
   FIREBASE_PROJECT_ID: () => required('FIREBASE_PROJECT_ID'),
   FIREBASE_SERVICE_ACCOUNT_JSON: () => optional('FIREBASE_SERVICE_ACCOUNT_JSON'),
 
-  // Voyage AI (legacy — embeddings moved to Vertex; optional so boot won't fail)
+  // Voyage AI (legacy - embeddings moved to Vertex; optional so boot won't fail)
   VOYAGE_API_KEY: () => optional('VOYAGE_API_KEY'),
 
   // Google Cloud
@@ -53,16 +53,16 @@ export const env = {
   GOOGLE_CLIENT_ID: () => required('GOOGLE_CLIENT_ID'),
   GOOGLE_CLIENT_SECRET: () => required('GOOGLE_CLIENT_SECRET'),
 
-  // Serper (optional) — Google SERP API for person discovery. When set, the
+  // Serper (optional) - Google SERP API for person discovery. When set, the
   // contacts agent uses deterministic search results instead of the LLM's
   // built-in web_search grounding.
   SERPER_API_KEY: () => process.env.SERPER_API_KEY || null,
 
-  // emailfinder.dev (optional) — SMTP-verified email resolution. When set, the
+  // emailfinder.dev (optional) - SMTP-verified email resolution. When set, the
   // contacts agent resolves a real, deliverable email instead of guessing.
   EMAILFINDER_API_KEY: () => process.env.EMAILFINDER_API_KEY || null,
 
-  // MillionVerifier (optional) — catch-all gate after resolution. When set, a
+  // MillionVerifier (optional) - catch-all gate after resolution. When set, a
   // finder hit on a catch-all/unknown domain is downgraded to 'likely' and
   // 'invalid' addresses are discarded instead of shipped as 'verified'.
   MILLIONVERIFIER_API_KEY: () => process.env.MILLIONVERIFIER_API_KEY || null,

@@ -1,5 +1,5 @@
 # Cloud Run image for the OutreachOS API.
-# The React frontend is built separately and hosted on Vercel — this image
+# The React frontend is built separately and hosted on Vercel - this image
 # only serves /api/* + /healthz.
 
 FROM node:22-slim AS deps

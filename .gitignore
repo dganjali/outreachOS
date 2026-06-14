@@ -20,7 +20,7 @@ dist-ssr
 # ...but keep the committed, secret-free template.
 !.env.example
 
-# Secrets / service-account keys — never commit these
+# Secrets / service-account keys - never commit these
 /secrets/
 *service-account*.json
 outreachos-*-*.json
@@ -45,3 +45,6 @@ dist-server/
 
 # eval harness output
 scripts/eval/scorecard.latest.json
+
+# Claude Code worktrees
+.claude/worktrees/

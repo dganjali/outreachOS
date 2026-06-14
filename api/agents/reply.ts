@@ -60,11 +60,11 @@ export default async function handler(req: Request, res: Response) {
     contactId: contact?._id ?? null,
   });
 
-  void sequence; // currently unused — sequence context is implicit via `sent`
+  void sequence; // currently unused - sequence context is implicit via `sent`
 
   const userPrompt = [
     'ORIGINAL OUTREACH (what we sent)',
-    sent ? `Subject: ${sent.subject}\n\n${sent.body}` : '(unknown — could not match thread)',
+    sent ? `Subject: ${sent.subject}\n\n${sent.body}` : '(unknown - could not match thread)',
     '',
     'REPLY (what they sent back)',
     `From: ${reply.fromEmail ?? '(unknown)'}`,
@@ -121,7 +121,7 @@ export default async function handler(req: Request, res: Response) {
       }
       await scope.collection<ContactDoc>('contacts').updateById(contact._id, { status: 'replied' });
 
-      // Credit the facts/exemplars behind this email — a genuine human reply
+      // Credit the facts/exemplars behind this email - a genuine human reply
       // (anything but a machine unsubscribe) is a positive outcome signal.
       if (cls.classification !== 'unsubscribe') {
         await recordOutcome(user.id, contact._id, 'replied');

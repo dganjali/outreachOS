@@ -1,5 +1,5 @@
 // Pure-heuristic deliverability check for cold emails. No LLM, no network, no
-// browser/DOM deps — lives in shared/ so BOTH the frontend (pre-send warning)
+// browser/DOM deps - lives in shared/ so BOTH the frontend (pre-send warning)
 // and the server engine (anti-slop verifier) use the exact same rules.
 
 export type DeliverabilityLevel = 'good' | 'warn' | 'risk';

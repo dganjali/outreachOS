@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { pipeline, type PipelineRunView, type PipelineStepStatus } from '../lib/api';
 import { asScore } from '../lib/score';
+import { LogoMark } from '../components/Logo';
 import type { Mission } from '../types';
 
 type StepStatus = PipelineStepStatus;
@@ -15,14 +16,18 @@ interface RunTarget {
   evidence: StepStatus;
   contacts: StepStatus;
   sequence: StepStatus;
+  sequences: StepStatus[];
 }
 
 const DEFAULT_COMPANIES = 5;
 const MIN_COMPANIES = 1;
 const MAX_COMPANIES = 15;
+const DEFAULT_CONTACTS = 1;
+const MIN_CONTACTS = 1;
+const MAX_CONTACTS = 5;
 const POLL_MS = 2000;
 
-// The launch screen exposes one knob — how many companies to pursue (= top_n,
+// The launch screen exposes one knob - how many companies to pursue (= top_n,
 // the ones we research, find contacts for, and draft). We discover a larger
 // pool than we pursue so ranking has something to choose from.
 function targetCountFor(companies: number): number {
@@ -65,6 +70,7 @@ function targetsOf(run: PipelineRunView | null): RunTarget[] {
       evidence: mark('evidence'),
       contacts: mark('contacts'),
       sequence: mark('sequence'),
+      sequences: t.sequences ?? [],
     };
   });
 }
@@ -78,6 +84,7 @@ export function MissionRun() {
   const [error, setError] = useState<string | null>(null);
   const [missionLoadError, setMissionLoadError] = useState<string | null>(null);
   const [companies, setCompanies] = useState(DEFAULT_COMPANIES);
+  const [contacts, setContacts] = useState(DEFAULT_CONTACTS);
   const [priorRun, setPriorRun] = useState<PipelineRunView | null>(null);
   const runIdRef = useRef<string | null>(null);
 
@@ -112,6 +119,9 @@ export function MissionRun() {
         if (data.config?.top_n) {
           setCompanies(Math.min(Math.max(data.config.top_n, MIN_COMPANIES), MAX_COMPANIES));
         }
+        if (data.config?.top_contacts) {
+          setContacts(Math.min(Math.max(data.config.top_contacts, MIN_CONTACTS), MAX_CONTACTS));
+        }
         // Only auto-attach to a still-relevant run; a long-finished one stays
         // on the pre-launch screen so the user can deliberately relaunch.
         if (data.status === 'pending' || data.status === 'running' || data.status === 'paused') {
@@ -125,7 +135,7 @@ export function MissionRun() {
     };
   }, [id]);
 
-  // Elapsed clock — derived from the run's start, ticks only while live.
+  // Elapsed clock - derived from the run's start, ticks only while live.
   useEffect(() => {
     if (!run) return;
     const base = new Date(run.started_at).getTime();
@@ -153,7 +163,7 @@ export function MissionRun() {
         const { data } = await pipeline.status(rid);
         if (!cancelled && data) setRun(data);
       } catch {
-        /* transient — keep polling */
+        /* transient - keep polling */
       }
     }, POLL_MS);
     return () => {
@@ -167,7 +177,7 @@ export function MissionRun() {
     setError(null);
     setStarting(true);
     try {
-      const { data } = await pipeline.start(mission.id, targetCountFor(companies), companies);
+      const { data } = await pipeline.start(mission.id, targetCountFor(companies), companies, contacts);
       runIdRef.current = data.id;
       setRun(data);
     } catch (err) {
@@ -175,7 +185,7 @@ export function MissionRun() {
     } finally {
       setStarting(false);
     }
-  }, [mission, companies]);
+  }, [mission, companies, contacts]);
 
   const stop = useCallback(async () => {
     const rid = runIdRef.current;
@@ -209,13 +219,14 @@ export function MissionRun() {
           ← Mission
         </Link>
         <div className="run-ready">
-          <div className="run-ready-icon" aria-hidden>✦</div>
+          <div className="run-ready-icon" aria-hidden><LogoMark size={28} variant="mono-light" /></div>
           <h1 className="run-title">
             {mission ? `${priorRun ? 'Run' : 'Launch'} ${mission.name}${priorRun ? ' again' : ''}?` : 'Launch pipeline?'}
           </h1>
           <p className="run-ready-body">
             The agent will find {companies} {companies === 1 ? 'company' : 'companies'}, research each,
-            surface the right contacts, and draft a personalized email per target. You review and send after.
+            surface the right {contacts === 1 ? 'contact' : `${contacts} contacts`}, and draft a personalized
+            email for {contacts === 1 ? 'them' : 'each'}. You review and send after.
           </p>
 
           <div className="run-config">
@@ -254,16 +265,52 @@ export function MissionRun() {
             </div>
           </div>
 
+          <div className="run-config">
+            <label className="run-config-label" htmlFor="run-contacts">Contacts per company</label>
+            <div className="run-stepper" role="group" aria-label="Contacts per company">
+              <button
+                type="button"
+                className="run-stepper-btn"
+                aria-label="Fewer contacts"
+                disabled={contacts <= MIN_CONTACTS}
+                onClick={() => setContacts((c) => Math.max(MIN_CONTACTS, c - 1))}
+              >
+                −
+              </button>
+              <input
+                id="run-contacts"
+                type="number"
+                className="run-stepper-value"
+                min={MIN_CONTACTS}
+                max={MAX_CONTACTS}
+                value={contacts}
+                onChange={(e) => {
+                  const n = Math.round(Number(e.target.value));
+                  if (Number.isFinite(n)) setContacts(Math.min(MAX_CONTACTS, Math.max(MIN_CONTACTS, n)));
+                }}
+              />
+              <button
+                type="button"
+                className="run-stepper-btn"
+                aria-label="More contacts"
+                disabled={contacts >= MAX_CONTACTS}
+                onClick={() => setContacts((c) => Math.min(MAX_CONTACTS, c + 1))}
+              >
+                +
+              </button>
+            </div>
+          </div>
+
           {priorRun && (
             <p className="run-ready-note">
-              You've already run this mission. Running again finds <strong>new</strong> companies —
+              You've already run this mission. Running again finds <strong>new</strong> companies -
               we skip ones already in this mission.
             </p>
           )}
 
           <p className="run-ready-fineprint">
-            Runs on the server — you can close this tab and come back; progress is saved as it goes.
-            Uses up to ~{1 + companies * 3} of your daily agent runs.
+            Runs on the server - you can close this tab and come back; progress is saved as it goes.
+            Uses up to ~{1 + companies * (2 + contacts)} of your daily agent runs.
           </p>
           {missionLoadError && (
             <p className="run-banner error" role="alert">
@@ -371,7 +418,7 @@ export function MissionRun() {
                 <div className="run-target-steps">
                   <StepChip label="Evidence" status={t.evidence} />
                   <StepChip label="Contacts" status={t.contacts} />
-                  <StepChip label="Draft" status={t.sequence} />
+                  <StepChip label={draftLabel(t)} status={t.sequence} />
                 </div>
                 {t.sequence === 'done' && (
                   <Link to={`/missions/${id}`} className="run-target-review">
@@ -397,6 +444,14 @@ export function MissionRun() {
       )}
     </div>
   );
+}
+
+// "Draft" for a single contact; "Drafts n/m" once several are in flight so the
+// per-company contact count is visible as it progresses.
+function draftLabel(t: RunTarget): string {
+  if (t.sequences.length <= 1) return 'Draft';
+  const done = t.sequences.filter((s) => s === 'done').length;
+  return `Drafts ${done}/${t.sequences.length}`;
 }
 
 function StepChip({ label, status }: { label: string; status: StepStatus }) {

@@ -1,4 +1,4 @@
-# OutreachOS — User Flow & Screen States
+# OutreachOS - User Flow & Screen States
 
 The definitive map of every screen and every state we put in front of a user. Built to fix three problems with the current app: the **dashboard is a wall of zeros**, the **"running" experience is an opaque multi-minute spinner that feels forced**, and **progress is invisible**. This doc is the spec; build to it.
 
@@ -11,7 +11,7 @@ The definitive map of every screen and every state we put in front of a user. Bu
 3. **Stream partial results.** The user should be reading and approving finished targets while the rest are still cooking. Never make them wait for the whole batch.
 4. **The user is never trapped.** Long work runs server-side; they can leave, close the tab, come back, and it's still going (or done). No work lives only in a browser tab.
 5. **Honest, specific microcopy.** "Reading 3 sources on Acme's Series B" beats "Processing…". Real verbs, real nouns.
-6. **Every state is designed.** Loading, empty, partial, error, rate-limited, success — each is a deliberate screen, not an afterthought.
+6. **Every state is designed.** Loading, empty, partial, error, rate-limited, success - each is a deliberate screen, not an afterthought.
 
 ---
 
@@ -47,16 +47,16 @@ Side routes available from the left nav at all times: **Dashboard · Missions ·
 
 ## Global states & shared components
 
-These appear across many screens — design once, reuse.
+These appear across many screens - design once, reuse.
 
 | Component | When | Behavior |
 |---|---|---|
-| **Skeleton loaders** | Any data fetch >300ms | Gray shimmer blocks in the shape of the content (cards, rows) — never a centered spinner on a blank page. |
+| **Skeleton loaders** | Any data fetch >300ms | Gray shimmer blocks in the shape of the content (cards, rows) - never a centered spinner on a blank page. |
 | **Empty state** | A list/section has no data yet | Illustration + one-line explanation + the single next action. Never show a populated layout full of zeros. |
 | **Agent-working chip** | A single agent run is in flight (evidence/contacts/draft) | Inline shimmer + live step label on the exact element being worked on (e.g. on the target card), not a global blocker. |
 | **Toast** | Action result (save, send, error, copy) | Bottom-right, 3–4s, success/info/error variants. Already implemented (`ToastContext`). |
 | **Error banner** | A fetch or action fails | Inline, red, with the human message + a **Retry** button. Never a silent failure. |
-| **Rate-limit banner** | User hits 5/min or 50/day agent cap | Amber, shows remaining budget + when it resets + "Upgrade" CTA. (Currently invisible — see Mission Run.) |
+| **Rate-limit banner** | User hits 5/min or 50/day agent cap | Amber, shows remaining budget + when it resets + "Upgrade" CTA. (Currently invisible - see Mission Run.) |
 | **Reconnect toast** | SSE stream drops mid-run | "Reconnecting…" → silently resumes; the run keeps going server-side regardless. |
 
 ---
@@ -85,7 +85,7 @@ Both email/password and Google sign-in. Keep these as-is; they work.
 
 ---
 
-## 3. Onboarding  `/onboarding`  *(now 4 steps — templates step deleted)*
+## 3. Onboarding  `/onboarding`  *(now 4 steps - templates step deleted)*
 
 Goal: collect the *minimum* to make the first mission's drafts sound like the user, then get out of the way. Profile can always be deepened later in **Me**.
 
@@ -98,7 +98,7 @@ Goal: collect the *minimum* to make the first mission's drafts sound like the us
 
 **States:** per-step (entering / saving / error) · finishing (saving + optional "Enriching your profile from LinkedIn…") · done → redirect to **New Mission** (`/missions/new?welcome=1`).
 
-**Key fix:** enrichment runs **non-blocking in the background** — the user is already on the New Mission screen while it finishes. It must resolve to a terminal state (don't leave it "running" forever — see Dashboard activity feed bug).
+**Key fix:** enrichment runs **non-blocking in the background** - the user is already on the New Mission screen while it finishes. It must resolve to a terminal state (don't leave it "running" forever - see Dashboard activity feed bug).
 
 > Removed: the "Templates of successful emails you've drafted" step. It was friction at the worst moment (most users have nothing to paste). Example emails now live as an *optional* field in **Me → Workshop** for power users.
 
@@ -106,7 +106,7 @@ Goal: collect the *minimum* to make the first mission's drafts sound like the us
 
 ## 4. Dashboard  `/dashboard`  ⚠️ **REDESIGN**
 
-The current dashboard shows six "0" KPIs and blank buttons to a brand-new user — it looks broken and says nothing. It has **two completely different jobs** depending on whether the user has ever run a mission. Split them.
+The current dashboard shows six "0" KPIs and blank buttons to a brand-new user - it looks broken and says nothing. It has **two completely different jobs** depending on whether the user has ever run a mission. Split them.
 
 ### 4a. First-run dashboard (no missions yet)
 Don't show the zero-grid. Show a focused launchpad:
@@ -116,7 +116,7 @@ Don't show the zero-grid. Show a focused launchpad:
 │  Welcome, Daniel 👋                                      │
 │                                                          │
 │   Let's land your first reply.                           │
-│   Tell us who you want to reach — the agent finds the    │
+│   Tell us who you want to reach - the agent finds the    │
 │   companies, the people, the angle, and writes the       │
 │   emails. You review and send.                           │
 │                                                          │
@@ -138,19 +138,19 @@ KPIs that drive action, not vanity zeros. Lead with what needs the user *now*:
 | **Drafts to review** | sequences in `draft` not yet sent | → filtered mission view |
 | **Replies to handle** | unhandled replies | → Inbox |
 | **In flight** | targets currently being researched | → the running mission |
-| **Sent** | total contacted | — |
-| **Reply rate** | replied / contacted (only show once contacted > 0) | — |
+| **Sent** | total contacted | - |
+| **Reply rate** | replied / contacted (only show once contacted > 0) | - |
 
 Below: **Active missions** (each row = name, mode, progress bar "6/8 targets researched · 4 drafts", status) + **Recent activity** feed.
 
-### Activity feed — fix the "stuck RUNNING" bug
+### Activity feed - fix the "stuck RUNNING" bug
 The current feed shows `enrich_profile · RUNNING · 0s ago` and never updates. Rules:
-- Every run row reflects a **terminal state** once done (completed/failed) — poll or stream until it resolves; never leave a phantom "running".
+- Every run row reflects a **terminal state** once done (completed/failed) - poll or stream until it resolves; never leave a phantom "running".
 - Show friendly labels ("Enriched your profile", "Researched 8 targets for Q1 Sponsorship"), relative time, and status color.
 - Failed runs get a **Retry**.
 
 ### Known bug to fix here
-In the screenshot the **"Create Mission" / "Create your first mission" buttons render with no visible text** (solid green blocks). Likely a CSS color/contrast or missing-label issue on `.dashboard-create` — fix so the label is always visible.
+In the screenshot the **"Create Mission" / "Create your first mission" buttons render with no visible text** (solid green blocks). Likely a CSS color/contrast or missing-label issue on `.dashboard-create` - fix so the label is always visible.
 
 ---
 
@@ -168,13 +168,13 @@ Each card → Mission Workspace. A mission mid-run shows a live "Researching… 
 
 ## 6. New Mission  `/missions/new`
 
-Keep the current form (it's good — the placeholders teach users to write specific inputs). States: editing · validation errors · creating · created → **straight into Mission Run** (not back to a static page).
+Keep the current form (it's good - the placeholders teach users to write specific inputs). States: editing · validation errors · creating · created → **straight into Mission Run** (not back to a static page).
 
 Fields: name · mode (5 cards) · offer · audience. On submit, create the mission and immediately **launch the pipeline + navigate to the Run view** (so "create" and "start" are one motion, not two clicks).
 
 ---
 
-## 7. ⭐ Mission Run  `/missions/:id/run`  — **THE screen to get right**
+## 7. ⭐ Mission Run  `/missions/:id/run`  - **THE screen to get right**
 
 This replaces the current "click Run full pipeline → global spinner for 10 minutes → results dump." It's the heart of the product and the thing that "feels forced" today.
 
@@ -208,20 +208,20 @@ Each unit has a status: `queued · running · done · failed`. The whole run has
 
 ### Behaviors (every state)
 - **Streaming:** rows update live as each step completes (SSE). Targets appear the moment targeting returns; each fills in Evidence → Contacts → Draft as they finish.
-- **Results are usable immediately:** a target that reaches "Draft ✅" shows a **Review** link — the user can start reading/editing/sending finished ones while others run.
-- **Run in background:** the run lives server-side. The user can navigate away or close the tab; a global "mission running" indicator (in the nav) lets them jump back. Returning re-attaches to the live stream (fetch history + tail — no lost events).
+- **Results are usable immediately:** a target that reaches "Draft ✅" shows a **Review** link - the user can start reading/editing/sending finished ones while others run.
+- **Run in background:** the run lives server-side. The user can navigate away or close the tab; a global "mission running" indicator (in the nav) lets them jump back. Returning re-attaches to the live stream (fetch history + tail - no lost events).
 - **Per-step microcopy:** the running step shows what it's doing ("Finding decision-makers at Globex…", "Drafting with your proof points…").
-- **Rate-limit (paused):** if the 5/min or 50/day cap hits mid-run, the run **pauses** with an amber banner ("Paused — you've used your 50 runs today. Resumes tomorrow, or upgrade for more."). Already-finished targets remain fully usable.
+- **Rate-limit (paused):** if the 5/min or 50/day cap hits mid-run, the run **pauses** with an amber banner ("Paused - you've used your 50 runs today. Resumes tomorrow, or upgrade for more."). Already-finished targets remain fully usable.
 - **Partial failure:** a step that fails shows ⚠ + **Retry** on that target; the rest of the run continues. Never abort the whole run for one target.
 - **Cancel (Stop):** confirms, halts queued work, keeps finished results.
-- **Done:** header flips to a summary — "✅ 8 targets · 22 contacts · 8 drafts ready" + primary CTA **Review & send** → Mission Workspace. Time-elapsed shown.
-- **Empty result:** if targeting finds nothing (rare), show "No strong matches for this audience — try broadening it" + edit-mission CTA.
+- **Done:** header flips to a summary - "✅ 8 targets · 22 contacts · 8 drafts ready" + primary CTA **Review & send** → Mission Workspace. Time-elapsed shown.
+- **Empty result:** if targeting finds nothing (rare), show "No strong matches for this audience - try broadening it" + edit-mission CTA.
 
 ### Loading / first paint
-Skeleton of the phase list with "Starting…" — never a blank screen.
+Skeleton of the phase list with "Starting…" - never a blank screen.
 
 ### Single-step runs (lighter variant)
-When the user re-runs *one* thing from the Workspace ("Find more contacts", "Regenerate draft"), don't open the full Run view — show the **agent-working chip** inline on that card with its step label, and slot the result in when done.
+When the user re-runs *one* thing from the Workspace ("Find more contacts", "Regenerate draft"), don't open the full Run view - show the **agent-working chip** inline on that card with its step label, and slot the result in when done.
 
 > **Build dependency:** this experience requires moving pipeline orchestration **server-side with SSE** (a `POST /api/agents/pipeline` that streams progress + a `GET /api/missions/:id/run` to re-attach). Today it's client-orchestrated in `MissionPage.runFullPipeline()` and dies on tab close. The run-status model (phase + per-target step states) should persist on the mission so the feed/badges/re-attach all read from one source.
 
@@ -237,11 +237,11 @@ Where the user turns research into sent emails. (This is today's MissionPage, cl
 | **Target list** | each target card: score, "why now", signal pills, status select (suggested/approved/rejected/contacted), evidence pack (collapsible), contacts, drafts. |
 | **Target card states** | researching (chip) · researched · no-evidence (CTA "Build evidence") · approved · rejected (dimmed) · contacted. |
 | **Contact row states** | found · has verified email (pill) · likely-pattern only · no email (prompt for override on send). |
-| **Draft / sequence states** | none yet ("Draft email" — disabled until evidence exists, with reason tooltip) · drafting (chip) · drafted (initial + 2 follow-ups, each: copy / save as Gmail draft / send now) · sent (badge) · follow-up locked until initial sent (with reason). |
+| **Draft / sequence states** | none yet ("Draft email" - disabled until evidence exists, with reason tooltip) · drafting (chip) · drafted (initial + 2 follow-ups, each: copy / save as Gmail draft / send now) · sent (badge) · follow-up locked until initial sent (with reason). |
 | **Send states** | idle · sending · sent ✅ · draft-created ✅ · needs-recipient-email (inline input) · gmail-not-connected (→ Settings CTA) · error (retry). |
-| Empty | "No targets yet — run the pipeline." |
+| Empty | "No targets yet - run the pipeline." |
 
-Improvement: add **inline draft editing** + **regenerate with a note** ("make it shorter", "lead with the metric") — today drafts are read-only.
+Improvement: add **inline draft editing** + **regenerate with a note** ("make it shorter", "lead with the metric") - today drafts are read-only.
 
 ---
 
@@ -255,11 +255,11 @@ Improvement: add **inline draft editing** + **regenerate with a note** ("make it
 | Reply states | unclassified ("Classify with AI") · classifying (chip) · classified · handled (dimmed) |
 | Action states | mark handled/unhandled · copy suggested reply · (future) send reply inline |
 
-Fix the copy: it currently says "every ~10 minutes" in one place — make it match the real cron cadence (15 min).
+Fix the copy: it currently says "every ~10 minutes" in one place - make it match the real cron cadence (15 min).
 
 ---
 
-## 10. Me  `/me`  (profile workshop — already strong)
+## 10. Me  `/me`  (profile workshop - already strong)
 
 | Area | States |
 |---|---|
@@ -313,4 +313,4 @@ agent_run / pipeline_run:
 5. **Rate-limit surfacing** (banner + budget) everywhere agents run.
 6. **Inline draft edit / regenerate** (§8) + fix Inbox cadence copy (§9).
 
-Everything else (Me, Settings, Auth) is already in good shape — just make sure each async action shows a working state and resolves.
+Everything else (Me, Settings, Auth) is already in good shape - just make sure each async action shows a working state and resolves.

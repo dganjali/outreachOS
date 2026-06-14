@@ -1,5 +1,5 @@
 // Unit tests for the pipeline reducer (advancePipeline). These exercise the
-// durable state machine directly with fake executors — no Mongo, no network —
+// durable state machine directly with fake executors - no Mongo, no network -
 // covering the happy path, partial failures, and the daily-limit pause that the
 // browser orchestration used to handle ad hoc.
 
@@ -23,7 +23,7 @@ function baseRun(over: Partial<PipelineRunDoc> = {}): PipelineRunDoc {
     missionId: 'm1',
     status: 'pending',
     phase: 'targeting',
-    config: { targetCount: 8, topN: 3 },
+    config: { targetCount: 8, topN: 3, topContacts: 1 },
     targets: [],
     cursor: null,
     note: null,
@@ -88,6 +88,49 @@ test('happy path completes every target through all three steps', async () => {
   }
 });
 
+test('topContacts drafts the top N contacts per target', async () => {
+  let sequenceCalls = 0;
+  const exec = fakeExec({
+    targeting: async () => [{ id: 't1', name: 'Acme', score: 0.9 }],
+    contacts: async () => [
+      { id: 'c1', confidence: 0.9 },
+      { id: 'c2', confidence: 0.7 },
+      { id: 'c3', confidence: 0.5 },
+      { id: 'c4', confidence: 0.3 },
+    ],
+    sequence: async () => {
+      sequenceCalls++;
+    },
+  });
+  const end = await runToEnd(baseRun({ config: { targetCount: 8, topN: 3, topContacts: 3 } }), exec);
+  assert.equal(end.status, 'done');
+  const t = end.targets[0];
+  assert.deepEqual(t.contactIds, ['c1', 'c2', 'c3']); // capped at topContacts, by confidence
+  assert.equal(t.bestContactId, 'c1');
+  assert.deepEqual(t.sequences, ['done', 'done', 'done']);
+  assert.equal(t.sequence, 'done');
+  assert.equal(sequenceCalls, 3);
+});
+
+test('a target draft step is done if any contact draft succeeds', async () => {
+  let calls = 0;
+  const exec = fakeExec({
+    targeting: async () => [{ id: 't1', name: 'Acme', score: 0.9 }],
+    contacts: async () => [
+      { id: 'c1', confidence: 0.9 },
+      { id: 'c2', confidence: 0.7 },
+    ],
+    sequence: async () => {
+      calls++;
+      if (calls === 1) throw new Error('draft_failed'); // first contact only
+    },
+  });
+  const end = await runToEnd(baseRun({ config: { targetCount: 8, topN: 3, topContacts: 2 } }), exec);
+  const t = end.targets[0];
+  assert.deepEqual(t.sequences, ['failed', 'done']);
+  assert.equal(t.sequence, 'done');
+});
+
 test('no targets found ends the run cleanly', async () => {
   const end = await runToEnd(baseRun(), fakeExec({ targeting: async () => [] }));
   assert.equal(end.status, 'done');
@@ -136,7 +179,7 @@ test('daily-limit pauses the run and preserves the cursor for resume', async () 
   assert.equal(end.targets[0].evidence, 'done');
 });
 
-test('rate-limit (per-minute) is retryable — it does not corrupt state', async () => {
+test('rate-limit (per-minute) is retryable - it does not corrupt state', async () => {
   let first = true;
   const exec = fakeExec({
     evidence: async () => {

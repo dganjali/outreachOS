@@ -34,7 +34,7 @@ describe('findEmail', () => {
     assert.deepEqual(await findEmail({ fullName: 'Jane Doe', domain: '' }), { email: null, raw: null });
   });
 
-  // Live test — only runs with a real key. Costs ≤1 credit, and only on a hit.
+  // Live test - only runs with a real key. Costs ≤1 credit, and only on a hit.
   test('live: resolves a known public email or returns null', {
     skip: !process.env.EMAILFINDER_API_KEY,
   }, async () => {

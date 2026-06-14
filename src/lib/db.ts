@@ -27,12 +27,12 @@ type Json = any;
 // ---------------------------------------------------------------------------
 function camel(s: string): string {
   // Frontend `id` is Mongo `_id`. Map explicitly so .eq('id', x), filters,
-  // and selected columns all hit the right field. Idempotent — `_id` stays `_id`.
+  // and selected columns all hit the right field. Idempotent - `_id` stays `_id`.
   if (s === 'id' || s === '_id') return '_id';
   return s.replace(/_([a-z0-9])/g, (_m, c: string) => c.toUpperCase());
 }
 function snake(s: string): string {
-  // Inverse of the above — Mongo `_id` surfaces as `id` to the frontend so
+  // Inverse of the above - Mongo `_id` surfaces as `id` to the frontend so
   // existing pages can read `row.id` like they did under Supabase. Idempotent.
   if (s === '_id' || s === 'id') return 'id';
   return s.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);

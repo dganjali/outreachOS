@@ -21,7 +21,7 @@
   --popover: 220 14% 11%;
   --popover-foreground: 210 16% 97%;
 
-  /* forest green — the brand / "go" action (Send, Run, Connect, New mission).
+  /* forest green - the brand / "go" action (Send, Run, Connect, New mission).
      Muted & deep; carried as a flat matte fill, never a gradient or glow. */
   --primary: 152 38% 42%;
   --primary-foreground: 150 30% 97%;
@@ -87,7 +87,7 @@ body {
    its NON-colliding surface/ink tokens to dark renders every not-yet-rewritten
    legacy page (mission detail/run, profile, onboarding) in a dark theme that
    matches the new shadcn surfaces, without rewriting all their JSX. (The few
-   tokens that collide with shadcn — border/accent/primary — are handled by the
+   tokens that collide with shadcn - border/accent/primary - are handled by the
    shadcn values; legacy hairlines fall back gracefully.) */
 :root,
 .dark {
@@ -111,7 +111,7 @@ body {
 
   /* legacy forest-green accent family. NOTE: --accent itself collides with a
      shadcn token (kept as the shadcn value), so legacy .btn-go/links lose their
-     green — acceptable, they are rare on the remaining legacy pages. These
+     green - acceptable, they are rare on the remaining legacy pages. These
      non-colliding members keep their dark-tuned values. */
   --accent-hover: oklch(0.470 0.095 156);
   --accent-press: oklch(0.430 0.090 156);
@@ -142,7 +142,7 @@ body {
 }
 
 /* ============================================================
-   Matte dark surface treatment — flat material, hairline borders,
+   Matte dark surface treatment - flat material, hairline borders,
    no gradients / glow / glass. Depth comes from a single soft shadow
    and crisp 1px lines (Warp / Linear / Vercel register).
    ============================================================ */
@@ -162,7 +162,7 @@ body {
     background: hsl(var(--card));
     box-shadow: 0 1px 2px hsl(0 0% 0% / 0.35);
   }
-  /* Primary action: flat matte green. No gradient, no glow — a crisp fill that
+  /* Primary action: flat matte green. No gradient, no glow - a crisp fill that
      lifts a touch on hover. Pair with `text-primary-foreground`. */
   .btn-glow {
     background: hsl(var(--primary));
@@ -193,7 +193,7 @@ body {
   }
   /* Smooth matte color fog for the landing ground. Very low-opacity, large soft
      radials in the brand green + a cool slate, so the page reads as tinted
-     material instead of flat void — matte, never a bright glow. */
+     material instead of flat void - matte, never a bright glow. */
   .bg-matte-ambient {
     background:
       radial-gradient(115% 60% at 50% -8%, hsl(152 40% 42% / 0.11), transparent 62%),
@@ -201,12 +201,12 @@ body {
       radial-gradient(85% 50% at 0% 55%, hsl(160 38% 42% / 0.06), transparent 55%),
       radial-gradient(125% 75% at 50% 112%, hsl(158 42% 40% / 0.10), transparent 64%);
   }
-  /* Per-section matte tint — a single soft green wash bleeding from the top edge.
+  /* Per-section matte tint - a single soft green wash bleeding from the top edge.
      Pairs with a section's existing border-t to give it gentle tonal lift. */
   .section-tint {
     background: radial-gradient(120% 80% at 50% 0%, hsl(152 38% 42% / 0.05), transparent 58%);
   }
-  /* Faint static grid texture for hero/section backdrops — 1px lines only,
+  /* Faint static grid texture for hero/section backdrops - 1px lines only,
      masked to fade at the edges. Texture, not a color wash. */
   .bg-fade-grid {
     background-image:

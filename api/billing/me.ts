@@ -1,4 +1,4 @@
-// GET /api/billing/me — current plan + live usage for the signed-in user.
+// GET /api/billing/me - current plan + live usage for the signed-in user.
 // Powers the Plan & Billing UI (current plan, usage meters, renewal date).
 
 import type { Request, Response } from 'express';

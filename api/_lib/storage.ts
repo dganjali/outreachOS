@@ -2,9 +2,9 @@
 // screenshots, context dumps).
 //
 // Two drivers:
-//   - 'gcs'   — Google Cloud Storage. Browser uploads/downloads go DIRECTLY to
+//   - 'gcs'   - Google Cloud Storage. Browser uploads/downloads go DIRECTLY to
 //               GCS via v4 signed URLs (no bytes through our Node server). Prod.
-//   - 'local' — filesystem under LOCAL_STORAGE_DIR, served by our own HMAC-token
+//   - 'local' - filesystem under LOCAL_STORAGE_DIR, served by our own HMAC-token
 //               put/get endpoints. The "signed URL" is a relative path to those
 //               endpoints, so the frontend storage shim is driver-agnostic.
 //
@@ -98,7 +98,7 @@ function localPathFor(storagePath: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Public API — each branches on the active driver
+// Public API - each branches on the active driver
 // ---------------------------------------------------------------------------
 
 /**
@@ -182,7 +182,7 @@ export async function signedUploadUrl(args: {
 }
 
 // ---------------------------------------------------------------------------
-// Local-driver HTTP handlers — mounted in server/index.ts at /api/storage-local.
+// Local-driver HTTP handlers - mounted in server/index.ts at /api/storage-local.
 // They authenticate via the HMAC token in the query string (NOT a Firebase
 // bearer), mirroring how GCS signed URLs are origin-independent. Registered with
 // express.raw so the PUT body arrives as a Buffer.

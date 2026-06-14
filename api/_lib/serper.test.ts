@@ -78,7 +78,7 @@ describe('profileKey', () => {
   });
 });
 
-// Live test — only runs with a real key.
+// Live test - only runs with a real key.
 test('live: search returns an organic result array', {
   skip: !process.env.SERPER_API_KEY,
 }, async () => {

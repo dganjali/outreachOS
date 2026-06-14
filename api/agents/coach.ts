@@ -130,7 +130,7 @@ function buildPrompt(
   outcomes: { sent_count: number; reply_count: number; reply_rate: number }
 ): string {
   const ctxLines = [
-    'PROFILE CONTEXT (other fields of the same user — use as ground truth, never invent beyond this):',
+    'PROFILE CONTEXT (other fields of the same user - use as ground truth, never invent beyond this):',
     profile.name ? `Name: ${profile.name}` : '',
     profile.role ? `Role: ${profile.role}` : '',
     profile.organization ? `Org: ${profile.organization}` : '',
@@ -149,7 +149,7 @@ function buildPrompt(
       ? 'OUTCOMES: this field has not shipped in any sent message yet.'
       : `OUTCOMES: this field has been cited in ${outcomes.sent_count} sent message${outcomes.sent_count === 1 ? '' : 's'}, producing ${outcomes.reply_count} reply${outcomes.reply_count === 1 ? '' : 'ies'} (${outcomes.reply_rate}% reply rate). ${
           outcomes.sent_count >= 5 && outcomes.reply_count === 0
-            ? "It's underperforming — be willing to take a structurally different angle, not a polish pass."
+            ? "It's underperforming - be willing to take a structurally different angle, not a polish pass."
             : outcomes.reply_count > 0
               ? 'Preserve what is working; sharpen rather than rebuild.'
               : ''
@@ -159,7 +159,7 @@ function buildPrompt(
     `FIELD TO COACH: ${FIELD_LABEL[field]}`,
     '',
     'CURRENT VALUE:',
-    currentValue.trim() || '(empty — propose a strong starting point grounded in PROFILE CONTEXT)',
+    currentValue.trim() || '(empty - propose a strong starting point grounded in PROFILE CONTEXT)',
     '',
     outcomesBlock,
     '',

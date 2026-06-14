@@ -14,7 +14,7 @@ test('accepts ordinary documents', () => {
 });
 
 test('rejects prototype-pollution keys at any depth', () => {
-  // `__proto__` must come from JSON *text* — an object literal would set the
+  // `__proto__` must come from JSON *text* - an object literal would set the
   // prototype instead of an own key. JSON.parse makes it an own enumerable key,
   // which is exactly the pollution vector we defend against.
   for (const json of [

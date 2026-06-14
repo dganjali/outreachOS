@@ -1,7 +1,7 @@
 // MongoDB client + per-user collection wrapper.
 //
 // Replaces the old Supabase admin/userClient pattern. Mongo has no row-level
-// security — security lives here, in this file. Every read/write goes through
+// security - security lives here, in this file. Every read/write goes through
 // `forUser(uid).collection(name)`, which auto-injects `userId: uid` (or the
 // equivalent ownership filter) on every query.
 //
@@ -29,13 +29,13 @@ async function getDb(): Promise<Db> {
   return _db;
 }
 
-/** Service-role access — use only in cron jobs, migrations, and init scripts. */
+/** Service-role access - use only in cron jobs, migrations, and init scripts. */
 export async function adminDb(): Promise<Db> {
   return getDb();
 }
 
 // ---------------------------------------------------------------------------
-// Collection names — single source of truth.
+// Collection names - single source of truth.
 // ---------------------------------------------------------------------------
 export const COL = {
   profiles: 'profiles',
@@ -62,7 +62,7 @@ export const COL = {
 export type CollectionName = (typeof COL)[keyof typeof COL];
 
 // ---------------------------------------------------------------------------
-// Ownership rules — how do we filter docs to "owned by user"?
+// Ownership rules - how do we filter docs to "owned by user"?
 //
 // Most collections store `userId` directly. A few are owned transitively
 // (evidence_packs through targets → missions). For those, the wrapper does a
@@ -97,7 +97,7 @@ const OWNERSHIP: Record<CollectionName, OwnershipMode> = {
 // ---------------------------------------------------------------------------
 /**
  * Doc shape that callers pass to insertOne/insertMany. They supply everything
- * except the stamped-on-write fields — userId, createdAt, updatedAt — which
+ * except the stamped-on-write fields - userId, createdAt, updatedAt - which
  * the wrapper fills in.
  */
 export type InsertDoc<T> = Omit<T, 'userId' | 'createdAt' | 'updatedAt'>;
@@ -223,7 +223,7 @@ function buildScoped<T extends Document>(uid: string, name: CollectionName): Sco
 }
 
 // ---------------------------------------------------------------------------
-// ID generation — Mongo's ObjectId is fine, but we expose stringified ids to
+// ID generation - Mongo's ObjectId is fine, but we expose stringified ids to
 // the API. This helper produces a 24-char hex id we can use as the _id when
 // we want stable string ids that match the old uuid shape.
 // ---------------------------------------------------------------------------

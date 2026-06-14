@@ -1,4 +1,4 @@
-# PRODUCT.md — OutreachOS
+# PRODUCT.md - OutreachOS
 
 register: product
 

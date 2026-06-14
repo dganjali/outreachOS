@@ -7,7 +7,7 @@ import { startRun, completeRun, failRun } from '../_lib/runs';
 import { embedOne } from '../_lib/embeddings';
 import type { ContextFactDoc, ProfileDoc } from '../../shared/schemas';
 
-// Cap on how many facts a single enrichment can add — keeps the context bank
+// Cap on how many facts a single enrichment can add - keeps the context bank
 // from ballooning and the embed loop bounded.
 const MAX_ENRICH_FACTS = 20;
 
@@ -67,7 +67,7 @@ export default async function handler(req: Request, res: Response) {
     await scope.collection<ProfileDoc>('profiles').updateById(profile._id, updates);
     const updated = await scope.collection<ProfileDoc>('profiles').findById(profile._id);
 
-    // Turn the enrichment into atomic, person-level context facts — the actual
+    // Turn the enrichment into atomic, person-level context facts - the actual
     // grounding source the drafting engine reads. Without this the LinkedIn URL
     // collected at onboarding never reaches a draft.
     const factsAdded = await persistEnrichmentFacts(scope, {
@@ -156,7 +156,7 @@ async function persistEnrichmentFacts(
     try {
       embedding = await embedOne(c.claim, 'document');
     } catch {
-      // Best-effort — facts are still useful without a vector (recency fallback).
+      // Best-effort - facts are still useful without a vector (recency fallback).
     }
 
     const doc: InsertDoc<ContextFactDoc> = {
@@ -168,7 +168,7 @@ async function persistEnrichmentFacts(
       date: null,
       evidenceUrl: null,
       provenance: 'enrich',
-      confidence: 0.6, // web-sourced — lower than user-entered, the user can prune
+      confidence: 0.6, // web-sourced - lower than user-entered, the user can prune
       ...(embedding ? { embedding } : {}),
     };
     await scope.collection<ContextFactDoc>('context_facts').insertOne(doc);

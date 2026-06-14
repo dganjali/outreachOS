@@ -4,7 +4,7 @@
 export type MissionMode = 'sponsorship' | 'bd' | 'internship' | 'recruiting' | 'sales';
 
 // ---------------------------------------------------------------------------
-// Contact Discovery Engine — see CONTACT_ENGINE.md. Defined in this
+// Contact Discovery Engine - see CONTACT_ENGINE.md. Defined in this
 // dependency-free module so both the api/ engine and the React client share one
 // source of truth for the seniority taxonomy and the Ideal Contact Profile.
 // ---------------------------------------------------------------------------
@@ -31,7 +31,7 @@ export type SizeTier = 'startup' | 'small' | 'mid' | 'large' | 'enterprise';
 export type GeoScope = 'metro' | 'country' | 'region' | 'global';
 
 export interface ContactIcpGeo {
-  preferred: string | null; // human label, e.g. "Toronto, CA" — null = anywhere
+  preferred: string | null; // human label, e.g. "Toronto, CA" - null = anywhere
   scope: GeoScope;
   strict: boolean; // true = drop out-of-geo contacts; false = only down-rank them
 }

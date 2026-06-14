@@ -1,4 +1,4 @@
-// Email-resolution cascade — provider-agnostic. Turns a discovered person
+// Email-resolution cascade - provider-agnostic. Turns a discovered person
 // (name) + company domain into a trustworthy email, or nothing.
 //
 // The whole point: we NEVER ship an unverified pattern-guess (e.g.
@@ -66,8 +66,8 @@ function displayPattern(domain: string, existing: ContactEmailFields, scraped: S
 
 /**
  * Resolve a deliverable email for `name` at `domain`. Ordered cascade:
- *   1. A pre-trusted email already on the row (verified/likely import) — keep.
- *   2. External finder providers (emailfinder.dev) — SMTP-verified hit.
+ *   1. A pre-trusted email already on the row (verified/likely import) - keep.
+ *   2. External finder providers (emailfinder.dev) - SMTP-verified hit.
  *   3. A real email scraped from the company site that matches this person.
  *   4. Nothing → email:null, status 'none', pattern kept for display only.
  */

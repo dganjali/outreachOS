@@ -1,8 +1,8 @@
-// PersonaWizard — the guided, conversational way to build a reusable voice.
+// PersonaWizard - the guided, conversational way to build a reusable voice.
 //
 // One screen per question: Frame → Substance → Clarify → Style → Calibrate,
 // then a single Overview that reveals the learned voice and lets you jump back
-// to edit any section. Progressive disclosure does the work — no wall of fields.
+// to edit any section. Progressive disclosure does the work - no wall of fields.
 // Used standalone in ME → Personalization and embedded inside mission creation.
 //
 // LLM flow (Gemini agents, server-side):
@@ -14,7 +14,7 @@
 // Persistence is LAZY: the persona row is created the first time an agent needs
 // it (Clarify/Calibrate), so Frame/Substance/Style stay fully navigable and a
 // user who bails early leaves at most an un-calibrated "Draft" (resumable).
-// Every agent call degrades gracefully — failures show inline and never trap.
+// Every agent call degrades gracefully - failures show inline and never trap.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -213,7 +213,7 @@ export function PersonaWizard({
     }
 
     // Sync facts + exemplars against DB truth. Only persona-scoped facts are
-    // managed here — person-level facts (scope:'person') are already persisted
+    // managed here - person-level facts (scope:'person') are already persisted
     // by the extract-context agent and must NOT be re-inserted.
     const personaFacts = facts.filter((f) => f.scope !== 'person');
     const personItemsPreserved = facts.filter((f) => f.scope === 'person');
@@ -255,7 +255,7 @@ export function PersonaWizard({
   }, [userId, name, mode, seed, editing, facts, exemplars, strictness]);
 
   // Opt this voice out of the shared person-level ("default") facts. They stay
-  // in the Context bank and other voices — we just record their ids on the
+  // in the Context bank and other voices - we just record their ids on the
   // persona so they're hidden here and dropped from this voice's grounding.
   const clearDefaultFacts = useCallback(async () => {
     const defaultIds = facts.filter((f) => f.scope === 'person' && f.id).map((f) => f.id!);
@@ -303,7 +303,7 @@ export function PersonaWizard({
         go('overview', 'forward');
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Something went wrong — try again.');
+      setError(e instanceof Error ? e.message : 'Something went wrong - try again.');
     } finally {
       setBusy(false);
     }
@@ -347,7 +347,7 @@ export function PersonaWizard({
       const fresh = await getPersonaBundle(userId, pid);
       onDone(fresh?.persona ?? { ...(persona as Persona), id: pid, onboarding_completed_at: completedAt });
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Save failed — try again.');
+      setError(e instanceof Error ? e.message : 'Save failed - try again.');
       setBusy(false);
     }
   }
@@ -508,7 +508,7 @@ function FrameStep({
 }) {
   return (
     <div className="pw-step">
-      <StepHead q="Let's name this voice." hint="A voice is a reusable way of writing — give it a name and tell us what it's for." />
+      <StepHead q="Let's name this voice." hint="A voice is a reusable way of writing - give it a name and tell us what it's for." />
       <input
         className="pw-input pw-input-lg"
         value={name}
@@ -593,7 +593,7 @@ function SubstanceStep({
       }
       setDumpText('');
     } catch (e) {
-      setExtractError(e instanceof Error ? e.message : 'Extraction failed — try again.');
+      setExtractError(e instanceof Error ? e.message : 'Extraction failed - try again.');
     } finally {
       setExtracting(false);
     }
@@ -610,7 +610,7 @@ function SubstanceStep({
       const asset = await uploadAsset({ userId, kind: 'context_dump', file });
       await runExtract({ assetId: asset.id });
     } catch (e) {
-      setExtractError(e instanceof Error ? e.message : 'Upload failed — try again.');
+      setExtractError(e instanceof Error ? e.message : 'Upload failed - try again.');
       setExtracting(false);
     }
   }
@@ -625,7 +625,7 @@ function SubstanceStep({
       try {
         await deleteContextFact(fact.id);
       } catch {
-        // Best-effort — drop locally regardless.
+        // Best-effort - drop locally regardless.
       }
     }
     setFacts((f) => f.filter((_, idx) => idx !== i));
@@ -635,7 +635,7 @@ function SubstanceStep({
     <div className="pw-step">
       <StepHead
         q="What makes you worth a reply?"
-        hint="Drop the concrete facts a great email could cite — what you've built, real numbers, credentials. One per line. Skip the fluff."
+        hint="Drop the concrete facts a great email could cite - what you've built, real numbers, credentials. One per line. Skip the fluff."
       />
 
       {/* Smart-fill card */}
@@ -646,7 +646,7 @@ function SubstanceStep({
           </span>
           <span className="pw-smartfill-badge">Recommended</span>
         </div>
-        <p className="pw-smartfill-hint">Paste your resume, bio, or any context — or upload a file — and we'll extract the facts for you.</p>
+        <p className="pw-smartfill-hint">Paste your resume, bio, or any context - or upload a file - and we'll extract the facts for you.</p>
 
         {/* Paste box */}
         <textarea
@@ -693,7 +693,7 @@ function SubstanceStep({
           />
           <FileText size={14} className="pw-smartfill-dropzone-icon" />
           <span className="pw-smartfill-dropzone-label">
-            {extracting ? 'Reading…' : 'Drop a PDF, DOCX, image or screenshot — scanned files are OCR’d'}
+            {extracting ? 'Reading…' : 'Drop a PDF, DOCX, image or screenshot - scanned files are OCR’d'}
           </span>
         </div>
 
@@ -712,7 +712,7 @@ function SubstanceStep({
 
       {/* OR divider */}
       <div className="pw-or-divider">
-        <span>— or add manually —</span>
+        <span>- or add manually -</span>
       </div>
 
       {/* Manual path */}
@@ -762,7 +762,7 @@ function ScopedChipList({
   facts: FactItem[];
   onRemove: (i: number) => void;
 }) {
-  if (facts.length === 0) return <p className="pw-empty">No facts yet — add a few above.</p>;
+  if (facts.length === 0) return <p className="pw-empty">No facts yet - add a few above.</p>;
   return (
     <div className="pw-chips">
       {facts.map((f, i) => (
@@ -778,7 +778,7 @@ function ScopedChipList({
   );
 }
 
-// Clarify (Stage 3) — adaptive questions from the onboard-questions agent.
+// Clarify (Stage 3) - adaptive questions from the onboard-questions agent.
 function ClarifyStep({
   facts,
   addFact,
@@ -821,7 +821,7 @@ function ClarifyStep({
     <div className="pw-step">
       <StepHead
         q="Mind a few quick questions?"
-        hint="The agent reads what you've added and asks only what fills the biggest gaps. Optional — answer what's useful, skip the rest."
+        hint="The agent reads what you've added and asks only what fills the biggest gaps. Optional - answer what's useful, skip the rest."
       />
       {!asked && (
         <button type="button" className="pw-btn-add" onClick={ask} disabled={loading || facts.length === 0}>
@@ -830,7 +830,7 @@ function ClarifyStep({
         </button>
       )}
       {facts.length === 0 && !asked && (
-        <p className="pw-empty">Add a fact or two on the previous step first — the questions adapt to you.</p>
+        <p className="pw-empty">Add a fact or two on the previous step first - the questions adapt to you.</p>
       )}
       {error && <p className="pw-error">{error}</p>}
       <div className="pw-clar-list">
@@ -894,7 +894,7 @@ function StyleStep({
     <div className="pw-step">
       <StepHead
         q="Show me how you write."
-        hint="Paste a real email you've sent that landed well. Voice is learned from examples, not adjectives — one or two is plenty."
+        hint="Paste a real email you've sent that landed well. Voice is learned from examples, not adjectives - one or two is plenty."
       />
       <textarea
         className="pw-input pw-textarea pw-textarea-tall"
@@ -907,7 +907,7 @@ function StyleStep({
         <Plus size={14} /> Add example
       </button>
       <div className="pw-ex-list">
-        {exemplars.length === 0 && <p className="pw-empty">No examples yet — optional, but they sharpen the voice a lot.</p>}
+        {exemplars.length === 0 && <p className="pw-empty">No examples yet - optional, but they sharpen the voice a lot.</p>}
         {exemplars.map((e, i) => (
           <div key={i} className="pw-ex">
             <p className="pw-ex-body">
@@ -944,15 +944,15 @@ function StyleStep({
           aria-valuetext={strictnessLabel(strictness)}
         />
         <div className="pw-slider-ends">
-          <span>Loose — just borrow my voice</span>
-          <span>Strict — reuse the structure</span>
+          <span>Loose - just borrow my voice</span>
+          <span>Strict - reuse the structure</span>
         </div>
       </div>
     </div>
   );
 }
 
-// Calibrate (Stages 4–5) — we run the engine ONCE on a real contact (or a
+// Calibrate (Stages 4–5) - we run the engine ONCE on a real contact (or a
 // synthesized stand-in recipient when none exist yet) so the user reacts to a
 // genuine draft instead of writing one. Two ways to refine:
 //   • whole-draft chat (structural)
@@ -1023,7 +1023,7 @@ function CalibrateStep({
       setBodyVersion((v) => v + 1);
       setGenState('ready');
     } catch (e) {
-      setGenError(e instanceof Error ? e.message : 'Could not draft right now — edit below or regenerate.');
+      setGenError(e instanceof Error ? e.message : 'Could not draft right now - edit below or regenerate.');
       setGenState('failed');
     } finally {
       setGenerating(false);
@@ -1093,7 +1093,7 @@ function CalibrateStep({
         setInstruction('');
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Refine failed — edit directly or try again.');
+      setError(e instanceof Error ? e.message : 'Refine failed - edit directly or try again.');
     } finally {
       setSpanBusy(false);
       setBusy(false);
@@ -1104,7 +1104,7 @@ function CalibrateStep({
     <div className="pw-step">
       <StepHead
         q="Let's calibrate on a real draft."
-        hint="We drafted a real email from your voice. Tell the chat how to fix it — or highlight any part to rewrite just that bit. Every instruction is learned as your taste."
+        hint="We drafted a real email from your voice. Tell the chat how to fix it - or highlight any part to rewrite just that bit. Every instruction is learned as your taste."
       />
 
       <div className="pw-calib-toolbar">
@@ -1119,7 +1119,7 @@ function CalibrateStep({
             {synthetic ? ' · sample contact' : ''}
           </span>
         ) : genState === 'failed' ? (
-          <span className="pw-calib-meta">Couldn't draft — edit below or regenerate.</span>
+          <span className="pw-calib-meta">Couldn't draft - edit below or regenerate.</span>
         ) : (
           <span className="pw-calib-meta" />
         )}
@@ -1180,7 +1180,7 @@ function CalibrateStep({
           className="pw-input"
           value={instruction}
           onChange={(e) => setInstruction(e.target.value)}
-          placeholder="Fix the whole draft — e.g. make it less formal, cut the second paragraph"
+          placeholder="Fix the whole draft - e.g. make it less formal, cut the second paragraph"
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
               e.preventDefault();
@@ -1227,7 +1227,7 @@ function OverviewStep({
     <div className="pw-step pw-overview">
       <StepHead
         q={editing ? 'Your voice.' : "Here's your voice."}
-        hint="Everything in one place. Tweak any section, then save — it's reusable across missions."
+        hint="Everything in one place. Tweak any section, then save - it's reusable across missions."
       />
 
       <OverviewRow
@@ -1271,12 +1271,12 @@ function OverviewStep({
   );
 }
 
-// The learned StyleProfile, made legible — the moat the engine reads at draft time.
+// The learned StyleProfile, made legible - the moat the engine reads at draft time.
 function VoiceProfile({ persona }: { persona: Persona | null }) {
   const sp = persona?.style_profile;
   const dims = Object.entries(sp?.dimensions ?? {});
   if (!sp || (!sp.voice_summary && dims.length === 0)) {
-    return <p className="pw-empty">Not calibrated yet — run a draft through Calibrate to learn your voice.</p>;
+    return <p className="pw-empty">Not calibrated yet - run a draft through Calibrate to learn your voice.</p>;
   }
   return (
     <div className="pw-voice">

@@ -57,7 +57,7 @@ export default async function handler(req: Request, res: Response) {
       return res.status(500).json({ error: 'download_failed', detail: msg });
     }
 
-    // 2. Extract text via the shared extractor — handles PDF/DOCX/image, with
+    // 2. Extract text via the shared extractor - handles PDF/DOCX/image, with
     //    an OCR fallback for scanned or broken-text-layer files. (`text_empty`
     //    and `unsupported_file_type` come back as error codes we relay.)
     let text = '';

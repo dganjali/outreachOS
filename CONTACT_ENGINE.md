@@ -1,6 +1,6 @@
 # Contact Discovery Engine
 
-> How OutreachOS decides **who** to email at a target company — and how it keeps
+> How OutreachOS decides **who** to email at a target company - and how it keeps
 > those people in the band that actually replies.
 
 This document describes the contact-discovery subsystem: the problem it solves,
@@ -12,8 +12,8 @@ and its supporting libraries (`seniority.ts`, `icp.ts`, `serper.ts`).
 
 ## 1. The problem
 
-Cold outreach lives or dies on contact quality. The wrong person — too senior,
-wrong function, wrong region — means no reply no matter how good the email is.
+Cold outreach lives or dies on contact quality. The wrong person - too senior,
+wrong function, wrong region - means no reply no matter how good the email is.
 
 The first-generation pipeline produced an uneven mix. For a single enterprise
 target it would surface, side by side:
@@ -25,7 +25,7 @@ target it would surface, side by side:
 | Global Chief Marketing Officer | ❌ too high up |
 | Director, Sponsors & Community Investment | ✅ good |
 | Senior Vice President, Community | ⚠️ borderline (too senior) |
-| Senior Community Investment Manager | ✅ good — the program owner |
+| Senior Community Investment Manager | ✅ good - the program owner |
 
 The good ones are **program owners** (Manager–Director who run the thing and
 feel the need). The bad ones are **executives** who will never reply to a cold
@@ -36,7 +36,7 @@ email and don't need to.
 1. **The only mode-specific lever was a flat keyword blob.**
    `TITLE_HINTS_BY_MODE` injected `community OR marketing OR partnerships …`
    into one LinkedIn-scoped Google query. It biased *function* but did nothing
-   about *level* — a "Global CMO" matches "marketing" and ranks fine.
+   about *level* - a "Global CMO" matches "marketing" and ranks fine.
 2. **No seniority filtering existed anywhere.** The `seniority` field on
    `ContactDoc` was hardcoded `null`. Nothing could prefer a Manager over a
    President.
@@ -48,7 +48,7 @@ email and don't need to.
    Manager." `employeeCount` was never populated or used.
 5. **Location was ignored.** `headquartersLocation` and contact `location`
    existed but were never populated or used.
-6. **Identical shape for every mode** — only the keyword blob changed. There was
+6. **Identical shape for every mode** - only the keyword blob changed. There was
    no model of *who actually owns this and replies*, and nothing adapted to the
    specific mission or target.
 
@@ -83,7 +83,7 @@ are *above the cap* → dropped or penalized.
 The ICP is:
 - **Generated once per mission** by an LLM step seeded with a per-mode prior, and
   **cached on `MissionDoc.contactIcp`** so it is reused across targets.
-- **Adapted per target deterministically** — the company-size tier shifts the
+- **Adapted per target deterministically** - the company-size tier shifts the
   seniority band, and the target HQ resolves the geo preference. No extra LLM
   call is spent where deterministic logic is correct and cheaper. (A per-target
   LLM refinement hook exists behind a flag for cases where the function set
@@ -105,18 +105,18 @@ senior_director 7 · vp 8 · svp 9 · cxo 10 · founder/president 11
 ```
 
 `parseSeniority(title)` returns `{ level, rank, isRouter, scope }`:
-- **scope qualifiers** — "**Global** CMO", "**Regional** President",
-  "International", "Worldwide" — are detected and treated as seniority/scope
+- **scope qualifiers** - "**Global** CMO", "**Regional** President",
+  "International", "Worldwide" - are detected and treated as seniority/scope
   amplifiers (a global director is less reachable than a local one).
-- **routers** — "coordinator", "assistant", "executive assistant",
-  "associate" — flagged so they're only used when `routerOk` is set.
+- **routers** - "coordinator", "assistant", "executive assistant",
+  "associate" - flagged so they're only used when `routerOk` is set.
 
 This is what finally populates the `seniority`, `headline`, and `location`
 fields that were always `null`.
 
 ### 3.2 Company-size → band shift
 
-The acceptable band slides with company size — the missing piece behind the
+The acceptable band slides with company size - the missing piece behind the
 complaint:
 
 | Size tier | Headcount | Ideal band | Hard cap |
@@ -126,7 +126,7 @@ complaint:
 | `mid` | 250–2,000 | manager–director | senior_director |
 | `large` | 2,000–10,000 | manager–director | senior_director |
 | `enterprise` | > 10,000 | manager–senior_manager | director\* |
-| _unknown_ | — | manager–director | vp |
+| _unknown_ | - | manager–director | vp |
 
 \* VP+ at an enterprise is only kept if `routerOk` **and** the pool would
 otherwise be empty (then it's surfaced with a flag, never silently).
@@ -162,7 +162,7 @@ it and extract location.
 
 The candidate pool is sorted by a **composite reply-likelihood score** in both
 `resolvePoolWithBudget` (the email-resolution walk) and the pipeline's `best`
-pick — replacing raw LLM order / raw `confidence`.
+pick - replacing raw LLM order / raw `confidence`.
 
 ```
 score = w_func · functionMatch
@@ -204,10 +204,10 @@ relative to company size.
 | **Sponsorship** | Community / DevRel / brand-partnerships **manager–director**; sponsorship & events leads; program managers | CMO, President, "Global Head" | routers (event leads) OK |
 | **BD / Partnerships** | Partnerships / alliances / ecosystem **manager–director**; "BD lead" | Chief Partnership Officer at large cos | |
 | **Internship** | Hiring manager / team lead of the relevant team + technical recruiters + ICs on the team (warm intro) | VP+ | IC + manager bands |
-| **Recruiting** | **ICs & team leads at the target company in the relevant function/level — the people you'd hire** | execs, in-house recruiters | candidate-sourcing model; see below |
-| **Sales** | The **champion** who feels the pain (manager/director of the affected function); economic buyer secondary | — | size-relative |
+| **Recruiting** | **ICs & team leads at the target company in the relevant function/level - the people you'd hire** | execs, in-house recruiters | candidate-sourcing model; see below |
+| **Sales** | The **champion** who feels the pain (manager/director of the affected function); economic buyer secondary | - | size-relative |
 
-### Recruiting — the design decision
+### Recruiting - the design decision
 
 Recruiting is defined as **candidate sourcing**: the contact is a *person you'd
 hire* (IC / lead at the relevant level), found at the target companies (a
@@ -224,7 +224,7 @@ one-line change if that's what's wanted instead.
 
 ## 8. The adaptive / confirmation step (`api/_lib/icp.ts`)
 
-`synthesizeContactIcp(mission, prior)` — one LLM call per mission that turns
+`synthesizeContactIcp(mission, prior)` - one LLM call per mission that turns
 `mode + goal + offerDetails + targetDescription + geo` into a `ContactIcp`,
 seeded by the per-mode prior. Cached on the mission. This is what makes discovery
 *adapt* instead of running a frozen keyword list:
@@ -239,9 +239,9 @@ LLM) so the pipeline never hard-depends on the synthesis call succeeding.
 
 ## 9. Long-term infrastructure (the compounding part)
 
-- **Decision log per contact** — score components + the kept/dropped reason are
+- **Decision log per contact** - score components + the kept/dropped reason are
   persisted on the run, so a bad pick is explainable.
-- **Outcome-weighted ranking** — `outcomes.ts` already tracks replies. A later
+- **Outcome-weighted ranking** - `outcomes.ts` already tracks replies. A later
   phase learns the `w_*` weights per mode/size from who actually replied. The
   engine improves with use rather than staying frozen at hand-tuned weights.
 
@@ -249,21 +249,21 @@ LLM) so the pipeline never hard-depends on the synthesis call succeeding.
 
 ## 10. Implementation phases
 
-- **Phase 1 — kills "too high up" immediately, zero added LLM cost.**
+- **Phase 1 - kills "too high up" immediately, zero added LLM cost.**
   `seniority.ts` (parser + size-relative banding + composite scoring) +
   multi-query builder with negative terms + populate `seniority`/`headline`/
   `location` + sort the pool by score. Reuses the existing `*.test.ts` harness.
-- **Phase 2 — adaptive + geo.** `icp.ts` synthesizer cached on the mission;
+- **Phase 2 - adaptive + geo.** `icp.ts` synthesizer cached on the mission;
   per-mode priors; mission `geo` field + UI input; size enrichment.
-- **Phase 3 — compounding.** Per-target LLM ICP refinement (flagged), outcome-
+- **Phase 3 - compounding.** Per-target LLM ICP refinement (flagged), outcome-
   driven weight learning, recruiting person-first evidence path.
 
 ### Files
 
 | File | Change |
 | --- | --- |
-| `api/_lib/seniority.ts` | **new** — taxonomy, parser, banding, scoring |
-| `api/_lib/icp.ts` | **new** — ICP synthesizer, per-mode priors, default |
+| `api/_lib/seniority.ts` | **new** - taxonomy, parser, banding, scoring |
+| `api/_lib/icp.ts` | **new** - ICP synthesizer, per-mode priors, default |
 | `api/_lib/serper.ts` | multi-query builder + dedup pool |
 | `api/_lib/company-enrich.ts` | `enrichCompanySize` |
 | `api/_lib/prompts.ts` | per-mode priors, ICP + serp system prompts |

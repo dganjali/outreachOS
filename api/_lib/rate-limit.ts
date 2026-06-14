@@ -4,14 +4,14 @@
 // external package here so there's no new supply-chain surface and the limiter
 // is trivially auditable. Two limiters are exported:
 //
-//   • globalRateLimit — a generous per-IP cap on every endpoint, to blunt
+//   • globalRateLimit - a generous per-IP cap on every endpoint, to blunt
 //     scraping / brute-force / accidental request storms.
-//   • authRateLimit   — a strict 5-attempts / 15-minutes per-IP cap on the
+//   • authRateLimit   - a strict 5-attempts / 15-minutes per-IP cap on the
 //     OAuth (authentication) routes, per the security requirement.
 //
 // NOTE ON SCOPE: the store is per-process. On Cloud Run with multiple instances
 // each instance keeps its own counters, so the effective limit is
-// (max × instanceCount). This is intentional defense-in-depth — it is not a
+// (max × instanceCount). This is intentional defense-in-depth - it is not a
 // billing/quota control (that lives in api/_lib/runs.ts, which is per-user and
 // Mongo-backed and therefore global). For a hard cross-instance auth cap, back
 // this with a shared store (Redis/Memorystore); the interface below is
@@ -116,7 +116,7 @@ export const globalRateLimit = rateLimit({
   name: 'global',
   windowMs: 60_000,
   max: 120,
-  message: 'Too many requests — slow down and retry in a minute.',
+  message: 'Too many requests - slow down and retry in a minute.',
 });
 
 // Authentication / OAuth routes: 5 attempts per 15 minutes, per the brief.
@@ -127,7 +127,7 @@ export const authRateLimit = rateLimit({
   message: 'Too many authentication attempts. Try again in 15 minutes.',
 });
 
-/** Test seam — clears all counters between unit tests. */
+/** Test seam - clears all counters between unit tests. */
 export function __resetRateLimitStore(): void {
   store.clear();
 }

@@ -1,11 +1,11 @@
-// Text embeddings — Gemini on Vertex AI (gemini-embedding-001).
+// Text embeddings - Gemini on Vertex AI (gemini-embedding-001).
 //
 // Populates the `embedding` field on evidence_packs, email_sequences, and
 // profile_assets chunks so Atlas Vector Search can do semantic retrieval.
 //
 // Output is pinned to 1024 dims to match the existing Atlas vector indexes
 // (shared/schemas.ts, numDimensions: 1024). Auth is via ADC (the Cloud Run
-// runtime service account) — same as the Gemini chat adapter, no API key.
+// runtime service account) - same as the Gemini chat adapter, no API key.
 
 import { GoogleGenAI } from '@google/genai';
 import { env } from './env';

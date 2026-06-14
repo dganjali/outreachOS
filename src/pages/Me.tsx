@@ -27,7 +27,7 @@ export function Me() {
   const [tab, setTab] = useState<Tab>('personalization');
   const [historyReloadKey, setHistoryReloadKey] = useState(0);
 
-  // Shared, person-level context facts — the single source of truth the Context
+  // Shared, person-level context facts - the single source of truth the Context
   // tab edits and every voice reads.
   const [facts, setFacts] = useState<ContextFact[]>([]);
   const [factsLoading, setFactsLoading] = useState(true);
@@ -185,7 +185,7 @@ export function Me() {
     toast.success(
       facts_added > 0
         ? `Added ${facts_added} fact${facts_added === 1 ? '' : 's'} from your LinkedIn.`
-        : 'Profile refreshed — no new facts found.'
+        : 'Profile refreshed - no new facts found.'
     );
   }
 

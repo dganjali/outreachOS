@@ -1,4 +1,4 @@
-// MongoDB collection schemas — the single place that describes what every
+// MongoDB collection schemas - the single place that describes what every
 // collection looks like. `init-mongo.ts` reads INDEX_SPEC from here to create
 // all indexes (including the Atlas Vector Search index).
 //
@@ -9,7 +9,7 @@
 //
 // Every document has:
 //   _id: string
-//   userId: string         (Firebase UID — denormalized on every doc for O(1) ownership checks)
+//   userId: string         (Firebase UID - denormalized on every doc for O(1) ownership checks)
 //   createdAt: Date
 //   updatedAt: Date
 // These are stamped by the `forUser(uid).collection().insertOne()` wrapper.
@@ -22,7 +22,7 @@ void ({} as EmbedInputType); // keep the import live for downstream consumers
 
 // ---------------------------------------------------------------------------
 // Document shapes (TypeScript, not Mongo validators).
-// We intentionally keep validators OFF for hackathon velocity — add later via
+// We intentionally keep validators OFF for hackathon velocity - add later via
 // db.command({ collMod: ..., validator: ... }) if you want them.
 // ---------------------------------------------------------------------------
 
@@ -56,7 +56,7 @@ export interface ProfileDoc extends BaseDoc {
   pauseFollowups?: boolean;
 
   // --- Billing / monetization (Stripe). All optional; absence == free tier. ---
-  // The plan the user purchased. Effective limits also depend on planStatus —
+  // The plan the user purchased. Effective limits also depend on planStatus -
   // see resolvePlan() in shared/plans.ts. Defaults to 'free' when unset.
   plan?: PlanId | null;
   planStatus?: PlanStatus | null;
@@ -68,7 +68,7 @@ export interface ProfileDoc extends BaseDoc {
   planUpdatedAt?: Date | null;
   // Monotonic monthly mission-launch counter, the source of truth for the
   // monthly cap. `period` is the UTC 'YYYY-MM' the count applies to; a new month
-  // lazily resets `used` to 0. NEVER decremented on mission delete — counting
+  // lazily resets `used` to 0. NEVER decremented on mission delete - counting
   // live mission docs instead would let a user mint unlimited missions by
   // delete-and-recreate. Incremented in api/data/router.ts on mission insert.
   missionQuota?: { period: string; used: number } | null;
@@ -98,13 +98,13 @@ export interface ProfileAssetDoc extends BaseDoc {
   parsedAt: Date | null;
   parseError: string | null;
   sourceUrl: string | null;
-  // Vector field — populated for resume chunks so the sequence agent can
+  // Vector field - populated for resume chunks so the sequence agent can
   // semantically retrieve relevant snippets instead of stuffing the whole CV.
   embedding?: number[];
 }
 
 // ---------------------------------------------------------------------------
-// Personalization layer — the persona/taste model. Layered design:
+// Personalization layer - the persona/taste model. Layered design:
 //   • Person-level identity + shared proof live on ProfileDoc + ContextFacts
 //     (scope:'person'), entered once and reused across personas.
 //   • Each PersonaDoc is a reusable, use-case-scoped *voice* (selected/created
@@ -118,7 +118,7 @@ export interface ProfileAssetDoc extends BaseDoc {
 export interface StyleDimension {
   // Normalized scalar (most dims 0..1; sentenceLenTarget is a word count).
   value: number;
-  // 0..1 — how trustworthy this value is. The learning-loop merge refuses to
+  // 0..1 - how trustworthy this value is. The learning-loop merge refuses to
   // overwrite a high-confidence dimension with a single noisy signal.
   confidence: number;
   // Where the value came from: 'onboarding' | 'edit-delta' | 'chat-instruction'
@@ -132,7 +132,7 @@ export interface StyleProfile {
   dimensions: Record<string, StyleDimension>;
   // Extracted hard do/don'ts (e.g. "first paragraph ≤ 2 sentences").
   rules: Array<{ rule: string; source: string; confidence: number }>;
-  // The user's PERSONAL slop list — hard constraints + critique input.
+  // The user's PERSONAL slop list - hard constraints + critique input.
   bannedPhrases: string[];
   // Short prose summary regenerated from the above, injected into the prompt.
   voiceSummary: string;
@@ -167,7 +167,7 @@ export interface PersonaDoc extends BaseDoc {
   excludedFactIds?: string[];
 }
 
-// Immutable per-calibration snapshots — audit + rollback for a persona's voice.
+// Immutable per-calibration snapshots - audit + rollback for a persona's voice.
 export interface PersonaVersionDoc extends BaseDoc {
   personaId: string;
   snapshot: Record<string, unknown>;     // a StyleProfile at a point in time
@@ -213,7 +213,7 @@ export interface MissionDoc extends BaseDoc {
   // Optional location focus (region/country/city) for contact discovery. null =
   // no geographic preference. See CONTACT_ENGINE.md §4.
   geo?: string | null;
-  // Cached Ideal Contact Profile — generated once on first contact discovery and
+  // Cached Ideal Contact Profile - generated once on first contact discovery and
   // reused across this mission's targets (CONTACT_ENGINE.md §2/§8). Optional so
   // pre-engine missions read as undefined; lazily backfilled on next run.
   contactIcp?: ContactIcp | null;
@@ -247,7 +247,7 @@ export interface ContactDoc extends BaseDoc {
   email: string | null;
   emailStatus: 'verified' | 'likely' | 'guessed' | 'none';
   // Which rung of the resolution cascade produced the email (analytics only).
-  // Optional — pre-existing docs read as undefined; no migration needed.
+  // Optional - pre-existing docs read as undefined; no migration needed.
   emailResolver?: 'preexisting' | 'email_finder' | 'scrape' | 'verifier' | 'none' | null;
   linkedinUrl: string | null;
   likelyEmailPattern: string | null;
@@ -271,7 +271,7 @@ export interface EvidencePackDoc extends BaseDoc {
     recency: string;
   }>;
   citations: Array<{ url: string; title?: string }>;
-  // Vector field — concatenated bullets, embedded with Voyage.
+  // Vector field - concatenated bullets, embedded with Voyage.
   embedding?: number[];
 }
 
@@ -286,7 +286,7 @@ export interface EmailSequenceDoc extends BaseDoc {
   body: string;
   // Immutable record of the INITIAL email exactly as the AI first produced it.
   // The learning loop compares this against the human-edited final (the
-  // edit-delta) — the richest taste signal. Optional: pre-personalization docs
+  // edit-delta) - the richest taste signal. Optional: pre-personalization docs
   // read as undefined; never overwritten once set (saveTouch updates only
   // subject/body).
   originalSubject?: string | null;
@@ -296,7 +296,7 @@ export interface EmailSequenceDoc extends BaseDoc {
   scheduledSendAt: Date | null;
   sentAt: Date | null;
   profileVersionId: string | null;
-  // Vector field — embed subject+body so we can retrieve "past sequences that
+  // Vector field - embed subject+body so we can retrieve "past sequences that
   // got replies" as exemplars for new generations.
   embedding?: number[];
 }
@@ -391,12 +391,12 @@ export interface UserIntegrationDoc extends BaseDoc {
 }
 
 // ---------------------------------------------------------------------------
-// Pipeline runs — the durable, resumable record of a full mission pipeline.
+// Pipeline runs - the durable, resumable record of a full mission pipeline.
 //
 // Replaces the old browser-driven orchestration (which died when the tab
 // closed). The server advances this doc one step at a time; it IS the source of
-// truth for progress, so any driver — in-process loop, a resumed poll, or a
-// Cloud Tasks worker — can pick up exactly where the last one stopped.
+// truth for progress, so any driver - in-process loop, a resumed poll, or a
+// Cloud Tasks worker - can pick up exactly where the last one stopped.
 // ---------------------------------------------------------------------------
 export type PipelineStepStatus = 'queued' | 'running' | 'done' | 'failed';
 
@@ -406,7 +406,14 @@ export interface PipelineTargetState {
   score: number | null;
   evidence: PipelineStepStatus;
   contacts: PipelineStepStatus;
+  // Aggregate draft status for the target: 'done' once at least one contact has
+  // a draft, 'failed' if none could be drafted. Per-contact detail lives in
+  // `sequences` (parallel to `contactIds`).
   sequence: PipelineStepStatus;
+  // The contacts we draft for, top `config.topContacts` by reply-likelihood.
+  contactIds: string[];
+  sequences: PipelineStepStatus[];
+  // Primary contact (contactIds[0]); kept for convenience/back-compat.
   bestContactId: string | null;
 }
 
@@ -414,10 +421,11 @@ export interface PipelineRunDoc extends BaseDoc {
   missionId: string;
   status: 'pending' | 'running' | 'paused' | 'done' | 'error' | 'canceled';
   phase: 'targeting' | 'processing' | 'done';
-  config: { targetCount: number; topN: number };
+  config: { targetCount: number; topN: number; topContacts: number };
   targets: PipelineTargetState[];
-  // Resume pointer into `targets`. null before targeting completes / after done.
-  cursor: { targetIndex: number; step: 'evidence' | 'contacts' | 'sequence' } | null;
+  // Resume pointer into `targets`. `contactIndex` tracks which contact's draft is
+  // in flight during the 'sequence' step. null before targeting / after done.
+  cursor: { targetIndex: number; step: 'evidence' | 'contacts' | 'sequence'; contactIndex?: number } | null;
   note: string | null;
   error: string | null;
   // Bumped on every persisted step; a stale heartbeat means the driver died and
@@ -428,7 +436,7 @@ export interface PipelineRunDoc extends BaseDoc {
 }
 
 // ---------------------------------------------------------------------------
-// Index spec — read by scripts/init-mongo.ts. Plain JS so the script doesn't
+// Index spec - read by scripts/init-mongo.ts. Plain JS so the script doesn't
 // need to import any types.
 // ---------------------------------------------------------------------------
 
@@ -507,7 +515,7 @@ export const INDEX_SPEC: Record<string, Array<{ keys: Record<string, 1 | -1>; op
 
 /**
  * Atlas Vector Search index definitions. These can't be created via the Node
- * driver's regular createIndex — they go through the Atlas Admin API or the
+ * driver's regular createIndex - they go through the Atlas Admin API or the
  * `db.collection.createSearchIndex()` helper (driver 6.6+).
  */
 export const VECTOR_INDEX_SPEC = [
@@ -545,7 +553,7 @@ export const VECTOR_INDEX_SPEC = [
     },
   },
   {
-    // Gold exemplar retrieval — the engine pulls the persona's most relevant
+    // Gold exemplar retrieval - the engine pulls the persona's most relevant
     // past emails as few-shot voice anchors. Cold-start works because exemplars
     // are user-provided at onboarding (not dependent on earned replies).
     collection: 'style_exemplars',
@@ -559,7 +567,7 @@ export const VECTOR_INDEX_SPEC = [
     },
   },
   {
-    // Relevance retrieval over the context bank — select the facts worth citing
+    // Relevance retrieval over the context bank - select the facts worth citing
     // for a given target instead of dumping the whole bank into the prompt.
     collection: 'context_facts',
     name: 'context_fact_vector_idx',

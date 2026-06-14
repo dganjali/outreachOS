@@ -2,18 +2,18 @@
 //
 // The data router already gates *query* filters against NoSQL-operator
 // injection (see api/data/router.ts `sanitizeFilter`). This module covers the
-// other half — the *write* path and request bodies generally — against three
+// other half - the *write* path and request bodies generally - against three
 // classes of malformed/abusive input:
 //
-//   1. Prototype pollution — JSON like {"__proto__": {"isAdmin": true}} parses
+//   1. Prototype pollution - JSON like {"__proto__": {"isAdmin": true}} parses
 //      with `__proto__` as an OWN property; if such an object is later merged
 //      into another via spread/Object.assign in a way that walks the prototype
 //      chain, it can poison Object.prototype. We reject these keys outright.
-//   2. Stored Mongo operators / dotted paths — a write body that reaches
+//   2. Stored Mongo operators / dotted paths - a write body that reaches
 //      `$set: { ...body }` with a key like `$rename` or `a.b` would mutate
 //      fields the caller never intended. Real document fields never start with
 //      `$` or contain `.`, so we reject them.
-//   3. Oversized / pathologically-nested payloads — deeply nested or huge
+//   3. Oversized / pathologically-nested payloads - deeply nested or huge
 //      objects are a cheap DoS. We bound depth and total key count.
 
 export class UnsafePayloadError extends Error {
@@ -44,7 +44,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
  * UnsafePayloadError on any prototype-pollution key, stored Mongo operator /
  * dotted key, or when depth / key-count / string-length bounds are exceeded.
  *
- * Returns the value unchanged when safe (it does not clone — callers store the
+ * Returns the value unchanged when safe (it does not clone - callers store the
  * original object). The caller maps the thrown error to HTTP 400.
  */
 export function assertSafeWriteBody(value: unknown, opts: SanitizeOptions = {}): void {

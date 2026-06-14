@@ -5,7 +5,7 @@
 //
 // Every agent handler follows the same shape: `(req, res) => res.status(n).json(obj)`.
 // Reusing the handlers verbatim means orchestration goes through the exact same
-// rate-limit checks, run logging, and DB writes as a real HTTP call — no logic
+// rate-limit checks, run logging, and DB writes as a real HTTP call - no logic
 // is duplicated or allowed to drift.
 
 import type { Request, Response } from 'express';

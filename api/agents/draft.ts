@@ -1,4 +1,4 @@
-// Draft agent — the HTTP entry point to the personalization engine for a SINGLE
+// Draft agent - the HTTP entry point to the personalization engine for a SINGLE
 // draft (onboarding Stage-4 calibration, or one-off regeneration).
 //
 // The live bulk pipeline goes through sequence.ts (which also writes follow-ups
@@ -52,7 +52,7 @@ export default async function handler(req: Request, res: Response) {
 
     const result = await runDraftEngine(ctx, tier);
 
-    // Observe — log the full grounding lineage so the learning loop + eval can
+    // Observe - log the full grounding lineage so the learning loop + eval can
     // attribute outcomes back to specific facts/exemplars/persona version.
     await completeRun(scope, run._id, {
       persona_id: persona?._id ?? null,

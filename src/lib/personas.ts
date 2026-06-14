@@ -13,7 +13,7 @@ export function emptyStyleProfile(): StyleProfile {
 }
 
 /**
- * Whether a voice has actually learned a style — i.e. the user ran the
+ * Whether a voice has actually learned a style - i.e. the user ran the
  * "calibrate on a real draft" step and extract-style populated the profile.
  *
  * This is the real signal for the "Calibrated" badge. `onboarding_completed_at`
@@ -99,7 +99,7 @@ export interface PersonaBundle {
   exemplars: StyleExemplar[];
 }
 
-/** Persona + its persona-scoped facts + exemplars — everything the wizard edits. */
+/** Persona + its persona-scoped facts + exemplars - everything the wizard edits. */
 export async function getPersonaBundle(userId: string, personaId: string): Promise<PersonaBundle | null> {
   const persona = await getPersona(personaId);
   if (!persona) return null;

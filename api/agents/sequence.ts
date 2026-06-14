@@ -1,4 +1,4 @@
-// Sequence agent — the LIVE drafting path (pipeline + MissionPage "draft").
+// Sequence agent - the LIVE drafting path (pipeline + MissionPage "draft").
 //
 // The initial email now goes through the personalization engine
 // (assemble → grounded generate → verify → tiered revise), persona-aware, with
@@ -47,10 +47,10 @@ const FOLLOWUPS_SCHEMA = {
   required: ['followups'],
 } as const;
 
-const FOLLOWUPS_SYSTEM = `You write 2 short follow-up emails for a cold outreach sequence. They reference the original lightly, add no new factual claims, stay in the sender's voice, and each end with one low-friction CTA. Each email MUST end with a short sign-off ("Best,") followed by the sender's name on the next line — use the sender name provided verbatim, never a placeholder like "[Your Name]". Keep each under 70 words. wait_days: first ~3, second ~6. Output JSON only.`;
+const FOLLOWUPS_SYSTEM = `You write 2 short follow-up emails for a cold outreach sequence. They reference the original lightly, add no new factual claims, stay in the sender's voice, and each end with one low-friction CTA. Each email MUST end with a short sign-off ("Best,") followed by the sender's name on the next line - use the sender name provided verbatim, never a placeholder like "[Your Name]". Keep each under 70 words. wait_days: first ~3, second ~6. Output JSON only.`;
 
 // Pull evidence-bullet indices a draft actually cited, from "evidence:<pack>:<i>"
-// factIds — preserves the old anchoredBullets telemetry against the latest pack.
+// factIds - preserves the old anchoredBullets telemetry against the latest pack.
 function anchoredFromClaims(claims: Array<{ factId: string }>, packId: string | null): number[] {
   if (!packId) return [];
   const idx = new Set<number>();
@@ -103,7 +103,7 @@ export default async function handler(req: Request, res: Response) {
       persona,
     });
 
-    // Initial email — grounded engine, single critique pass (bulk tier).
+    // Initial email - grounded engine, single critique pass (bulk tier).
     const result = await runDraftEngine(ctx, 'bulk');
     const { subject, body, angle, claims } = result.draft;
 
@@ -177,7 +177,7 @@ async function generateFollowups(
           role: 'user',
           content: [
             `Recipient: ${recipientName}`,
-            `Sender (sign off as): ${senderName ?? 'unknown — close with "Best," and no placeholder name'}`,
+            `Sender (sign off as): ${senderName ?? 'unknown - close with "Best," and no placeholder name'}`,
             `Mission goal / offer: ${missionGoal}`,
             `Original email:\nSubject: ${subject}\n\n${body}`,
             'Write 2 follow-ups, each ending with a sign-off. JSON only.',

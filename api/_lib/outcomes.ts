@@ -1,4 +1,4 @@
-// Per-fact / per-exemplar outcome attribution — generalizes coach.ts's
+// Per-fact / per-exemplar outcome attribution - generalizes coach.ts's
 // per-profile-field reply-rate join down to the grounding atoms. The draft +
 // sequence agents log which `fact_ids` / `exemplar_ids` went into a contact's
 // email (agent_runs.output). When that email is sent or gets a reply, we credit
@@ -7,7 +7,7 @@
 // and exemplars that actually earn replies.
 //
 // Reply visibility is weak today (Gmail send-only scope), so this is a bonus
-// signal layered on top of edit-deltas — always best-effort, never blocking.
+// signal layered on top of edit-deltas - always best-effort, never blocking.
 
 import { adminDb } from './db';
 import type { AgentRunDoc } from '../../shared/schemas';
@@ -27,7 +27,7 @@ async function lineageForContact(
   const out = run?.output ?? {};
   const factIds = Array.isArray(out.fact_ids) ? (out.fact_ids as string[]) : [];
   const exemplarIds = Array.isArray(out.exemplar_ids) ? (out.exemplar_ids as string[]) : [];
-  // Evidence "facts" are synthetic ids (evidence:<pack>:<i>) — only persisted
+  // Evidence "facts" are synthetic ids (evidence:<pack>:<i>) - only persisted
   // ContextFacts have a row to update.
   return { factIds: factIds.filter((id) => !id.startsWith('evidence:')), exemplarIds };
 }

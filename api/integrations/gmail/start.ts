@@ -11,7 +11,7 @@ export default async function handler(req: Request, res: Response) {
   const origin = (req.body as { origin?: string } | null)?.origin || `https://${req.headers.host}`;
   const redirectUri = `${origin}/api/integrations/gmail/callback`;
 
-  // Encrypted state — round-trips through Google, we don't trust it on return.
+  // Encrypted state - round-trips through Google, we don't trust it on return.
   const state = encrypt(JSON.stringify({ uid: user.id, t: Date.now(), redirect: redirectUri }));
 
   return res.status(200).json({ url: authUrl(state, redirectUri) });

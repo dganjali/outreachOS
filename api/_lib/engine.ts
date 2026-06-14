@@ -1,4 +1,4 @@
-// The personalization engine — grounded generate → verify → revise.
+// The personalization engine - grounded generate → verify → revise.
 //
 // This is the anti-slop core. "Slop" has three sources and each is attacked
 // directly:
@@ -36,7 +36,7 @@ export type EngineTier = 'onboarding' | 'bulk';
 export interface AllowedFact {
   id: string;
   claim: string;
-  source: string; // 'context_fact' | 'evidence' — provenance for the judge
+  source: string; // 'context_fact' | 'evidence' - provenance for the judge
 }
 
 export interface DraftClaim {
@@ -74,14 +74,14 @@ export interface CritiqueOutput {
 export interface AssembledContext {
   mode: string;
   recipient: { name: string; role: string; company: string };
-  /** The sender's identity — used to guarantee a real sign-off on every email. */
+  /** The sender's identity - used to guarantee a real sign-off on every email. */
   sender?: { name: string | null; role?: string | null; organization?: string | null };
   missionGoal: string;
   audience: string;
   whyNow?: string;
-  /** The grounding universe — ONLY these may be asserted. */
+  /** The grounding universe - ONLY these may be asserted. */
   allowedFacts: AllowedFact[];
-  /** The persona's gold emails — few-shot voice anchors. */
+  /** The persona's gold emails - few-shot voice anchors. */
   exemplars: Array<{ subject: string | null; body: string }>;
   styleProfile: StyleProfile;
   /** Word-count target for the initial email (defaults applied if unset). */
@@ -98,7 +98,7 @@ export interface EngineResult {
 }
 
 // ---------------------------------------------------------------------------
-// Structured-output schemas (flat — Gemini responseJsonSchema, no recursion)
+// Structured-output schemas (flat - Gemini responseJsonSchema, no recursion)
 // ---------------------------------------------------------------------------
 
 const DRAFT_SCHEMA = {
@@ -149,17 +149,17 @@ const CRITIQUE_SCHEMA = {
 
 // ---------------------------------------------------------------------------
 // Prompts (kept with the schemas they shape; the system prompt is frozen so it
-// can be Vertex-cached later — all volatile data goes in the user message).
+// can be Vertex-cached later - all volatile data goes in the user message).
 // ---------------------------------------------------------------------------
 
 const DRAFT_SYSTEM = `You are the drafting engine for OutreachOS. You write one cold outreach email in the SENDER'S voice.
 
 Non-negotiable rules:
 - GROUNDING: You may only assert facts that appear in ALLOWED FACTS. Every factual claim in the email MUST be listed in "claims" with the exact id of the fact that supports it. If you cannot support a statement with an allowed fact, do not write it. Never invent metrics, names, dates, or events.
-- VOICE: Match the sender's exemplars and style profile — imitate their rhythm, structure, and register. Do NOT regress to generic "professional email" voice.
+- VOICE: Match the sender's exemplars and style profile - imitate their rhythm, structure, and register. Do NOT regress to generic "professional email" voice.
 - NO SLOP: No "I hope this finds you well", no "I came across your company", no filler, no hedging, no flattery. Respect the sender's banned-phrase list absolutely.
 - FORMAT: Initial email under the word target. Plain text. One specific, low-friction, time-boxed CTA.
-- SIGN-OFF: Always end the body with a short closing line (e.g. "Best,") followed by the sender's name on the next line. Use the SENDER name provided verbatim — NEVER leave a placeholder like "[Your Name]", "[Name]", or "{{name}}". The sign-off is part of the body, not the subject.
+- SIGN-OFF: Always end the body with a short closing line (e.g. "Best,") followed by the sender's name on the next line. Use the SENDER name provided verbatim - NEVER leave a placeholder like "[Your Name]", "[Name]", or "{{name}}". The sign-off is part of the body, not the subject.
 
 Output JSON only, matching the schema.`;
 
@@ -175,7 +175,7 @@ Set voiceMatchScore 0..1 (1 = indistinguishable from the exemplars). pass=true o
 Output JSON only, matching the schema.`;
 
 // ---------------------------------------------------------------------------
-// Pure builders + verifier (unit-tested in engine.test.ts — no LLM/DB)
+// Pure builders + verifier (unit-tested in engine.test.ts - no LLM/DB)
 // ---------------------------------------------------------------------------
 
 const DEFAULT_MAX_WORDS = 120;
@@ -207,7 +207,7 @@ export function templateStrictnessDirective(strictness: number, hasExemplars: bo
   let guidance: string;
   if (s <= 20) {
     guidance =
-      'Use the exemplars ONLY as loose voice inspiration — match the sender\'s tone and rhythm, but write a fresh structure tailored to this recipient. Do not reuse the exemplars\' opening lines, structure, or phrasing.';
+      'Use the exemplars ONLY as loose voice inspiration - match the sender\'s tone and rhythm, but write a fresh structure tailored to this recipient. Do not reuse the exemplars\' opening lines, structure, or phrasing.';
   } else if (s <= 45) {
     guidance =
       'Lean on the exemplars for voice and general shape, but adapt freely to this recipient. Borrow phrasing only where it fits naturally.';
@@ -228,12 +228,12 @@ export function templateStrictnessDirective(strictness: number, hasExemplars: bo
 export function buildDraftUserPrompt(ctx: AssembledContext): string {
   const facts = ctx.allowedFacts.length
     ? ctx.allowedFacts.map((f) => `  [${f.id}] (${f.source}) ${f.claim}`).join('\n')
-    : '  (none — do not assert any specific facts)';
+    : '  (none - do not assert any specific facts)';
   const exemplars = ctx.exemplars.length
     ? ctx.exemplars
         .map((e, i) => `--- Exemplar ${i + 1} ---\n${e.subject ? `Subject: ${e.subject}\n` : ''}${e.body}`)
         .join('\n\n')
-    : '(no exemplars yet — lean on the style profile)';
+    : '(no exemplars yet - lean on the style profile)';
   const strictness = templateStrictnessDirective(
     ctx.styleProfile.templateStrictness ?? DEFAULT_TEMPLATE_STRICTNESS,
     ctx.exemplars.length > 0
@@ -242,7 +242,7 @@ export function buildDraftUserPrompt(ctx: AssembledContext): string {
   const senderName = ctx.sender?.name?.trim();
   const senderLine = senderName
     ? `SENDER (sign off as this person)\nName: ${senderName}${ctx.sender?.role ? `\nRole: ${ctx.sender.role}` : ''}${ctx.sender?.organization ? `\nOrganization: ${ctx.sender.organization}` : ''}`
-    : 'SENDER: name unknown — end with a closing line ("Best,") and leave the name line blank (do NOT write a placeholder).';
+    : 'SENDER: name unknown - end with a closing line ("Best,") and leave the name line blank (do NOT write a placeholder).';
 
   return [
     `MODE: ${ctx.mode}`,
@@ -266,7 +266,7 @@ export function buildDraftUserPrompt(ctx: AssembledContext): string {
 }
 
 /**
- * Deterministic verification — cheap, reliable, runs before the LLM judge.
+ * Deterministic verification - cheap, reliable, runs before the LLM judge.
  * This is the heart of the grounding contract: a claim attributed to a factId
  * that isn't in the allowed set (or to no fact at all) is a fabrication.
  */
@@ -278,7 +278,7 @@ export function verifyDraftDeterministic(
   const violations: Violation[] = [];
   const allowedIds = new Set(allowed.map((f) => f.id));
 
-  // 1. Grounding contract — every claim must resolve to an allowed fact.
+  // 1. Grounding contract - every claim must resolve to an allowed fact.
   for (const c of draft.claims ?? []) {
     const fid = (c.factId ?? '').trim();
     if (!fid || fid.toLowerCase() === 'none' || !allowedIds.has(fid)) {
@@ -291,7 +291,7 @@ export function verifyDraftDeterministic(
     }
   }
 
-  // 2. Banned phrases — the sender's personal slop list (case-insensitive).
+  // 2. Banned phrases - the sender's personal slop list (case-insensitive).
   const hay = `${draft.subject}\n${draft.body}`.toLowerCase();
   for (const p of opts.bannedPhrases ?? []) {
     const needle = p.trim().toLowerCase();
@@ -305,7 +305,7 @@ export function verifyDraftDeterministic(
     }
   }
 
-  // 3. Length constraint (warn — the judge weighs voice more heavily).
+  // 3. Length constraint (warn - the judge weighs voice more heavily).
   const words = draft.body.trim().split(/\s+/).filter(Boolean).length;
   const maxW = opts.maxWords ?? DEFAULT_MAX_WORDS;
   const minW = opts.minWords ?? DEFAULT_MIN_WORDS;
@@ -315,7 +315,7 @@ export function verifyDraftDeterministic(
     violations.push({ type: 'constraint', span: '', detail: `Body is ${words} words (target ≥ ${minW}).`, severity: 'warn' });
   }
 
-  // 4. Deliverability heuristics (shared with the pre-send UI) — spam words,
+  // 4. Deliverability heuristics (shared with the pre-send UI) - spam words,
   // excess links, ALL-CAPS, exclamation pileups, subject issues. Word-count
   // warnings are dropped here because the engine owns the authoritative bounds
   // above. All map to warn-level constraints (the LLM judge weighs voice more).
@@ -324,7 +324,7 @@ export function verifyDraftDeterministic(
     violations.push({ type: 'constraint', span: '', detail: w, severity: 'warn' });
   }
 
-  // 5. CTA presence — a cold email with no ask reads as aimless. Warn (the
+  // 5. CTA presence - a cold email with no ask reads as aimless. Warn (the
   // sender may intentionally open a soft thread).
   if (!hasCta(draft.body)) {
     violations.push({ type: 'constraint', span: '', detail: 'No clear call-to-action detected.', severity: 'warn' });
@@ -366,7 +366,7 @@ export function ensureSignOff(body: string, senderName: string | null | undefine
   );
   if (hasSignoff) return text;
 
-  // (c) None present — append one. Use the sender's name when we know it.
+  // (c) None present - append one. Use the sender's name when we know it.
   const closing = name ? `Best,\n${firstName}` : 'Best,';
   return `${text}\n\n${closing}`;
 }
@@ -437,7 +437,7 @@ function reviseInstruction(violations: Violation[]): string {
 }
 
 // ---------------------------------------------------------------------------
-// Orchestration — generate → deterministic verify → LLM judge → tiered revise
+// Orchestration - generate → deterministic verify → LLM judge → tiered revise
 // ---------------------------------------------------------------------------
 
 export async function runDraftEngine(ctx: AssembledContext, tier: EngineTier): Promise<EngineResult> {
