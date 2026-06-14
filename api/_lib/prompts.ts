@@ -277,6 +277,7 @@ Classification options (pick exactly one):
 Rules for suggested_response:
 - Skip (null) when classification is "unsubscribe" or "oof"
 - Match the sender's voice/tone from the original email
+- End with a short sign-off ("Best,") followed by the sender's name (use the sender name from CONTEXT verbatim; never a placeholder like "[Your Name]")
 - Under 80 words
 - Specific and concrete — not "thanks for getting back!"
 - For "interested": propose 2-3 specific times OR a calendar link placeholder OR a clear next step

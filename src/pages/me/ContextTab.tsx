@@ -29,7 +29,7 @@ export function scorePanel(
     case 'facts':
       return { filled: factsCount > 0 ? 1 : 0, total: 1 };
     case 'links':
-      return countFilled([form.linkedin_url, form.website, form.resume_url]);
+      return countFilled([form.linkedin_url, form.website]);
   }
 }
 
@@ -150,7 +150,7 @@ export function ContextTab({
 
       <Panel
         title="Links & files"
-        hint="Links the agent can reference. Upload files in a voice's Smart fill to pull facts from them."
+        hint="Links and files the agent can mine for facts. Grab from LinkedIn or drop a résumé — both add facts under Facts above."
         open={open.links}
         score={scorePanel(form, facts.length, 'links')}
         onToggle={() => toggle('links')}
@@ -161,9 +161,6 @@ export function ContextTab({
           </Field>
           <Field label="Website">
             <input type="url" value={form.website} onChange={(e) => set('website', e.target.value)} placeholder="https://…" />
-          </Field>
-          <Field label="Résumé URL">
-            <input type="url" value={form.resume_url} onChange={(e) => set('resume_url', e.target.value)} placeholder="https://…" />
           </Field>
         </div>
 
@@ -176,15 +173,16 @@ export function ContextTab({
             title={hasLinkedin ? undefined : 'Add your LinkedIn URL above first'}
           >
             {autofilling ? <Loader2 className="pw-spin" size={14} /> : <UserSearch size={14} />}
-            {autofilling ? 'Reading your LinkedIn…' : 'Autofill from LinkedIn'}
+            {autofilling ? 'Reading your LinkedIn…' : 'Grab facts from LinkedIn'}
           </button>
           <p className="section-hint">
-            Pulls public, sourceable facts from your LinkedIn and adds them above. Review and prune
-            anything off — nothing is sent without your say-so. To autofill from a résumé, drop the
-            file into Smart fill under Facts.
+            Pulls public, sourceable facts from your LinkedIn and adds them to Facts above. Review and
+            prune anything off — nothing is sent without your say-so.
           </p>
           {autofillError && <p className="pw-error">{autofillError}</p>}
         </div>
+
+        <ResumeDropzone userId={userId} onFactsChanged={onFactsChanged} />
       </Panel>
 
       {error && (
@@ -360,6 +358,83 @@ function FactsEditor({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Résumé file box — same pipeline as Smart fill: upload → extract-context →
+// person-level facts. Dropping a résumé pulls its facts into the profile.
+// ---------------------------------------------------------------------------
+function ResumeDropzone({
+  userId,
+  onFactsChanged,
+}: {
+  userId: string;
+  onFactsChanged: () => void;
+}) {
+  const [extracting, setExtracting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  async function handleFile(file: File | null | undefined) {
+    if (!file) return;
+    if (file.size > MAX_ASSET_BYTES) {
+      setError(`File too large. Max 20MB; this file is ${(file.size / 1024 / 1024).toFixed(1)}MB.`);
+      return;
+    }
+    setExtracting(true);
+    setError(null);
+    setResult(null);
+    try {
+      const asset = await uploadAsset({ userId, kind: 'context_dump', file });
+      const { facts } = await agents.extractContext({ asset_id: asset.id });
+      onFactsChanged();
+      setResult(
+        facts.length > 0
+          ? `Added ${facts.length} fact${facts.length === 1 ? '' : 's'} from your résumé.`
+          : 'Read your résumé — no new facts found.'
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Upload failed — try again.');
+    } finally {
+      setExtracting(false);
+    }
+  }
+
+  return (
+    <div className="me-field me-resume-drop">
+      <span className="me-field-label-row">
+        <span className="me-field-label">Résumé</span>
+      </span>
+      <div
+        className={`pw-smartfill-dropzone ${dragOver ? 'asset-dropzone-over' : ''} ${extracting ? 'asset-dropzone-busy' : ''}`}
+        onDragOver={(e) => { e.preventDefault(); if (!extracting) setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => { e.preventDefault(); setDragOver(false); if (!extracting) handleFile(e.dataTransfer.files?.[0]); }}
+        onClick={() => !extracting && fileRef.current?.click()}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => { if (!extracting && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); fileRef.current?.click(); } }}
+        aria-label="Upload your résumé to extract facts"
+        aria-busy={extracting}
+      >
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".pdf,.docx,.doc,.txt,.md,.rtf,.png,.jpg,.jpeg,.webp,.heic"
+          hidden
+          onChange={(e) => { handleFile(e.target.files?.[0]); e.target.value = ''; }}
+        />
+        {extracting ? <Loader2 size={14} className="pw-spin pw-smartfill-dropzone-icon" /> : <FileText size={14} className="pw-smartfill-dropzone-icon" />}
+        <span className="pw-smartfill-dropzone-label">
+          {extracting ? 'Reading your résumé…' : 'Drop your résumé (PDF, DOCX, image) — we’ll pull the facts out'}
+        </span>
+      </div>
+      {result && <p className="section-hint">{result}</p>}
+      {error && <p className="pw-error">{error}</p>}
     </div>
   );
 }

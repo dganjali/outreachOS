@@ -16,6 +16,7 @@ import type {
   EvidencePackDoc,
   MissionDoc,
   PersonaDoc,
+  ProfileDoc,
   StyleExemplarDoc,
   TargetDoc,
 } from '../../shared/schemas';
@@ -57,10 +58,13 @@ export async function assembleDraftContext(
     excludedFactIds: persona?.excludedFactIds ?? [],
   });
   const exemplarDocs = persona ? await fetchExemplars(uid, persona._id, mission.goal) : [];
+  // Sender identity — anchors a real sign-off on every email (engine.ts).
+  const profile = await scope.collection<ProfileDoc>('profiles').findOne();
 
   const ctx: AssembledContext = {
     mode: mission.mode ?? 'sales',
     recipient: { name: contact.name, role: contact.role, company: target.companyName },
+    sender: { name: profile?.name ?? null, role: profile?.role ?? null, organization: profile?.organization ?? null },
     missionGoal: mission.goal,
     audience: mission.targetDescription,
     whyNow: target.whyNow ?? undefined,
