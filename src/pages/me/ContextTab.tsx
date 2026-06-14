@@ -6,7 +6,7 @@
 // confirmed by you. Identity + links round it out.
 
 import { useRef, useState } from 'react';
-import { Plus, X, Sparkles, Loader2, FileText } from 'lucide-react';
+import { Plus, X, Sparkles, Loader2, FileText, UserSearch } from 'lucide-react';
 import type { ProfileSnapshot } from '../../lib/profileSnapshot';
 import type { Profile, ContextFact } from '../../types';
 import { agents } from '../../lib/api';
@@ -59,6 +59,9 @@ interface ContextTabProps {
   /** Called after Smart-fill extracts facts (which persist server-side) so the
    *  parent can reload the canonical list. */
   onFactsChanged: () => void;
+  /** Persist the form, run LinkedIn enrichment, refresh profile + facts. Throws
+   *  on failure so the button can surface the error inline. */
+  onAutofill: () => Promise<void>;
 }
 
 export function ContextTab({
@@ -74,18 +77,35 @@ export function ContextTab({
   onAddFact,
   onRemoveFact,
   onFactsChanged,
+  onAutofill,
 }: ContextTabProps) {
   const [open, setOpen] = useState<Record<PanelKey, boolean>>({
     identity: true,
     facts: true,
     links: false,
   });
+  const [autofilling, setAutofilling] = useState(false);
+  const [autofillError, setAutofillError] = useState<string | null>(null);
 
   function set<K extends keyof ProfileSnapshot>(key: K, value: ProfileSnapshot[K]) {
     setForm((f) => ({ ...f, [key]: value }));
   }
   function toggle(key: PanelKey) {
     setOpen((o) => ({ ...o, [key]: !o[key] }));
+  }
+
+  const hasLinkedin = /linkedin\.com/i.test(form.linkedin_url);
+
+  async function autofill() {
+    setAutofilling(true);
+    setAutofillError(null);
+    try {
+      await onAutofill();
+    } catch (e) {
+      setAutofillError(e instanceof Error ? e.message : 'Autofill failed — try again.');
+    } finally {
+      setAutofilling(false);
+    }
   }
 
   return (
@@ -145,6 +165,25 @@ export function ContextTab({
           <Field label="Résumé URL">
             <input type="url" value={form.resume_url} onChange={(e) => set('resume_url', e.target.value)} placeholder="https://…" />
           </Field>
+        </div>
+
+        <div className="me-autofill">
+          <button
+            type="button"
+            className="pw-btn-add"
+            onClick={autofill}
+            disabled={autofilling || !hasLinkedin}
+            title={hasLinkedin ? undefined : 'Add your LinkedIn URL above first'}
+          >
+            {autofilling ? <Loader2 className="pw-spin" size={14} /> : <UserSearch size={14} />}
+            {autofilling ? 'Reading your LinkedIn…' : 'Autofill from LinkedIn'}
+          </button>
+          <p className="section-hint">
+            Pulls public, sourceable facts from your LinkedIn and adds them above. Review and prune
+            anything off — nothing is sent without your say-so. To autofill from a résumé, drop the
+            file into Smart fill under Facts.
+          </p>
+          {autofillError && <p className="pw-error">{autofillError}</p>}
         </div>
       </Panel>
 

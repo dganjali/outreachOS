@@ -3,7 +3,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractText, stripRtf } from './file-extract.js';
+import { extractText, stripRtf, isLowQualityText } from './file-extract.js';
 
 // ---------------------------------------------------------------------------
 // Pass-through: TXT and MD
@@ -75,6 +75,34 @@ describe('stripRtf', () => {
     const rtf = String.raw`{\rtf1 caf\'e9}`;
     const out = stripRtf(rtf);
     assert.ok(out.includes('é'), `Got: ${out}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isLowQualityText — the OCR-fallback trigger for PDFs
+// ---------------------------------------------------------------------------
+describe('isLowQualityText', () => {
+  it('flags text shorter than the minimum', () => {
+    assert.equal(isLowQualityText('too short'), true);
+  });
+
+  it('accepts a healthy résumé text layer', () => {
+    const good =
+      'Alex Chen — Senior Engineer at Acme. Built payments infrastructure for 10 million users. ' +
+      'Raised a $4M seed round in 2023. Speaks at QCon and led a team of 8 engineers.';
+    assert.equal(isLowQualityText(good), false);
+  });
+
+  it('flags mojibake from a broken font/CID encoding', () => {
+    // The kind of soup pdf-parse emits for a PDF with no ToUnicode map — long
+    // enough to pass the length check, but almost no readable characters.
+    const garbage = '��'.repeat(40);
+    assert.equal(isLowQualityText(garbage), true);
+  });
+
+  it('flags a thin layer of spaced single glyphs (no real words)', () => {
+    const spaced = 'A B C D E F G H I J K L M N O P Q R S T U V W X Y Z 1 2 3 4 5 6';
+    assert.equal(isLowQualityText(spaced), true);
   });
 });
 

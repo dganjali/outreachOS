@@ -34,8 +34,12 @@ export async function extractText(buf: Buffer, mime: string | null, fileName: st
   if (isPdf(mimeNorm, ext)) {
     const result = await pdfParse(buf);
     text = (result?.text ?? '').toString().trim();
-    // Scanned/image-only PDFs have no embedded text layer — fall back to OCR.
-    if (text.length < MIN_CHARS) {
+    // Fall back to OCR when the embedded text layer is missing OR degenerate.
+    // A length check alone misses the common "some PDFs" failure: a PDF with a
+    // broken CID/font encoding (mojibake) or a thin selectable layer over
+    // scanned page images returns plenty of characters, so pdf-parse "succeeds"
+    // but the text is junk. isLowQualityText catches both.
+    if (isLowQualityText(text)) {
       text = await ocrSafely(buf, mimeNorm || 'application/pdf', text);
     }
   } else if (isImage(mimeNorm, ext)) {
@@ -65,17 +69,56 @@ export async function extractText(buf: Buffer, mime: string | null, fileName: st
 }
 
 /**
- * Run OCR, swallowing OCR-specific failures so we fall through to the normal
+ * Run OCR, swallowing most OCR failures so we fall through to the normal
  * `text_empty` error with the original (possibly partial) text. `prev` is the
- * deterministic extraction so far — OCR only replaces it if it returns more.
+ * deterministic extraction so far.
+ *
+ * When `prev` is empty/garbage we prefer the OCR result outright (a longer
+ * garbage layer must not win on length alone); when `prev` is a healthy layer
+ * we keep whichever is longer. `ocr_too_large` is re-thrown so the caller can
+ * give the user an actionable message instead of a generic "no text" error.
  */
 async function ocrSafely(buf: Buffer, mime: string, prev: string): Promise<string> {
   try {
     const ocr = await ocrTranscribe(buf, mime);
+    if (!prev || isLowQualityText(prev)) {
+      return ocr.length >= MIN_CHARS ? ocr : prev;
+    }
     return ocr.length > prev.length ? ocr : prev;
-  } catch {
+  } catch (err) {
+    if ((err as { code?: string })?.code === 'ocr_too_large') throw err;
     return prev;
   }
+}
+
+/**
+ * True when an extracted text layer is missing or degenerate enough that OCR
+ * should be attempted instead. Catches scanned PDFs (too short) and broken
+ * font/CID extractions (mojibake: low ratio of readable characters, or almost
+ * no real words).
+ */
+export function isLowQualityText(text: string): boolean {
+  const t = text.trim();
+  if (t.length < MIN_CHARS) return true;
+
+  let readable = 0;
+  for (let i = 0; i < t.length; i++) {
+    const c = t.charCodeAt(i);
+    const isAlnum = (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
+    const isSpace = c === 32 || c === 9 || c === 10 || c === 13;
+    const isPunct =
+      (c >= 33 && c <= 47) || (c >= 58 && c <= 64) || (c >= 91 && c <= 96) || (c >= 123 && c <= 126);
+    if (isAlnum || isSpace || isPunct) readable++;
+  }
+  // A healthy ASCII-ish layer is overwhelmingly readable chars. Be lenient
+  // enough not to trip on accented names / non-Latin text (which OCR wouldn't
+  // improve anyway): only flag clearly-garbled layers.
+  if (readable / t.length < 0.7) return true;
+
+  // Real prose has actual words (runs of 2+ letters). Spaced single glyphs or
+  // symbol soup have almost none.
+  const words = t.match(/[A-Za-z]{2,}/g)?.length ?? 0;
+  return words < 5;
 }
 
 // ---------------------------------------------------------------------------

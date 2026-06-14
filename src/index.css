@@ -1865,6 +1865,15 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
   gap: var(--space-3);
 }
 
+.me-autofill {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px dashed var(--border);
+}
+
 .me-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

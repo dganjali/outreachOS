@@ -1,12 +1,9 @@
 import type { Request, Response } from 'express';
-// pdf-parse's index.js runs a self-test against a bundled file on require.
-// Import the inner module directly to skip that test.
-// @ts-expect-error - no types ship for the inner path
-import pdfParse from 'pdf-parse/lib/pdf-parse.js';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { forUser } from '../_lib/db';
 import { downloadObject } from '../_lib/storage';
-import { MODEL, createMessageWithRetry, extractJson, ocrTranscribe } from '../_lib/llm';
+import { MODEL, createMessageWithRetry, extractJson } from '../_lib/llm';
+import { extractText } from '../_lib/file-extract';
 import { PARSE_RESUME_SYSTEM } from '../_lib/prompts';
 import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
 import type { ProfileAssetDoc } from '../../shared/schemas';
@@ -60,40 +57,21 @@ export default async function handler(req: Request, res: Response) {
       return res.status(500).json({ error: 'download_failed', detail: msg });
     }
 
-    // 2. Extract text.
+    // 2. Extract text via the shared extractor — handles PDF/DOCX/image, with
+    //    an OCR fallback for scanned or broken-text-layer files. (`text_empty`
+    //    and `unsupported_file_type` come back as error codes we relay.)
     let text = '';
     try {
-      const pdf = await pdfParse(buf);
-      text = (pdf?.text ?? '').toString().trim();
+      text = await extractText(buf, asset.mimeType, asset.fileName);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'pdf_parse_failed';
+      const msg = err instanceof Error ? err.message : 'extract_failed';
+      const code = (err as { code?: string }).code ?? 'pdf_parse_failed';
       await failRun(scope, run._id, msg);
       await scope.collection<ProfileAssetDoc>('profile_assets').updateById(asset._id, {
         parseError: msg,
         parsedAt: new Date(),
       });
-      return res.status(422).json({ error: 'pdf_parse_failed', detail: msg });
-    }
-
-    // Scanned/image-only resumes have no text layer — fall back to OCR (Gemini).
-    if (text.length < 50) {
-      try {
-        const ocr = await ocrTranscribe(buf, asset.mimeType || 'application/pdf');
-        if (ocr.length > text.length) text = ocr;
-      } catch {
-        // OCR best-effort — fall through to the text_empty error below.
-      }
-    }
-
-    if (!text || text.length < 50) {
-      const msg = 'No text extracted — is the PDF scanned/image-only?';
-      await failRun(scope, run._id, msg);
-      await scope.collection<ProfileAssetDoc>('profile_assets').updateById(asset._id, {
-        parsedText: text,
-        parseError: msg,
-        parsedAt: new Date(),
-      });
-      return res.status(422).json({ error: 'pdf_text_empty', detail: msg });
+      return res.status(422).json({ error: code === 'text_empty' ? 'pdf_text_empty' : code, detail: msg });
     }
 
     const truncated = text.length > MAX_TEXT_CHARS ? text.slice(0, MAX_TEXT_CHARS) : text;
