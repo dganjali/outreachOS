@@ -90,19 +90,17 @@ export const agents = {
       revisions: number;
       pass: boolean;
     }>('/api/agents/draft', { contact_id, tier }),
-  // Onboarding calibration: grab a real contact + run the engine once so the
-  // user iterates on a genuine draft. `none` = no resolvable contact yet.
+  // Onboarding calibration: run the engine once so the user iterates on a
+  // genuine draft. Uses a real contact when one exists; otherwise synthesizes a
+  // representative recipient (`synthetic: true`) so a draft always appears.
   calibrateDraft: (persona_id: string) =>
-    authedFetch<
-      | { none: true }
-      | {
-          none?: false;
-          run_id: string;
-          recipient: { name: string; role: string; company: string };
-          subject: string;
-          body: string;
-        }
-    >('/api/agents/calibrate-draft', { persona_id }),
+    authedFetch<{
+      run_id: string;
+      recipient: { name: string; role: string; company: string };
+      synthetic?: boolean;
+      subject: string;
+      body: string;
+    }>('/api/agents/calibrate-draft', { persona_id }),
   onboardQuestions: (persona_id: string) =>
     authedFetch<{ run_id: string; questions: Array<{ id: string; question: string; why: string }> }>(
       '/api/agents/onboard-questions',

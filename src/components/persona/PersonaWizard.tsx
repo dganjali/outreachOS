@@ -952,8 +952,9 @@ function StyleStep({
   );
 }
 
-// Calibrate (Stages 4–5) — we grab a real contact and run the engine ONCE so the
-// user reacts to a genuine draft instead of writing one. Two ways to refine:
+// Calibrate (Stages 4–5) — we run the engine ONCE on a real contact (or a
+// synthesized stand-in recipient when none exist yet) so the user reacts to a
+// genuine draft instead of writing one. Two ways to refine:
 //   • whole-draft chat (structural)
 //   • highlight a span → a prompt box pops up right above it to rewrite just that.
 // Every instruction is learned as taste (extract-style turns them into rules).
@@ -987,8 +988,11 @@ function CalibrateStep({
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
   const [recipient, setRecipient] = useState<Recipient | null>(null);
-  // null = haven't tried yet; 'none' = no contact, fall back to manual paste.
-  const [genState, setGenState] = useState<'idle' | 'none' | 'ready'>('idle');
+  // Whether the recipient is a synthesized stand-in (no real contacts yet).
+  const [synthetic, setSynthetic] = useState(false);
+  // 'idle' = not generated; 'ready' = a draft is on screen; 'failed' = the
+  // engine couldn't draft (rare) → user can edit directly or regenerate.
+  const [genState, setGenState] = useState<'idle' | 'failed' | 'ready'>('idle');
 
   // contentEditable body: uncontrolled DOM, synced to parent state via onInput.
   // We only push state INTO the DOM on programmatic replacement (bumping
@@ -1011,20 +1015,16 @@ function CalibrateStep({
     setGenError(null);
     try {
       const pid = await ensurePersona();
-      const r = await agents.calibrateDraft(pid);
-      if ('none' in r && r.none) {
-        setGenState('none');
-        return;
-      }
-      const data = r as Exclude<typeof r, { none: true }>;
+      const data = await agents.calibrateDraft(pid);
       setRecipient(data.recipient);
+      setSynthetic(Boolean(data.synthetic));
       setSubject(data.subject);
       setBody(data.body);
       setBodyVersion((v) => v + 1);
       setGenState('ready');
     } catch (e) {
-      setGenError(e instanceof Error ? e.message : 'Could not draft — paste one below instead.');
-      setGenState('none');
+      setGenError(e instanceof Error ? e.message : 'Could not draft right now — edit below or regenerate.');
+      setGenState('failed');
     } finally {
       setGenerating(false);
     }
@@ -1116,9 +1116,10 @@ function CalibrateStep({
           <span className="pw-calib-meta">
             Drafted to <strong>{recipient.name}</strong>
             {recipient.company ? ` at ${recipient.company}` : ''}
+            {synthetic ? ' · sample contact' : ''}
           </span>
-        ) : genState === 'none' ? (
-          <span className="pw-calib-meta">No contacts yet — write or paste a draft you'd actually send.</span>
+        ) : genState === 'failed' ? (
+          <span className="pw-calib-meta">Couldn't draft — edit below or regenerate.</span>
         ) : (
           <span className="pw-calib-meta" />
         )}
