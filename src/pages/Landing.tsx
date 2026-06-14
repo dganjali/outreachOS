@@ -5,6 +5,7 @@ import { ArrowRight, Target, FileText, Inbox as InboxIcon, Check, ArrowUpRight }
 import { Logo } from '../components/Logo';
 import { BrowserFrame, HeroAppMock, PipelineMock, DraftMock, InboxMock } from '../components/AppMockups';
 import { GenerativeMountains } from '../components/GenerativeMountains';
+import { AgentFlow } from '../components/AgentFlow';
 import { Button } from '@/components/ui/button';
 import {
   Accordion,
@@ -122,7 +123,7 @@ function Reveal({
 
 function SectionHead({ title, sub }: { title: string; sub?: string }) {
   return (
-    <div className="mb-14 max-w-2xl">
+    <div className="mb-10 max-w-2xl">
       <h2 className="text-balance font-display text-3xl font-semibold tracking-[-0.02em] text-foreground md:text-[2.5rem] md:leading-[1.08]">
         {title}
       </h2>
@@ -141,7 +142,11 @@ export function Landing() {
   }, []);
 
   return (
-    <div className="min-h-dvh bg-background text-foreground [overflow-x:clip]">
+    <div className="relative min-h-dvh bg-background text-foreground [overflow-x:clip]">
+      {/* Smooth matte color ground — soft, low-opacity green/slate fog so the page
+          reads as tinted material rather than flat black. Fixed, behind content. */}
+      <div aria-hidden className="bg-matte-ambient pointer-events-none fixed inset-0 -z-10" />
+
       {/* Nav */}
       <header
         className={cn(
@@ -154,6 +159,7 @@ export function Landing() {
           <nav className="hidden items-center gap-9 text-sm text-muted-foreground md:flex">
             <a href="#features" className="transition-colors hover:text-foreground">Features</a>
             <a href="#how" className="transition-colors hover:text-foreground">How it works</a>
+            <a href="#agents" className="transition-colors hover:text-foreground">Agents</a>
             <a href="#modes" className="transition-colors hover:text-foreground">Modes</a>
             <a href="#pricing" className="transition-colors hover:text-foreground">Pricing</a>
             <a href="#faq" className="transition-colors hover:text-foreground">FAQ</a>
@@ -275,13 +281,28 @@ export function Landing() {
           </div>
         </section>
 
+        {/* Agents — illustrative animated pipeline, bridging the 3 steps and the deep dives */}
+        <section id="agents" className="section-tint border-t border-border/70">
+          <div className="mx-auto max-w-6xl px-5 py-16 md:px-8 md:py-20">
+            <Reveal>
+              <SectionHead
+                title="Four agents. One click."
+                sub="Targeting, evidence, contacts, and sequence run as a single pipeline — each handing off to the next, every claim sourced along the way."
+              />
+            </Reveal>
+            <Reveal delay={80}>
+              <AgentFlow />
+            </Reveal>
+          </div>
+        </section>
+
         {/* Features — the deep dives behind each step */}
         <section id="features" className="border-t border-border/70">
-          <div className="mx-auto max-w-6xl px-5 py-24 md:px-8 md:py-32">
+          <div className="mx-auto max-w-6xl px-5 py-20 md:px-8 md:py-24">
             <Reveal>
               <SectionHead title="Inside the pipeline." />
             </Reveal>
-            <div className="flex flex-col gap-20 md:gap-28">
+            <div className="flex flex-col gap-16 md:gap-20">
               {FEATURES.map((f, i) => (
                 <Reveal
                   key={f.eyebrow}
@@ -352,7 +373,7 @@ export function Landing() {
 
         {/* Pricing */}
         <section id="pricing" className="border-t border-border/70">
-          <div className="mx-auto max-w-6xl px-5 py-24 md:px-8 md:py-28">
+          <div className="mx-auto max-w-6xl px-5 py-20 md:px-8 md:py-24">
             <Reveal>
               <SectionHead title="Start free. Scale when it works." />
             </Reveal>
@@ -443,8 +464,8 @@ export function Landing() {
         </section>
 
         {/* CTA */}
-        <section className="border-t border-border/70">
-          <div className="mx-auto max-w-6xl px-5 py-24 md:px-8">
+        <section className="section-tint border-t border-border/70">
+          <div className="mx-auto max-w-6xl px-5 py-20 md:px-8">
             <Reveal className="flex flex-col items-start gap-8 rounded-2xl border border-border bg-card p-10 md:flex-row md:items-center md:justify-between md:p-14">
               <div className="max-w-lg">
                 <h2 className="text-balance font-display text-3xl font-semibold tracking-[-0.02em] text-foreground md:text-[2.5rem] md:leading-[1.08]">
