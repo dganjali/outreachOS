@@ -17,9 +17,17 @@ interface RunTarget {
   sequence: StepStatus;
 }
 
-const TOP_N = 5;
-const TARGET_COUNT = 8;
+const DEFAULT_COMPANIES = 5;
+const MIN_COMPANIES = 1;
+const MAX_COMPANIES = 15;
 const POLL_MS = 2000;
+
+// The launch screen exposes one knob — how many companies to pursue (= top_n,
+// the ones we research, find contacts for, and draft). We discover a larger
+// pool than we pursue so ranking has something to choose from.
+function targetCountFor(companies: number): number {
+  return Math.min(Math.max(companies * 2, companies + 3), 25);
+}
 
 // Map the server run's status/phase onto the UI phase the view already speaks.
 function phaseOf(run: PipelineRunView | null): Phase {
@@ -69,6 +77,8 @@ export function MissionRun() {
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [missionLoadError, setMissionLoadError] = useState<string | null>(null);
+  const [companies, setCompanies] = useState(DEFAULT_COMPANIES);
+  const [priorRun, setPriorRun] = useState<PipelineRunView | null>(null);
   const runIdRef = useRef<string | null>(null);
 
   const phase = phaseOf(run);
@@ -96,6 +106,12 @@ export function MissionRun() {
       .latestForMission(id)
       .then(({ data }) => {
         if (cancelled || !data) return;
+        setPriorRun(data);
+        // Reuse the settings from the last run so a re-run defaults to the same
+        // size (clamped to the control's range).
+        if (data.config?.top_n) {
+          setCompanies(Math.min(Math.max(data.config.top_n, MIN_COMPANIES), MAX_COMPANIES));
+        }
         // Only auto-attach to a still-relevant run; a long-finished one stays
         // on the pre-launch screen so the user can deliberately relaunch.
         if (data.status === 'pending' || data.status === 'running' || data.status === 'paused') {
@@ -151,7 +167,7 @@ export function MissionRun() {
     setError(null);
     setStarting(true);
     try {
-      const { data } = await pipeline.start(mission.id, TARGET_COUNT, TOP_N);
+      const { data } = await pipeline.start(mission.id, targetCountFor(companies), companies);
       runIdRef.current = data.id;
       setRun(data);
     } catch (err) {
@@ -159,7 +175,7 @@ export function MissionRun() {
     } finally {
       setStarting(false);
     }
-  }, [mission]);
+  }, [mission, companies]);
 
   const stop = useCallback(async () => {
     const rid = runIdRef.current;
@@ -194,14 +210,60 @@ export function MissionRun() {
         </Link>
         <div className="run-ready">
           <div className="run-ready-icon" aria-hidden>✦</div>
-          <h1 className="run-title">{mission ? `Launch ${mission.name}?` : 'Launch pipeline?'}</h1>
+          <h1 className="run-title">
+            {mission ? `${priorRun ? 'Run' : 'Launch'} ${mission.name}${priorRun ? ' again' : ''}?` : 'Launch pipeline?'}
+          </h1>
           <p className="run-ready-body">
-            The agent will find the top {TOP_N} companies, research each, surface the right contacts,
-            and draft a personalized email per target. You review and send after.
+            The agent will find {companies} {companies === 1 ? 'company' : 'companies'}, research each,
+            surface the right contacts, and draft a personalized email per target. You review and send after.
           </p>
+
+          <div className="run-config">
+            <label className="run-config-label" htmlFor="run-companies">Companies to pursue</label>
+            <div className="run-stepper" role="group" aria-label="Companies to pursue">
+              <button
+                type="button"
+                className="run-stepper-btn"
+                aria-label="Fewer companies"
+                disabled={companies <= MIN_COMPANIES}
+                onClick={() => setCompanies((c) => Math.max(MIN_COMPANIES, c - 1))}
+              >
+                −
+              </button>
+              <input
+                id="run-companies"
+                type="number"
+                className="run-stepper-value"
+                min={MIN_COMPANIES}
+                max={MAX_COMPANIES}
+                value={companies}
+                onChange={(e) => {
+                  const n = Math.round(Number(e.target.value));
+                  if (Number.isFinite(n)) setCompanies(Math.min(MAX_COMPANIES, Math.max(MIN_COMPANIES, n)));
+                }}
+              />
+              <button
+                type="button"
+                className="run-stepper-btn"
+                aria-label="More companies"
+                disabled={companies >= MAX_COMPANIES}
+                onClick={() => setCompanies((c) => Math.min(MAX_COMPANIES, c + 1))}
+              >
+                +
+              </button>
+            </div>
+          </div>
+
+          {priorRun && (
+            <p className="run-ready-note">
+              You've already run this mission. Running again finds <strong>new</strong> companies —
+              we skip ones already in this mission.
+            </p>
+          )}
+
           <p className="run-ready-fineprint">
             Runs on the server — you can close this tab and come back; progress is saved as it goes.
-            Uses up to ~{1 + TOP_N * 3} of your daily agent runs.
+            Uses up to ~{1 + companies * 3} of your daily agent runs.
           </p>
           {missionLoadError && (
             <p className="run-banner error" role="alert">
@@ -219,7 +281,15 @@ export function MissionRun() {
             disabled={!mission || starting}
             onClick={launch}
           >
-            {starting ? 'Starting…' : mission ? 'Launch pipeline →' : missionLoadError ? 'Unavailable' : 'Loading…'}
+            {starting
+              ? 'Starting…'
+              : mission
+                ? priorRun
+                  ? 'Run again →'
+                  : 'Launch pipeline →'
+                : missionLoadError
+                  ? 'Unavailable'
+                  : 'Loading…'}
           </button>
         </div>
       </div>

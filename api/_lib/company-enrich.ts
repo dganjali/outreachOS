@@ -2,7 +2,7 @@
 // cheap, deterministic Google SERP lookup) and falls back to the LLM web_search
 // path when Serper is off or can't find a non-aggregator domain.
 
-import { createMessageWithRetry, MODEL, WEB_SEARCH_TOOL, extractJson } from './anthropic';
+import { createMessageWithRetry, MODEL, WEB_SEARCH_TOOL, extractJson } from './llm';
 import { normalizeDomain } from './sender-context';
 import { serperEnabled, search, type SerperOrganicResult } from './serper';
 

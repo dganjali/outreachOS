@@ -9,10 +9,16 @@ import agentTarget from '../api/agents/target';
 import agentContacts from '../api/agents/contacts';
 import agentEvidence from '../api/agents/evidence';
 import agentSequence from '../api/agents/sequence';
+import agentDraft from '../api/agents/draft';
+import agentCalibrateDraft from '../api/agents/calibrate-draft';
+import agentOnboardQuestions from '../api/agents/onboard-questions';
+import agentRefine from '../api/agents/refine';
+import agentExtractStyle from '../api/agents/extract-style';
 import agentReply from '../api/agents/reply';
 import agentEnrichProfile from '../api/agents/enrich-profile';
 import agentCoach from '../api/agents/coach';
 import agentParseResume from '../api/agents/parse-resume';
+import agentExtractContext from '../api/agents/extract-context';
 import agentPipeline, { cancel as agentPipelineCancel } from '../api/agents/pipeline';
 
 import gmailSend from '../api/gmail/send';
@@ -26,6 +32,7 @@ import cronPollGmail from '../api/cron/poll-gmail';
 import cronSendDueTouches from '../api/cron/send-due-touches';
 import cronWeeklyDigest from '../api/cron/weekly-digest';
 import dataRouter from '../api/data/router';
+import { localPutHandler, localGetHandler } from '../api/_lib/storage';
 
 import { globalRateLimit, authRateLimit } from '../api/_lib/rate-limit';
 import billingCheckout from '../api/billing/checkout';
@@ -104,10 +111,16 @@ app.post('/api/agents/target', wrap(agentTarget));
 app.post('/api/agents/contacts', wrap(agentContacts));
 app.post('/api/agents/evidence', wrap(agentEvidence));
 app.post('/api/agents/sequence', wrap(agentSequence));
+app.post('/api/agents/draft', wrap(agentDraft));
+app.post('/api/agents/calibrate-draft', wrap(agentCalibrateDraft));
+app.post('/api/agents/onboard-questions', wrap(agentOnboardQuestions));
+app.post('/api/agents/refine', wrap(agentRefine));
+app.post('/api/agents/extract-style', wrap(agentExtractStyle));
 app.post('/api/agents/reply', wrap(agentReply));
 app.post('/api/agents/enrich-profile', wrap(agentEnrichProfile));
 app.post('/api/agents/coach', wrap(agentCoach));
 app.post('/api/agents/parse-resume', wrap(agentParseResume));
+app.post('/api/agents/extract-context', wrap(agentExtractContext));
 
 // server-side durable pipeline (replaces browser orchestration)
 app.post('/api/agents/pipeline/cancel', wrap(agentPipelineCancel));
@@ -129,6 +142,12 @@ app.post('/api/integrations/gmail/disconnect', wrap(gmailDisconnect));
 app.post('/api/cron/poll-gmail', wrap(cronPollGmail));
 app.post('/api/cron/send-due-touches', wrap(cronSendDueTouches));
 app.post('/api/cron/weekly-digest', wrap(cronWeeklyDigest));
+
+// Local-filesystem storage driver (dev, when no real GCS bucket). Token-authed
+// via the HMAC query param baked into the signed URL — no Firebase bearer — so
+// they sit OUTSIDE the /api/data auth router. PUT body arrives as a raw Buffer.
+app.put('/api/storage-local/put', express.raw({ type: '*/*', limit: '25mb' }), wrap(localPutHandler));
+app.get('/api/storage-local/get', wrap(localGetHandler));
 
 // generic CRUD for the frontend (replaces direct Supabase queries)
 app.use('/api/data', dataRouter);

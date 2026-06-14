@@ -11,7 +11,11 @@ function optional(name: string, fallback = ''): string {
 export const env = {
   // Gemini (Vertex AI) — the agent LLM. Auth is via Application Default
   // Credentials (the Cloud Run runtime service account), so no API key here.
+  // Two tiers: flash is the cheap default (research, judging, extraction); pro
+  // is reserved for the quality-critical draft generation step (the one call
+  // that defines the product). See api/_lib/llm.ts MODEL() vs MODEL_PRO().
   GEMINI_MODEL: () => optional('GEMINI_MODEL', 'gemini-2.5-flash'),
+  GEMINI_PRO_MODEL: () => optional('GEMINI_PRO_MODEL', 'gemini-2.5-pro'),
   // Embeddings model (Vertex AI). Pinned to 1024 dims in embeddings.ts to
   // match the existing Atlas vector indexes.
   GEMINI_EMBED_MODEL: () => optional('GEMINI_EMBED_MODEL', 'gemini-embedding-001'),

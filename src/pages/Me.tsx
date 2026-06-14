@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { agents, type CoachField } from '../lib/api';
 import {
   diffSnapshots,
   shouldSnapshot,
@@ -10,46 +9,78 @@ import {
   type ProfileSnapshot,
   type SnapshotField,
 } from '../lib/profileSnapshot';
-import type {
-  Profile,
-  ProfileVersionSource,
-  ParsedResumeFields,
-  ProfileAsset,
-} from '../types';
-import { Workshop, totalScore } from './me/Workshop';
+import type { ProfileVersionSource, ContextFact } from '../types';
+import { listContextFacts, addContextFact, deleteContextFact } from '../lib/personas';
+import { agents } from '../lib/api';
+import { ContextTab, totalScore } from './me/ContextTab';
 import { History } from './me/History';
-import { CoachDrawer } from '../components/me/CoachDrawer';
-import { ParseResumeModal } from '../components/me/ParseResumeModal';
+import { PersonaStudio } from './me/PersonaStudio';
 
-type Tab = 'workshop' | 'history';
+type Tab = 'personalization' | 'context' | 'history';
 
 export function Me() {
   const { profile, refreshProfile } = useAuth();
   const toast = useToast();
   const [form, setForm] = useState<ProfileSnapshot>(() => snapshotFromProfile(profile));
   const [saving, setSaving] = useState(false);
-  const [enriching, setEnriching] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>('workshop');
+  const [tab, setTab] = useState<Tab>('personalization');
   const [historyReloadKey, setHistoryReloadKey] = useState(0);
-  const [coach, setCoach] = useState<{ open: boolean; field: CoachField | null; value: string }>({
-    open: false,
-    field: null,
-    value: '',
-  });
-  const [assetReloadKey, setAssetReloadKey] = useState(0);
-  const [parseModal, setParseModal] = useState<{
-    open: boolean;
-    asset: ProfileAsset | null;
-    parsed: ParsedResumeFields | null;
-  }>({ open: false, asset: null, parsed: null });
-  const [parsingAssetId, setParsingAssetId] = useState<string | null>(null);
+
+  // Shared, person-level context facts — the single source of truth the Context
+  // tab edits and every voice reads.
+  const [facts, setFacts] = useState<ContextFact[]>([]);
+  const [factsLoading, setFactsLoading] = useState(true);
+  const [factsKey, setFactsKey] = useState(0);
 
   useEffect(() => {
     setForm(snapshotFromProfile(profile));
   }, [profile]);
 
-  const score = useMemo(() => totalScore(form), [form]);
+  useEffect(() => {
+    const uid = profile?.user_id;
+    if (!uid) return;
+    let alive = true;
+    setFactsLoading(true);
+    listContextFacts(uid, null)
+      .then((all) => alive && setFacts(all.filter((f) => f.scope === 'person')))
+      .catch(() => alive && setFacts([]))
+      .finally(() => alive && setFactsLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, [profile?.user_id, factsKey]);
+
+  const reloadFacts = useCallback(() => setFactsKey((k) => k + 1), []);
+
+  const handleAddFact = useCallback(
+    async (claim: string) => {
+      const uid = profile?.user_id;
+      if (!uid) return;
+      try {
+        await addContextFact(uid, { claim, scope: 'person', provenance: 'manual' });
+        reloadFacts();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Could not add fact');
+      }
+    },
+    [profile?.user_id, reloadFacts, toast]
+  );
+
+  const handleRemoveFact = useCallback(
+    async (id: string) => {
+      setFacts((f) => f.filter((x) => x.id !== id)); // optimistic
+      try {
+        await deleteContextFact(id);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Could not remove fact');
+        reloadFacts();
+      }
+    },
+    [reloadFacts, toast]
+  );
+
+  const score = useMemo(() => totalScore(form, facts.length), [form, facts.length]);
   const percent = score.total === 0 ? 0 : Math.round((score.filled / score.total) * 100);
 
   async function persistProfile(snapshot: ProfileSnapshot) {
@@ -139,78 +170,23 @@ export function Me() {
     }
   }
 
-  async function handleEnrich() {
-    if (!form.linkedin_url) return;
-    setEnriching(true);
-    try {
-      const r = await agents.enrichProfile();
-      await refreshProfile();
-      // Server already wrote enriched values into `profiles`; record a version snapshot
-      // from the just-refreshed profile so History captures the agent-authored change.
-      const enrichedSnap = snapshotFromProfile(
-        // refreshProfile mutates AuthContext but doesn't return the new profile; we re-fetch
-        // from supabase to avoid a stale-state race in the snapshot row.
-        await fetchFreshProfile(profile?.user_id)
-      );
-      await maybeSnapshot(
-        enrichedSnap,
-        'enrich',
-        `Enriched from ${r.source === 'apollo' ? 'a verified directory' : 'web search'}`
-      );
-      toast.success(
-        `Enriched from ${r.source === 'apollo' ? 'a verified directory' : 'web search'}. Review and tweak.`
-      );
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Enrichment failed');
-    } finally {
-      setEnriching(false);
-    }
-  }
-
-  async function handleAssetUploaded(asset: ProfileAsset) {
-    setAssetReloadKey((k) => k + 1);
-    if (asset.kind !== 'resume') {
-      toast.success('Uploaded.');
-      return;
-    }
-    // Trigger parse + open modal once results land.
-    setParsingAssetId(asset.id);
-    toast.info('Parsing resume… this may take 20-40s.');
-    try {
-      const r = await agents.parseResume(asset.id);
-      setParseModal({ open: true, asset, parsed: r.parsed_fields });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Parse failed');
-      setAssetReloadKey((k) => k + 1); // Refresh to show parse_error tag on the row.
-    } finally {
-      setParsingAssetId(null);
-    }
-  }
-
-  async function handleAcceptParsed(
-    updates: Partial<ProfileSnapshot>,
-    sourceAssetId: string
-  ) {
+  /**
+   * Autofill from LinkedIn: persist the current form first (so the server reads
+   * the latest LinkedIn URL), run the enrichment agent, then refresh the profile
+   * (role/org may have been filled) and reload the facts it added. Throws so the
+   * ContextTab button can surface the error inline.
+   */
+  async function handleAutofill() {
     if (!profile?.user_id) return;
-    const merged: ProfileSnapshot = { ...form, ...updates };
-    setForm(merged);
-    try {
-      await persistProfile(merged);
-      const { error: impErr } = await supabase.from('profile_versions').insert({
-        user_id: profile.user_id,
-        snapshot: merged as unknown as Record<string, unknown>,
-        source: 'import',
-        label: `Imported from resume`,
-      });
-      if (impErr) throw new Error(impErr.message);
-      await refreshProfile();
-      setHistoryReloadKey((k) => k + 1);
-      setParseModal({ open: false, asset: null, parsed: null });
-      toast.success('Profile updated from resume.');
-      void sourceAssetId;
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Update failed');
-    }
+    await persistProfile(form);
+    const { facts_added } = await agents.enrichProfile();
+    await refreshProfile();
+    reloadFacts();
+    toast.success(
+      facts_added > 0
+        ? `Added ${facts_added} fact${facts_added === 1 ? '' : 's'} from your LinkedIn.`
+        : 'Profile refreshed — no new facts found.'
+    );
   }
 
   async function handleRestore(snapshot: ProfileSnapshot, fromVersionId: string) {
@@ -239,7 +215,7 @@ export function Me() {
         <div>
           <h1 className="me-title">Me</h1>
           <p className="me-subtitle">
-            The agent reads this every time it drafts an email. Sharper inputs, sharper outreach.
+            Your voices and the context behind them. The agent reads this every time it drafts.
           </p>
         </div>
         <div className="me-completeness" aria-label={`Profile ${percent}% complete`}>
@@ -255,11 +231,20 @@ export function Me() {
         <button
           type="button"
           role="tab"
-          aria-selected={tab === 'workshop'}
-          className={`me-tab ${tab === 'workshop' ? 'me-tab-active' : ''}`}
-          onClick={() => setTab('workshop')}
+          aria-selected={tab === 'personalization'}
+          className={`me-tab ${tab === 'personalization' ? 'me-tab-active' : ''}`}
+          onClick={() => setTab('personalization')}
         >
-          Workshop
+          Personalization
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'context'}
+          className={`me-tab ${tab === 'context' ? 'me-tab-active' : ''}`}
+          onClick={() => setTab('context')}
+        >
+          Context
         </button>
         <button
           type="button"
@@ -272,20 +257,23 @@ export function Me() {
         </button>
       </div>
 
-      {tab === 'workshop' ? (
-        <Workshop
+      {tab === 'personalization' ? (
+        <PersonaStudio userId={profile?.user_id} />
+      ) : tab === 'context' ? (
+        <ContextTab
           form={form}
           setForm={setForm}
           profile={profile}
+          userId={profile?.user_id ?? ''}
           saving={saving}
-          enriching={enriching}
           error={error}
           onSubmit={handleSubmit}
-          onEnrich={handleEnrich}
-          onCoach={(field, value) => setCoach({ open: true, field, value })}
-          assetReloadKey={assetReloadKey}
-          onAssetUploaded={handleAssetUploaded}
-          onAssetError={(msg) => toast.error(msg)}
+          facts={facts}
+          factsLoading={factsLoading}
+          onAddFact={handleAddFact}
+          onRemoveFact={handleRemoveFact}
+          onFactsChanged={reloadFacts}
+          onAutofill={handleAutofill}
         />
       ) : profile?.user_id ? (
         <History
@@ -295,46 +283,8 @@ export function Me() {
           onRestore={handleRestore}
         />
       ) : null}
-
-      <CoachDrawer
-        open={coach.open}
-        field={coach.field}
-        currentValue={coach.value}
-        onClose={() => setCoach((c) => ({ ...c, open: false }))}
-        onApply={(field, value) => {
-          setForm((f) => ({ ...f, [field]: value }));
-          setCoach((c) => ({ ...c, open: false }));
-          toast.success('Suggestion applied. Save to keep it.');
-        }}
-      />
-
-      <ParseResumeModal
-        open={parseModal.open}
-        asset={parseModal.asset}
-        parsed={parseModal.parsed}
-        current={form}
-        onClose={() => setParseModal({ open: false, asset: null, parsed: null })}
-        onAccept={handleAcceptParsed}
-      />
-
-      {parsingAssetId && (
-        <div className="parse-toast">
-          <span className="parse-toast-spinner" aria-hidden />
-          Parsing resume…
-        </div>
-      )}
     </div>
   );
-}
-
-async function fetchFreshProfile(userId: string | undefined): Promise<Profile | null> {
-  if (!userId) return null;
-  const { data } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('user_id', userId)
-    .maybeSingle();
-  return (data as Profile | null) ?? null;
 }
 
 function CompletenessRing({ percent }: { percent: number }) {

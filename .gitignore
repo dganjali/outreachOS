@@ -42,3 +42,6 @@ gcp-*.json
 # Build output (compiled server bundle) + Firebase CLI cache
 dist-server/
 .firebase/
+
+# eval harness output
+scripts/eval/scorecard.latest.json

@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { forUser } from '../_lib/db';
-import { MODEL, createMessageWithRetry, extractJson } from '../_lib/anthropic';
+import { MODEL, createMessageWithRetry, extractJson } from '../_lib/llm';
 import { COACH_SYSTEM } from '../_lib/prompts';
 import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
 import type { ProfileDoc, ReplyDoc, SentMessageDoc } from '../../shared/schemas';

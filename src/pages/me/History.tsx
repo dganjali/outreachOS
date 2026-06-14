@@ -169,7 +169,7 @@ export function History({ userId, current, reloadKey, onRestore }: HistoryProps)
       <div className="me-history-empty">
         <h3>No history yet</h3>
         <p>
-          Save your profile from the Workshop tab. Each save creates a snapshot so you can compare
+          Save your profile from the Context tab. Each save creates a snapshot so you can compare
           versions and roll back.
         </p>
       </div>

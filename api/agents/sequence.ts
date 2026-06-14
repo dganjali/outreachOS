@@ -1,73 +1,64 @@
-// Sequence agent — writes the initial + follow-up emails.
+// Sequence agent — the LIVE drafting path (pipeline + MissionPage "draft").
 //
-// New (vs Supabase version):
-//   - Uses Atlas Vector Search to retrieve past sequences that got replies as
-//     exemplars for new generations. Falls back gracefully if vector index
-//     isn't ready.
+// The initial email now goes through the personalization engine
+// (assemble → grounded generate → verify → tiered revise), persona-aware, with
+// a single 'bulk'-tier critique pass. Follow-ups are generated as a cheap,
+// separate flash pass seeded with the approved initial. The persisted
+// email_sequences doc shape is unchanged so send.ts / MissionPage keep working.
 
 import type { Request, Response } from 'express';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
-import { adminDb, forUser, newId, type InsertDoc } from '../_lib/db';
-import { createMessageWithRetry, MODEL, extractJson } from '../_lib/anthropic';
-import { sequenceSystem, type MissionMode } from '../_lib/prompts';
+import { forUser, newId, type InsertDoc } from '../_lib/db';
+import { generateJson, MODEL } from '../_lib/llm';
 import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
 import { embedOne } from '../_lib/embeddings';
+import { runDraftEngine } from '../_lib/engine';
+import { resolvePersona, assembleDraftContext } from '../_lib/assemble';
 import type {
   ContactDoc,
   EmailSequenceDoc,
   EvidencePackDoc,
   MissionDoc,
-  ProfileDoc,
-  ProfileVersionDoc,
   TargetDoc,
 } from '../../shared/schemas';
 
-type ProfileRefField =
-  | 'bio'
-  | 'proof_points'
-  | 'achievements'
-  | 'metrics'
-  | 'writing_tone'
-  | 'example_emails';
-
-interface ProfileRef {
-  field: ProfileRefField;
-  snippet: string;
+interface FollowupOut {
+  wait_days: number;
+  subject: string;
+  body: string;
 }
 
-interface SequenceOutput {
-  primary_angle: string;
-  anchored_bullets: number[];
-  profile_refs?: Record<string, ProfileRef[]>;
-  initial: { subject: string; body: string };
-  followups: Array<{ wait_days: number; subject: string; body: string }>;
-}
+const FOLLOWUPS_SCHEMA = {
+  type: 'object',
+  properties: {
+    followups: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          wait_days: { type: 'number' },
+          subject: { type: 'string' },
+          body: { type: 'string' },
+        },
+        required: ['wait_days', 'subject', 'body'],
+      },
+    },
+  },
+  required: ['followups'],
+} as const;
 
-const PROFILE_REF_FIELDS = new Set<ProfileRefField>([
-  'bio', 'proof_points', 'achievements', 'metrics', 'writing_tone', 'example_emails',
-]);
+const FOLLOWUPS_SYSTEM = `You write 2 short follow-up emails for a cold outreach sequence. They reference the original lightly, add no new factual claims, stay in the sender's voice, and each end with one low-friction CTA. Keep each under 70 words. wait_days: first ~3, second ~6. Output JSON only.`;
 
-function cleanProfileRefs(raw: unknown): Record<string, ProfileRef[]> {
-  if (!raw || typeof raw !== 'object') return {};
-  const out: Record<string, ProfileRef[]> = {};
-  for (const [touchKey, refs] of Object.entries(raw as Record<string, unknown>)) {
-    if (!Array.isArray(refs)) continue;
-    const cleaned: ProfileRef[] = [];
-    for (const r of refs) {
-      if (!r || typeof r !== 'object') continue;
-      const obj = r as Record<string, unknown>;
-      const field = obj.field;
-      const snippet = obj.snippet;
-      if (typeof field === 'string' && PROFILE_REF_FIELDS.has(field as ProfileRefField)) {
-        cleaned.push({
-          field: field as ProfileRefField,
-          snippet: typeof snippet === 'string' ? snippet.slice(0, 240) : '',
-        });
-      }
-    }
-    if (cleaned.length > 0) out[touchKey] = cleaned;
+// Pull evidence-bullet indices a draft actually cited, from "evidence:<pack>:<i>"
+// factIds — preserves the old anchoredBullets telemetry against the latest pack.
+function anchoredFromClaims(claims: Array<{ factId: string }>, packId: string | null): number[] {
+  if (!packId) return [];
+  const idx = new Set<number>();
+  for (const c of claims) {
+    const m = /^evidence:(.+):(\d+)$/.exec(c.factId ?? '');
+    if (m && m[1] === packId) idx.add(Number(m[2]));
   }
-  return out;
+  return [...idx].sort((a, b) => a - b);
 }
 
 export default async function handler(req: Request, res: Response) {
@@ -87,17 +78,12 @@ export default async function handler(req: Request, res: Response) {
   const mission = await scope.collection<MissionDoc>('missions').findById(target.missionId);
   if (!mission) return res.status(404).json({ error: 'mission_not_found' });
 
-  const profile = await scope.collection<ProfileDoc>('profiles').findOne();
-
-  // Latest evidence pack for this target
-  const packs = await scope
-    .collection<EvidencePackDoc>('evidence_packs')
-    .find({ targetId: target._id });
+  // Latest evidence pack (grounding source; also enforced as a precondition so
+  // the pipeline always runs evidence → sequence in order).
+  const packs = await scope.collection<EvidencePackDoc>('evidence_packs').find({ targetId: target._id });
   packs.sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0));
   const latestPack = packs[0] ?? null;
-
-  const bullets = latestPack?.bullets ?? [];
-  if (bullets.length === 0) {
+  if (!latestPack || latestPack.bullets.length === 0) {
     return res.status(409).json({ error: 'no_evidence_pack', message: 'Generate an evidence pack first.' });
   }
 
@@ -108,117 +94,62 @@ export default async function handler(req: Request, res: Response) {
     contactId: contact_id,
   });
 
-  const mode = (mission.mode as MissionMode | null) ?? 'sales';
-  const evidenceText = bullets
-    .map((b, i) => `[${i}] ${b.fact} — ${b.sourceTitle ?? ''} (${b.recency ?? ''})`)
-    .join('\n');
-
-  const linkedinSummary = profile?.linkedinData
-    ? summarizeLinkedinData(profile.linkedinData as Record<string, unknown>)
-    : '';
-
-  const senderBlock = profile
-    ? [
-        `Name: ${profile.name ?? 'Unknown'}`,
-        profile.role ? `Role: ${profile.role}` : '',
-        profile.organization ? `Org: ${profile.organization}` : '',
-        profile.bio ? `Bio: ${profile.bio}` : '',
-        profile.proofPoints ? `Proof points: ${profile.proofPoints}` : '',
-        profile.achievements ? `Achievements: ${profile.achievements}` : '',
-        profile.metrics ? `Metrics: ${profile.metrics}` : '',
-        profile.writingTone ? `Preferred tone: ${profile.writingTone}` : '',
-        profile.linkedinUrl ? `LinkedIn: ${profile.linkedinUrl}` : '',
-        linkedinSummary ? `LinkedIn signal:\n${linkedinSummary}` : '',
-      ]
-        .filter(Boolean)
-        .join('\n')
-    : 'No sender profile provided.';
-
-  // Retrieve top-3 past sequences (from THIS user) that got replies, as exemplars.
-  const exemplars = await fetchReplyExemplars(scope.uid, mission.goal);
-
-  const userPrompt = [
-    `RECIPIENT`,
-    `Name: ${contact.name}`,
-    `Role: ${contact.role}`,
-    `Company: ${target.companyName}`,
-    '',
-    `MISSION`,
-    `Goal / what's being offered: ${mission.goal}`,
-    `Audience description: ${mission.targetDescription}`,
-    target.whyNow ? `Why now (target): ${target.whyNow}` : '',
-    '',
-    `EVIDENCE PACK (use indices in anchored_bullets)`,
-    evidenceText,
-    '',
-    `SENDER PROFILE`,
-    senderBlock,
-    profile?.exampleEmails ? `\nSENDER EXAMPLE EMAILS (style reference, do not copy)\n${profile.exampleEmails}` : '',
-    exemplars
-      ? `\nPAST EMAILS THAT GOT REPLIES (from your own outbox, retrieved by semantic similarity — emulate the tone/structure, NOT the specifics):\n${exemplars}`
-      : '',
-    '',
-    'Output JSON only.',
-  ]
-    .filter(Boolean)
-    .join('\n');
-
   try {
-    const message = await createMessageWithRetry({
-      model: MODEL(),
-      max_tokens: 2048,
-      system: sequenceSystem(mode),
-      messages: [{ role: 'user', content: userPrompt }],
+    const persona = await resolvePersona(scope, mission.personaId);
+    const { ctx, factIds, exemplarIds, personaVersion } = await assembleDraftContext(scope, user.id, {
+      contact,
+      target,
+      mission,
+      persona,
     });
 
-    const parsed = extractJson<SequenceOutput>(message);
-    if (!parsed.ok || !parsed.data?.initial) {
-      await failRun(scope, run._id, 'parse_failed');
-      return res.status(502).json({ error: 'parse_failed', raw: parsed.raw.slice(0, 500) });
-    }
+    // Initial email — grounded engine, single critique pass (bulk tier).
+    const result = await runDraftEngine(ctx, 'bulk');
+    const { subject, body, angle, claims } = result.draft;
 
-    const seq = parsed.data;
-    const profileRefs = cleanProfileRefs(seq.profile_refs);
-
-    const versions = await scope.collection<ProfileVersionDoc>('profile_versions').find();
-    versions.sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0));
-    const latestVersion = versions[0] ?? null;
+    const followups = await generateFollowups(ctx.recipient.name, mission.goal, subject, body);
 
     let embedding: number[] | undefined;
     try {
-      embedding = await embedOne(`${seq.initial.subject}\n\n${seq.initial.body}`, 'document');
+      embedding = await embedOne(`${subject}\n\n${body}`, 'document');
     } catch (err) {
       console.warn('embed_sequence_failed', err);
     }
-
-    const followups = (seq.followups ?? []).map((f) => ({
-      waitDays: f.wait_days,
-      subject: f.subject,
-      body: f.body,
-    }));
 
     const row = await scope.collection<EmailSequenceDoc>('email_sequences').insertOne({
       _id: newId(),
       contactId: contact_id,
       targetId: target._id,
       missionId: mission._id,
-      evidencePackId: latestPack?._id ?? null,
-      primaryAngle: seq.primary_angle,
-      anchoredBullets: seq.anchored_bullets ?? [],
-      subject: seq.initial.subject,
-      body: seq.initial.body,
+      evidencePackId: latestPack._id,
+      primaryAngle: angle || null,
+      anchoredBullets: anchoredFromClaims(claims, latestPack._id),
+      subject,
+      body,
+      // Immutable baseline for the edit-delta (learning loop compares vs final).
+      originalSubject: subject,
+      originalBody: body,
       followups,
       status: 'draft',
       scheduledSendAt: null,
       sentAt: null,
-      profileVersionId: latestVersion?._id ?? null,
-      // profileRefs is not a schema field but kept on the doc so the send agent
-      // can attribute back to coached fields. Stored as an extra prop.
-      ...({ profileRefs } as unknown as object),
+      profileVersionId: null,
       ...(embedding ? { embedding } : {}),
     } as InsertDoc<EmailSequenceDoc>);
 
-    await completeRun(scope, run._id, { sequence_id: row._id });
+    await completeRun(scope, run._id, {
+      sequence_id: row._id,
+      persona_id: persona?._id ?? null,
+      persona_version: personaVersion,
+      pass: result.pass,
+      revisions: result.revisions,
+      voice_match_score: result.voiceMatchScore,
+      violations: result.violations,
+      violation_count: result.violations.length,
+      fact_ids: factIds,
+      exemplar_ids: exemplarIds,
+      claims,
+    });
     return res.status(200).json({ run_id: run._id, sequence: row });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'unknown_error';
@@ -227,46 +158,38 @@ export default async function handler(req: Request, res: Response) {
   }
 }
 
-async function fetchReplyExemplars(uid: string, missionGoal: string): Promise<string | null> {
+async function generateFollowups(
+  recipientName: string,
+  missionGoal: string,
+  subject: string,
+  body: string
+): Promise<Array<{ waitDays: number; subject: string; body: string }>> {
   try {
-    const queryEmbedding = await embedOne(missionGoal, 'query');
-    const db = await adminDb();
-    const cursor = db.collection('email_sequences').aggregate([
-      {
-        $vectorSearch: {
-          index: 'sequence_vector_idx',
-          path: 'embedding',
-          queryVector: queryEmbedding,
-          numCandidates: 50,
-          limit: 3,
-          filter: { userId: uid, status: 'replied' },
+    const r = await generateJson<{ followups: FollowupOut[] }>({
+      model: MODEL(),
+      max_tokens: 1024,
+      temperature: 0.5,
+      system: FOLLOWUPS_SYSTEM,
+      responseJsonSchema: FOLLOWUPS_SCHEMA,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            `Recipient: ${recipientName}`,
+            `Mission goal / offer: ${missionGoal}`,
+            `Original email:\nSubject: ${subject}\n\n${body}`,
+            'Write 2 follow-ups. JSON only.',
+          ].join('\n\n'),
         },
-      },
-      { $project: { subject: 1, body: 1, primaryAngle: 1, score: { $meta: 'vectorSearchScore' } } },
-    ]);
-    const docs = await cursor.toArray();
-    if (docs.length === 0) return null;
-    return docs
-      .map((d, i) => `--- Exemplar ${i + 1} (angle: ${d.primaryAngle ?? '?'}) ---\nSubject: ${d.subject}\n\n${d.body}`)
-      .join('\n\n');
-  } catch (err) {
-    // Vector index not provisioned yet, or query failed — that's fine, exemplars are optional.
-    return null;
+      ],
+    });
+    if (!r.ok || !Array.isArray(r.data?.followups)) return [];
+    return r.data.followups.slice(0, 2).map((f) => ({
+      waitDays: typeof f.wait_days === 'number' ? f.wait_days : 3,
+      subject: f.subject,
+      body: f.body,
+    }));
+  } catch {
+    return []; // follow-ups are non-critical; never fail the draft over them
   }
-}
-
-function summarizeLinkedinData(data: Record<string, unknown>): string {
-  const out: string[] = [];
-  if (data.headline) out.push(`Headline: ${data.headline}`);
-  if (data.title) out.push(`Title: ${data.title}`);
-  const org = data.organization as { name?: string; industry?: string } | undefined;
-  if (org?.name) out.push(`Org: ${org.name}${org.industry ? ` (${org.industry})` : ''}`);
-  const history = data.employment_history as Array<{ title?: string; organization?: string; current?: boolean }> | undefined;
-  if (history?.length) {
-    const recent = history
-      .slice(0, 4)
-      .map((h) => `- ${h.title ?? '?'} @ ${h.organization ?? '?'}${h.current ? ' (current)' : ''}`);
-    out.push(`Recent roles:\n${recent.join('\n')}`);
-  }
-  return out.join('\n');
 }

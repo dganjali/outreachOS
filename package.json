@@ -14,7 +14,9 @@
     "server:typecheck": "tsc -p tsconfig.server.json --noEmit",
     "test": "tsx --test api/**/*.test.ts",
     "mongo:init": "tsx scripts/init-mongo.ts",
-    "migrate:from-supabase": "tsx scripts/migrate-from-supabase.ts"
+    "migrate:from-supabase": "tsx scripts/migrate-from-supabase.ts",
+    "migrate:personas": "tsx scripts/migrate-personas.ts",
+    "eval": "tsx scripts/eval/run.ts"
   },
   "dependencies": {
     "@google-cloud/secret-manager": "^5.6.0",
@@ -37,6 +39,7 @@
     "firebase": "^11.1.0",
     "firebase-admin": "^13.0.2",
     "lucide-react": "^1.17.0",
+    "mammoth": "^1.12.0",
     "mongodb": "^6.12.0",
     "pdf-parse": "^1.1.4",
     "react": "^18.2.0",

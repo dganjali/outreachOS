@@ -34,8 +34,9 @@
               └──────────┘ └────────────┘ └──────────────┘
                       │
               ┌───────▼──────────┐    ┌────────────────┐
-              │ Voyage AI        │    │ Anthropic API  │
-              │ (embeddings)     │    │ (Claude)       │
+              │ Vertex AI        │    │ Vertex AI      │
+              │ gemini-embedding │    │ Gemini 2.5     │
+              │ -001 (1024-d)    │    │ flash + pro    │
               └──────────────────┘    └────────────────┘
 ```
 
@@ -70,13 +71,15 @@ Full TS shapes in [`shared/schemas.ts`](./shared/schemas.ts). Indexes (including
 
 ## Vector retrieval
 
-Three vector indexes, all 1024-d cosine (Voyage `voyage-3`):
+Five vector indexes, all 1024-d cosine (Vertex `gemini-embedding-001`):
 
-1. **`email_sequences.embedding`** + `sequence_vector_idx` — **active**. The sequence agent uses it to retrieve the user's own past replies-getting emails as exemplars (`api/agents/sequence.ts → fetchReplyExemplars`).
-2. **`evidence_packs.embedding`** + `evidence_vector_idx` — populated on write; not yet read at query time. Future use: cross-mission target dedup ("we've already pitched this company an angle like this").
-3. **`profile_assets.embedding`** + `asset_vector_idx` — populated for resume chunks; not yet read. Future use: snippet-level retrieval into sequence prompts instead of dumping the whole resume.
+1. **`style_exemplars.embedding`** + `style_exemplar_vector_idx` — **active**. The engine retrieves a persona's most relevant gold emails as few-shot voice anchors (`api/_lib/assemble.ts → fetchExemplars`).
+2. **`context_facts.embedding`** + `context_fact_vector_idx` — **active**. Relevance-ranks the context bank to select the facts worth citing for a given draft (`api/_lib/assemble.ts → assembleAllowedFacts`).
+3. **`email_sequences.embedding`** + `sequence_vector_idx` — populated on write; future use: retrieve past replies-getting emails as earned exemplars.
+4. **`evidence_packs.embedding`** + `evidence_vector_idx` — populated on write; not yet read. Future use: cross-mission target dedup.
+5. **`profile_assets.embedding`** + `asset_vector_idx` — populated for resume chunks; future use: snippet-level retrieval into prompts.
 
-All three are best-effort: agents `try { embed }` and continue with `undefined` on failure. The vector index isn't required for the rest of the app to work.
+All are best-effort: callers `try { embed }` and fall back (recency / full set) on failure. Vector Search isn't required for the rest of the app to work.
 
 ## Auth & token flow
 
@@ -123,7 +126,7 @@ Cloud Scheduler triggers cron-style jobs (currently only daily Gmail polling).
 - **Cloud Run over Vercel functions:** kills the 60s timeout. The full mission pipeline (target → evidence × N → contacts × N → sequence × N) can now run server-side as one call with SSE progress, instead of the client-side orchestration we used to do.
 - **MongoDB over staying on Postgres:** the hackathon is sponsored by MongoDB — and Atlas Vector Search is genuinely useful for the "retrieve my own past winners" pattern. Postgres + pgvector could do the same but the operational story is messier.
 - **Firebase Auth over Clerk/Auth0:** GCP credits cover it, and the Google sign-in flow can request Gmail scopes upfront — collapses what used to be a two-step "sign up, then connect Gmail" flow into one.
-- **Voyage AI over Vertex embeddings:** retrieval-tuned and Anthropic-owned. Negligible cost difference; Voyage `voyage-3` outperforms Vertex `gecko` on retrieval benchmarks.
+- **Gemini on Vertex AI (not Claude):** one provider for generation, judging, and embeddings (`gemini-embedding-001`, 1024-d) — GCP credits cover it, native structured output (`responseJsonSchema`) replaces brittle regex JSON parsing, and model tiering (flash for cheap judging/extraction, pro for quality-critical draft generation) is a per-call choice. The old Anthropic/Voyage path is gone (`api/_lib/llm.ts`, formerly `anthropic.ts`).
 - **Cloud Tasks over Inngest/Trigger.dev:** GCP-native, free under the credit, no extra vendor.
 
 ## What's deliberately not in here

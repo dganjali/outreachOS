@@ -12,6 +12,7 @@ import type {
   Profile,
   ReplyClassification,
   ParsedResumeFields,
+  StyleProfile,
 } from '../types';
 import type { PlanId, PlanStatus } from '../../shared/plans';
 
@@ -79,16 +80,65 @@ export const agents = {
     authedFetch<{ run_id: string; sequence: EmailSequence }>('/api/agents/sequence', {
       contact_id,
     }),
+  draft: (contact_id: string, tier?: 'onboarding' | 'bulk') =>
+    authedFetch<{
+      run_id: string;
+      persona_id: string | null;
+      draft: { angle: string; subject: string; body: string; claims: Array<{ text: string; factId: string }> };
+      violations: Array<{ type: string; span: string; detail: string; severity: 'block' | 'warn' }>;
+      voice_match_score: number;
+      revisions: number;
+      pass: boolean;
+    }>('/api/agents/draft', { contact_id, tier }),
+  // Onboarding calibration: grab a real contact + run the engine once so the
+  // user iterates on a genuine draft. `none` = no resolvable contact yet.
+  calibrateDraft: (persona_id: string) =>
+    authedFetch<
+      | { none: true }
+      | {
+          none?: false;
+          run_id: string;
+          recipient: { name: string; role: string; company: string };
+          subject: string;
+          body: string;
+        }
+    >('/api/agents/calibrate-draft', { persona_id }),
+  onboardQuestions: (persona_id: string) =>
+    authedFetch<{ run_id: string; questions: Array<{ id: string; question: string; why: string }> }>(
+      '/api/agents/onboard-questions',
+      { persona_id }
+    ),
+  refine: (input: { persona_id?: string; subject?: string; body: string; instruction: string; span?: string }) =>
+    authedFetch<{ run_id: string; mode: 'span' | 'structural'; instruction: string; subject: string; body: string }>(
+      '/api/agents/refine',
+      input
+    ),
+  extractStyle: (input: {
+    persona_id: string;
+    chat_instructions?: string[];
+    edit_deltas?: Array<{ original: string; final: string }>;
+    confirmed_exemplar?: { subject?: string | null; body: string };
+    source?: string;
+  }) =>
+    authedFetch<{
+      run_id: string;
+      persona_id: string;
+      style_profile: StyleProfile;
+      style_profile_version: number;
+      exemplar_id: string | null;
+    }>('/api/agents/extract-style', input),
   reply: (reply_id: string) =>
     authedFetch<{ run_id: string; classification: { classification: ReplyClassification; urgency: string; key_points: string[]; suggested_response: { subject: string; body: string } | null; recommended_action: string } }>(
       '/api/agents/reply',
       { reply_id }
     ),
   enrichProfile: () =>
-    authedFetch<{ run_id: string; profile: Profile; source: 'apollo' | 'web_search' }>(
-      '/api/agents/enrich-profile',
-      {}
-    ),
+    authedFetch<{
+      run_id: string;
+      profile: Profile;
+      source: 'apollo' | 'web_search';
+      facts_added: number;
+    }>('/api/agents/enrich-profile', {}),
   coach: (field: CoachField, current_value: string) =>
     authedFetch<{
       run_id: string;
@@ -101,6 +151,11 @@ export const agents = {
     authedFetch<{ run_id: string; asset_id: string; parsed_fields: ParsedResumeFields }>(
       '/api/agents/parse-resume',
       { asset_id }
+    ),
+  extractContext: (input: { asset_id?: string; text?: string; persona_id?: string }) =>
+    authedFetch<{ run_id: string; facts: Array<{ id: string; claim: string; type: string }> }>(
+      '/api/agents/extract-context',
+      input
     ),
 };
 

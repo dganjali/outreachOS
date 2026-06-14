@@ -1,10 +1,11 @@
 import type { Request, Response } from 'express';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { forUser } from '../_lib/db';
-import { createMessageWithRetry, MODEL, extractJson } from '../_lib/anthropic';
+import { createMessageWithRetry, MODEL, extractJson } from '../_lib/llm';
 import { REPLY_ROUTER_SYSTEM } from '../_lib/prompts';
 import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
 import { cancelQueuedForContact, addSuppression, scheduleRetouch } from '../_lib/sequencing';
+import { recordOutcome } from '../_lib/outcomes';
 import type {
   ContactDoc,
   EmailSequenceDoc,
@@ -114,6 +115,12 @@ export default async function handler(req: Request, res: Response) {
         await scheduleRetouch(scope, contact._id, RETOUCH_DAYS);
       }
       await scope.collection<ContactDoc>('contacts').updateById(contact._id, { status: 'replied' });
+
+      // Credit the facts/exemplars behind this email — a genuine human reply
+      // (anything but a machine unsubscribe) is a positive outcome signal.
+      if (cls.classification !== 'unsubscribe') {
+        await recordOutcome(user.id, contact._id, 'replied');
+      }
     }
 
     await completeRun(scope, run._id, { classification: cls.classification });
