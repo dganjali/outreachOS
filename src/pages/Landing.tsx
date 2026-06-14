@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Target, FileText, Inbox as InboxIcon, Check, ArrowUpRight } from 'lucide-react';
 import { Logo } from '../components/Logo';
@@ -68,6 +69,57 @@ const FAQ = [
   { q: 'What does it run on?', a: 'Google Gemini powers the agents. Your data lives in your account; emails send from your Gmail.' },
 ];
 
+/* Fades + lifts its children into place when they scroll into view (once).
+   Transforms opacity/translate only, ease-out, no bounce. Honors reduced motion. */
+function Reveal({
+  children,
+  delay = 0,
+  className,
+  as: Tag = 'div',
+}: {
+  children: ReactNode;
+  delay?: number;
+  className?: string;
+  as?: 'div' | 'span' | 'li';
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [shown, setShown] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (reduce || typeof IntersectionObserver === 'undefined') {
+      setShown(true);
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setShown(true);
+          io.disconnect();
+        }
+      },
+      { threshold: 0.1, rootMargin: '0px 0px -6% 0px' }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  const style: CSSProperties = {
+    opacity: shown ? 1 : 0,
+    transform: shown ? 'none' : 'translateY(18px)',
+    transition: `opacity 640ms cubic-bezier(0.22,1,0.36,1) ${delay}ms, transform 640ms cubic-bezier(0.22,1,0.36,1) ${delay}ms`,
+    willChange: 'opacity, transform',
+  };
+
+  return (
+    <Tag ref={ref as never} className={className} style={style}>
+      {children}
+    </Tag>
+  );
+}
+
 function SectionHead({ title, sub }: { title: string; sub?: string }) {
   return (
     <div className="mb-14 max-w-2xl">
@@ -119,7 +171,7 @@ export function Landing() {
 
       <main>
         {/* Hero */}
-        <section className="relative isolate overflow-hidden px-5 pb-16 pt-32 md:pb-20 md:pt-40">
+        <section className="relative isolate overflow-hidden px-5 pb-14 pt-28 md:pb-16 md:pt-32">
           {/* matte backdrop: flat ground + a faint static grid + the generative green
               particle terrain as the one moment of motion. No color-wash gradients. */}
           <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
@@ -143,19 +195,19 @@ export function Landing() {
           </div>
 
           <div className="mx-auto max-w-3xl text-center">
-            <span className="inline-flex items-center gap-2 rounded-full border border-border bg-secondary/50 px-3 py-1 text-xs font-medium text-muted-foreground">
-              <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-              Agentic cold outreach, end to end
-            </span>
-            <h1 className="mt-6 text-balance font-display font-semibold leading-[1.03] tracking-[-0.035em] text-foreground text-[clamp(2.6rem,6.2vw,4.75rem)]">
-              Cold outreach that writes
-              <br className="hidden sm:block" /> and sends itself.
-            </h1>
-            <p className="mx-auto mt-6 max-w-xl text-pretty text-lg leading-relaxed text-muted-foreground">
-              OutreachOS finds the right companies, writes personalized emails backed by real buying
-              signals, and sends them from your Gmail. You review and approve.
-            </p>
-            <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
+            <Reveal as="div" delay={0}>
+              <h1 className="text-balance font-display font-semibold leading-[1.03] tracking-[-0.035em] text-foreground text-[clamp(2.6rem,6.2vw,4.75rem)]">
+                Cold outreach that writes
+                <br className="hidden sm:block" /> and sends itself.
+              </h1>
+            </Reveal>
+            <Reveal as="div" delay={90}>
+              <p className="mx-auto mt-6 max-w-xl text-pretty text-lg leading-relaxed text-muted-foreground">
+                OutreachOS finds the right companies, writes personalized emails backed by real buying
+                signals, and sends them from your Gmail. You review and approve.
+              </p>
+            </Reveal>
+            <Reveal as="div" delay={180} className="mt-9 flex flex-wrap items-center justify-center gap-3">
               <Button asChild size="lg" className="btn-glow gap-2 border-0 px-6 font-medium text-primary-foreground">
                 <Link to="/sign-up">
                   Start free <ArrowRight className="h-4 w-4" />
@@ -169,16 +221,18 @@ export function Landing() {
               >
                 <a href="#how">See how it works</a>
               </Button>
-            </div>
-            <p className="mt-5 text-sm text-muted-foreground">Runs on Google Gemini. Connect Gmail to send.</p>
+            </Reveal>
+            <Reveal as="div" delay={260}>
+              <p className="mt-5 text-sm text-muted-foreground">Runs on Google Gemini. Connect Gmail to send.</p>
+            </Reveal>
           </div>
 
           {/* hero product shot — matte frame, single soft shadow, no gradient ring or glow */}
-          <div className="relative mx-auto mt-16 max-w-5xl">
+          <Reveal as="div" delay={340} className="relative mx-auto mt-12 max-w-5xl md:mt-14">
             <BrowserFrame url="app.outreachos.com/missions" bodyClassName="p-0">
               <HeroAppMock />
             </BrowserFrame>
-          </div>
+          </Reveal>
         </section>
 
         {/* Replaces strip */}
@@ -202,18 +256,20 @@ export function Landing() {
 
         {/* How it works — the simple 3-step loop, before the deep feature dives */}
         <section id="how">
-          <div className="mx-auto max-w-6xl px-5 py-28 md:px-8">
-            <SectionHead
-              title="Three steps, start to sent."
-              sub="One mission in, a reviewable pipeline out. You stay in the approval seat the whole way."
-            />
+          <div className="mx-auto max-w-6xl px-5 py-20 md:px-8 md:py-24">
+            <Reveal>
+              <SectionHead
+                title="Three steps, start to sent."
+                sub="One mission in, a reviewable pipeline out. You stay in the approval seat the whole way."
+              />
+            </Reveal>
             <div className="grid gap-px overflow-hidden rounded-xl border border-border bg-border md:grid-cols-3">
-              {HOW.map((h) => (
-                <div key={h.step} className="flex flex-col bg-card p-7">
+              {HOW.map((h, i) => (
+                <Reveal key={h.step} delay={i * 90} className="flex flex-col bg-card p-7">
                   <span className="font-mono text-sm text-primary">{h.step}</span>
                   <h3 className="mt-5 text-lg font-semibold tracking-[-0.01em] text-foreground">{h.title}</h3>
                   <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">{h.body}</p>
-                </div>
+                </Reveal>
               ))}
             </div>
           </div>
@@ -221,11 +277,13 @@ export function Landing() {
 
         {/* Features — the deep dives behind each step */}
         <section id="features" className="border-t border-border/70">
-          <div className="mx-auto max-w-6xl px-5 py-28 md:px-8">
-            <SectionHead title="Inside the pipeline." />
-            <div className="flex flex-col gap-24">
+          <div className="mx-auto max-w-6xl px-5 py-24 md:px-8 md:py-32">
+            <Reveal>
+              <SectionHead title="Inside the pipeline." />
+            </Reveal>
+            <div className="flex flex-col gap-20 md:gap-28">
               {FEATURES.map((f, i) => (
-                <div
+                <Reveal
                   key={f.eyebrow}
                   className={`grid items-center gap-12 lg:grid-cols-2 ${i % 2 === 1 ? 'lg:[&>*:first-child]:order-2' : ''}`}
                 >
@@ -249,7 +307,7 @@ export function Landing() {
                     </ul>
                   </div>
                   <BrowserFrame url={f.url}>{f.mock}</BrowserFrame>
-                </div>
+                </Reveal>
               ))}
             </div>
           </div>
@@ -257,26 +315,26 @@ export function Landing() {
 
         {/* Modes */}
         <section id="modes" className="border-t border-border/70">
-          <div className="mx-auto max-w-6xl px-5 py-28 md:px-8">
-            <SectionHead
-              title="Five modes. One pipeline."
-              sub="Same machine underneath; the targeting, evidence, and tone shift to the job at hand."
-            />
+          <div className="mx-auto max-w-6xl px-5 py-20 md:px-8 md:py-24">
+            <Reveal>
+              <SectionHead
+                title="Five modes. One pipeline."
+                sub="Same machine underneath; the targeting, evidence, and tone shift to the job at hand."
+              />
+            </Reveal>
             <div className="grid gap-x-12 sm:grid-cols-2">
               {MODES.map((m, i) => (
-                <div
+                <Reveal
                   key={m.title}
-                  className={cn(
-                    'flex items-baseline gap-5 border-t border-border py-6',
-                    i < 2 ? 'sm:border-t' : '',
-                  )}
+                  delay={(i % 2) * 80}
+                  className="flex items-baseline gap-5 border-t border-border py-6"
                 >
                   <span className="font-mono text-xs text-muted-foreground/60">{String(i + 1).padStart(2, '0')}</span>
                   <div>
                     <h3 className="text-base font-semibold text-foreground">{m.title}</h3>
                     <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{m.blurb}</p>
                   </div>
-                </div>
+                </Reveal>
               ))}
             </div>
           </div>
@@ -284,15 +342,18 @@ export function Landing() {
 
         {/* Pricing */}
         <section id="pricing" className="border-t border-border/70">
-          <div className="mx-auto max-w-6xl px-5 py-28 md:px-8">
-            <SectionHead title="Start free. Scale when it works." />
+          <div className="mx-auto max-w-6xl px-5 py-24 md:px-8 md:py-28">
+            <Reveal>
+              <SectionHead title="Start free. Scale when it works." />
+            </Reveal>
             <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-              {PLAN_ORDER.map((id) => {
+              {PLAN_ORDER.map((id, i) => {
                 const plan = PLANS[id];
                 const featured = id === 'pro';
                 return (
-                  <div
+                  <Reveal
                     key={id}
+                    delay={i * 70}
                     className={cn(
                       'relative flex flex-col rounded-xl border p-6',
                       featured ? 'border-primary/50 bg-primary/[0.04]' : 'border-border bg-card'
@@ -335,7 +396,7 @@ export function Landing() {
                     >
                       <Link to="/sign-up">{plan.priceMonthly === 0 ? 'Start free' : `Choose ${plan.name}`}</Link>
                     </Button>
-                  </div>
+                  </Reveal>
                 );
               })}
             </div>
@@ -348,27 +409,31 @@ export function Landing() {
 
         {/* FAQ */}
         <section id="faq" className="border-t border-border/70">
-          <div className="mx-auto grid max-w-6xl gap-12 px-5 py-28 md:grid-cols-[0.8fr_1.2fr] md:px-8">
-            <SectionHead title="Questions, answered." />
-            <Accordion type="single" collapsible className="w-full">
-              {FAQ.map((f) => (
-                <AccordionItem key={f.q} value={f.q} className="border-border">
-                  <AccordionTrigger className="text-left text-base font-medium text-foreground hover:no-underline">
-                    {f.q}
-                  </AccordionTrigger>
-                  <AccordionContent className="max-w-prose text-sm leading-relaxed text-muted-foreground">
-                    {f.a}
-                  </AccordionContent>
-                </AccordionItem>
-              ))}
-            </Accordion>
+          <div className="mx-auto grid max-w-6xl gap-12 px-5 py-20 md:grid-cols-[0.8fr_1.2fr] md:px-8 md:py-24">
+            <Reveal>
+              <SectionHead title="Questions, answered." />
+            </Reveal>
+            <Reveal delay={80}>
+              <Accordion type="single" collapsible className="w-full">
+                {FAQ.map((f) => (
+                  <AccordionItem key={f.q} value={f.q} className="border-border">
+                    <AccordionTrigger className="text-left text-base font-medium text-foreground hover:no-underline">
+                      {f.q}
+                    </AccordionTrigger>
+                    <AccordionContent className="max-w-prose text-sm leading-relaxed text-muted-foreground">
+                      {f.a}
+                    </AccordionContent>
+                  </AccordionItem>
+                ))}
+              </Accordion>
+            </Reveal>
           </div>
         </section>
 
         {/* CTA */}
         <section className="border-t border-border/70">
-          <div className="mx-auto max-w-6xl px-5 py-28 md:px-8">
-            <div className="flex flex-col items-start gap-8 rounded-2xl border border-border bg-card p-10 md:flex-row md:items-center md:justify-between md:p-14">
+          <div className="mx-auto max-w-6xl px-5 py-24 md:px-8">
+            <Reveal className="flex flex-col items-start gap-8 rounded-2xl border border-border bg-card p-10 md:flex-row md:items-center md:justify-between md:p-14">
               <div className="max-w-lg">
                 <h2 className="text-balance font-display text-3xl font-semibold tracking-[-0.02em] text-foreground md:text-[2.5rem] md:leading-[1.08]">
                   Stop tab-hopping. Start sending.
@@ -383,7 +448,7 @@ export function Landing() {
                   Create your account <ArrowUpRight className="h-4 w-4" />
                 </Link>
               </Button>
-            </div>
+            </Reveal>
           </div>
         </section>
       </main>
