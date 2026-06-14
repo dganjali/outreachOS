@@ -10,56 +10,58 @@
 */
 :root,
 .dark {
-  --background: 218 36% 4%;
-  --foreground: 210 38% 97%;
+  /* Matte near-black: a faint cool tint, lifted just off pure black so surfaces
+     read as material, not a void. Low chroma keeps it neutral and refined. */
+  --background: 220 16% 6%;
+  --foreground: 210 16% 97%;
 
-  --card: 220 24% 7%;
-  --card-foreground: 210 38% 97%;
+  --card: 220 14% 8%;
+  --card-foreground: 210 16% 97%;
 
-  --popover: 220 24% 7%;
-  --popover-foreground: 210 38% 97%;
+  --popover: 220 14% 9%;
+  --popover-foreground: 210 16% 97%;
 
   /* forest green — the brand / "go" action (Send, Run, Connect, New mission).
-     Muted & deep to match the landing tones, not a neon emerald. */
-  --primary: 153 43% 39%;
-  --primary-foreground: 150 40% 96%;
+     Muted & deep; carried as a flat matte fill, never a gradient or glow. */
+  --primary: 152 38% 42%;
+  --primary-foreground: 150 30% 97%;
 
   /* neutral elevated surfaces (segmented controls, soft chips) */
-  --secondary: 216 21% 11%;
-  --secondary-foreground: 210 38% 97%;
+  --secondary: 220 13% 12%;
+  --secondary-foreground: 210 16% 97%;
 
-  --muted: 216 21% 11%;
-  --muted-foreground: 213 14% 66%;
+  --muted: 220 13% 12%;
+  --muted-foreground: 220 9% 62%;
 
   /* shadcn uses --accent for hover surfaces (menu items, ghost buttons).
      Keep it NEUTRAL so green stays reserved for primary actions. */
-  --accent: 215 20% 16%;
-  --accent-foreground: 210 38% 97%;
+  --accent: 220 12% 15%;
+  --accent-foreground: 210 16% 97%;
 
-  --destructive: 0 84% 60%;
-  --destructive-foreground: 210 38% 98%;
+  --destructive: 0 70% 55%;
+  --destructive-foreground: 210 16% 98%;
 
-  --success: 150 42% 42%;
-  --success-foreground: 150 40% 96%;
+  --success: 150 40% 44%;
+  --success-foreground: 150 30% 97%;
 
-  --warning: 38 80% 52%;
-  --warning-foreground: 38 80% 8%;
+  --warning: 38 70% 54%;
+  --warning-foreground: 38 70% 8%;
 
-  --border: 213 20% 17%;
-  --input: 213 20% 17%;
-  --ring: 152 45% 46%;
+  --border: 220 11% 16%;
+  --input: 220 11% 16%;
+  --ring: 152 40% 48%;
 
-  --radius: 0.625rem;
+  --radius: 0.5rem;
 
   /* sidebar (app shell) */
-  --sidebar-background: 220 26% 6%;
-  --sidebar-foreground: 213 14% 70%;
-  --sidebar-primary: 153 43% 41%;
-  --sidebar-primary-foreground: 150 40% 96%;
-  --sidebar-accent: 216 21% 12%;
-  --sidebar-accent-foreground: 210 38% 97%;
-  --sidebar-border: 213 20% 14%;
-  --sidebar-ring: 152 45% 46%;
+  --sidebar-background: 220 15% 7%;
+  --sidebar-foreground: 220 9% 68%;
+  --sidebar-primary: 152 38% 44%;
+  --sidebar-primary-foreground: 150 30% 97%;
+  --sidebar-accent: 220 13% 13%;
+  --sidebar-accent-foreground: 210 16% 97%;
+  --sidebar-border: 220 11% 14%;
+  --sidebar-ring: 152 40% 48%;
 
   color-scheme: dark;
 }
@@ -69,6 +71,15 @@
 html,
 body {
   background-color: hsl(var(--background));
+}
+
+/* Unify the whole app on Geist. Preflight is disabled and legacy index.css sets
+   the body font to Inter, so set it here (loads last) to win. Inter stays as the
+   metric-compatible fallback while Geist loads. */
+body {
+  font-family: 'Geist', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 /* ---- Legacy dark compatibility layer ----
@@ -131,99 +142,62 @@ body {
 }
 
 /* ============================================================
-   Premium dark surface treatment — depth, glow, texture.
-   Gives the app a modern startup feel (Cluely / Linear / Vercel)
-   instead of flat dark rectangles.
+   Matte dark surface treatment — flat material, hairline borders,
+   no gradients / glow / glass. Depth comes from a single soft shadow
+   and crisp 1px lines (Warp / Linear / Vercel register).
    ============================================================ */
 
-/* App background: deep slate + a soft forest-green aurora + faint grid. */
+/* App background: a flat matte ground. No aurora, no color wash. */
 .app-canvas {
   position: relative;
   background-color: hsl(var(--background));
-  background-image:
-    radial-gradient(60rem 40rem at 12% -8%, hsl(153 43% 39% / 0.10), transparent 60%),
-    radial-gradient(50rem 36rem at 100% 0%, hsl(190 50% 40% / 0.06), transparent 55%);
-}
-.app-canvas::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  background-image:
-    linear-gradient(to right, hsl(213 30% 60% / 0.035) 1px, transparent 1px),
-    linear-gradient(to bottom, hsl(213 30% 60% / 0.035) 1px, transparent 1px);
-  background-size: 56px 56px;
-  mask-image: radial-gradient(120% 90% at 50% 0%, #000 35%, transparent 80%);
-  -webkit-mask-image: radial-gradient(120% 90% at 50% 0%, #000 35%, transparent 80%);
-  z-index: 0;
 }
 
 @layer components {
-  /* Elevated panel: subtle top-light gradient, hairline, depth shadow. */
+  /* Elevated panel: flat matte fill, hairline border, one soft seating shadow. */
   .panel {
     position: relative;
-    border: 1px solid hsl(var(--border) / 0.9);
-    border-radius: var(--radius-lg);
-    background:
-      linear-gradient(180deg, hsl(216 24% 11% / 0.65), hsl(220 26% 7% / 0.65));
-    box-shadow:
-      0 1px 0 0 hsl(210 40% 98% / 0.05) inset,
-      0 1px 2px hsl(0 0% 0% / 0.3),
-      0 24px 50px -28px hsl(0 0% 0% / 0.75);
-    backdrop-filter: blur(8px);
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius-lg, 0.75rem);
+    background: hsl(var(--card));
+    box-shadow: 0 1px 2px hsl(0 0% 0% / 0.25);
   }
-  /* faint top sheen that catches the eye on larger panels */
-  .panel::before {
-    content: '';
-    position: absolute;
-    inset: 0 0 auto 0;
-    height: 1px;
-    border-radius: inherit;
-    background: linear-gradient(90deg, transparent, hsl(210 40% 98% / 0.10), transparent);
-    pointer-events: none;
-  }
-  /* Glowing primary action. */
+  /* Primary action: flat matte green. No gradient, no glow — a crisp fill that
+     lifts a touch on hover. Pair with `text-primary-foreground`. */
   .btn-glow {
-    background: linear-gradient(180deg, hsl(153 46% 43%), hsl(153 48% 35%));
-    box-shadow:
-      0 1px 0 0 hsl(150 60% 80% / 0.25) inset,
-      0 8px 24px -10px hsl(153 50% 40% / 0.6);
+    background: hsl(var(--primary));
+    border: 1px solid hsl(var(--primary));
+    box-shadow: 0 1px 1px hsl(0 0% 0% / 0.2);
+    transition: background-color 140ms ease, border-color 140ms ease;
   }
   .btn-glow:hover {
-    background: linear-gradient(180deg, hsl(153 48% 46%), hsl(153 50% 38%));
-    box-shadow:
-      0 1px 0 0 hsl(150 60% 80% / 0.3) inset,
-      0 10px 30px -8px hsl(153 50% 42% / 0.7);
+    background: hsl(152 38% 47%);
+    border-color: hsl(152 38% 47%);
   }
-}
-
-@keyframes aurora-1 {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  50% { transform: translate(7%, -5%) scale(1.15); }
-}
-@keyframes aurora-2 {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  50% { transform: translate(-7%, 5%) scale(0.9); }
 }
 
 @layer utilities {
-  /* Heading wash: bright foreground fading to a cooler tone. */
   .text-balance { text-wrap: balance; }
-  /* Fine film grain (TypeOS-style texture) via an inline noise SVG. */
+  /* Fine film grain (subtle texture) via an inline noise SVG. */
   .bg-grain {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   }
+  /* Was a gradient-clipped heading; now a solid near-white. Emphasis via
+     weight/scale, not a fill. Kept as a class so existing headings inherit it. */
   .text-wash {
-    background: linear-gradient(180deg, hsl(210 40% 99%), hsl(213 18% 74%));
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-    /* Tailwind's text-4xl/5xl set line-height:1, which clips glyph descenders
-       under background-clip:text. Give the clip box room so g/p/y aren't cut. */
-    padding-bottom: 0.14em;
+    color: hsl(var(--foreground));
+    padding-bottom: 0.06em;
   }
   .ring-soft {
-    box-shadow: 0 0 0 1px hsl(var(--border)), 0 0 0 4px hsl(153 43% 39% / 0.08);
+    box-shadow: 0 0 0 1px hsl(var(--border)), 0 0 0 4px hsl(152 38% 42% / 0.08);
+  }
+  /* Faint static grid texture for hero/section backdrops — 1px lines only,
+     masked to fade at the edges. Texture, not a color wash. */
+  .bg-fade-grid {
+    background-image:
+      linear-gradient(to right, hsl(220 10% 70% / 0.04) 1px, transparent 1px),
+      linear-gradient(to bottom, hsl(220 10% 70% / 0.04) 1px, transparent 1px);
+    background-size: 64px 64px;
   }
 }
 

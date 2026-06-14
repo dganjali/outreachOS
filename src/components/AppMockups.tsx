@@ -29,7 +29,7 @@ export function BrowserFrame({
   bodyClassName?: string;
 }) {
   return (
-    <div className="overflow-hidden rounded-xl border border-border bg-card shadow-[0_30px_80px_-40px_rgba(0,0,0,0.8)]">
+    <div className="overflow-hidden rounded-xl border border-border bg-card shadow-[0_24px_60px_-36px_rgba(0,0,0,0.7)]">
       <div className="flex items-center gap-3 border-b border-border/70 bg-secondary/40 px-3.5 py-2.5">
         <span className="flex gap-1.5" aria-hidden>
           <i className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]" />

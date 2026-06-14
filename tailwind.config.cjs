@@ -74,6 +74,7 @@ module.exports = {
   		},
   		fontFamily: {
   			sans: [
+  				'Geist',
   				'Inter',
   				'system-ui',
   				'-apple-system',
@@ -82,13 +83,13 @@ module.exports = {
   				'sans-serif'
   			],
   			display: [
-  				'Plus Jakarta Sans',
+  				'Geist',
   				'Inter',
   				'system-ui',
   				'sans-serif'
   			],
   			mono: [
-  				'JetBrains Mono',
+  				'Geist Mono',
   				'ui-monospace',
   				'SFMono-Regular',
   				'Menlo',
