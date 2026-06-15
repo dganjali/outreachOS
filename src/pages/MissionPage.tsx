@@ -37,6 +37,13 @@ export function MissionPage() {
   // matters: storing undefined for "none" made the loader effect refire
   // endlessly (its guard never tripped), flooding the API with requests.
   const [sequencesByContact, setSequencesByContact] = useState<Record<string, EmailSequence | null | undefined>>({});
+  // Sequence ids whose initial email (touch 0) has already been sent. Tracked at
+  // page level - separate from each card's local state - so "Send all" can skip
+  // already-sent contacts and never double-send.
+  const [initialSentSeqIds, setInitialSentSeqIds] = useState<Set<string>>(new Set());
+  // Bumped after a bulk send so SequenceCards remount and re-read their sent state.
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [sendingAll, setSendingAll] = useState(false);
   const [activeTargetId, setActiveTargetId] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -164,11 +171,26 @@ export function MissionPage() {
         if (!map[s.contact_id]) map[s.contact_id] = s; // ordered desc → first is newest
       }
       setSequencesByContact(map);
+
+      // Which of these sequences have already had their initial email sent.
+      const seqIds = Object.values(map).filter(Boolean).map((s) => (s as EmailSequence).id);
+      if (seqIds.length === 0) {
+        setInitialSentSeqIds(new Set());
+        return;
+      }
+      const { data: sent } = await supabase
+        .from('sent_messages')
+        .select('sequence_id, touch_index, status')
+        .in('sequence_id', seqIds)
+        .eq('touch_index', 0)
+        .eq('status', 'sent');
+      if (cancelled) return;
+      setInitialSentSeqIds(new Set((sent ?? []).map((m) => (m as { sequence_id: string }).sequence_id)));
     })();
     return () => {
       cancelled = true;
     };
-  }, [contactIdsKey]);
+  }, [contactIdsKey, refreshKey]);
 
   async function runWith<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
     setBusy(label);
@@ -204,6 +226,49 @@ export function MissionPage() {
   async function generateSequence(contact: Contact) {
     const r = await runWith(`sequence:${contact.id}`, () => agents.sequence(contact.id));
     if (r) await loadSequencesForContact(contact.id);
+  }
+
+  // Contacts whose initial email is drafted, has a recipient address, hasn't been
+  // sent yet, and isn't a known reply - i.e. the ones "Send all" would send to.
+  const sendableInitials = useMemo(() => {
+    const out: { sequenceId: string; email: string; name: string }[] = [];
+    for (const c of allContacts) {
+      if (c.status === 'replied') continue;
+      const seq = sequencesByContact[c.id];
+      if (!seq) continue;
+      if (initialSentSeqIds.has(seq.id)) continue;
+      const email = c.email || suggestEmail(c);
+      if (!email) continue;
+      out.push({ sequenceId: seq.id, email, name: c.name });
+    }
+    return out;
+  }, [allContacts, sequencesByContact, initialSentSeqIds]);
+
+  async function sendAllInitial() {
+    const jobs = sendableInitials;
+    if (jobs.length === 0) return;
+    const ok = await confirm({
+      title: `Send ${jobs.length} initial email${jobs.length > 1 ? 's' : ''} now?`,
+      description: 'Sends the first email to every contact that has a draft and a recipient address. Already-sent contacts are skipped.',
+      confirmText: `Send ${jobs.length}`,
+    });
+    if (!ok) return;
+    setSendingAll(true);
+    let sent = 0;
+    let failed = 0;
+    for (const job of jobs) {
+      try {
+        await gmail.send(job.sequenceId, 0, 'send', job.email);
+        sent++;
+      } catch {
+        failed++;
+      }
+    }
+    setSendingAll(false);
+    setRefreshKey((k) => k + 1); // remount cards so they reflect the new sent state
+    if (failed === 0) toast.success(`Sent ${sent} email${sent > 1 ? 's' : ''}.`);
+    else if (sent === 0) toast.error(`Could not send. ${failed} failed - check your Gmail connection in Settings.`);
+    else toast.warning(`Sent ${sent}, but ${failed} failed.`);
   }
 
   async function setTargetStatus(target: Target, status: Target['status']) {
@@ -267,6 +332,19 @@ export function MissionPage() {
         </div>
         <div className="mission-detail-actions">
           <CsvImport missionId={mission.id} onImported={loadTargets} />
+          {sendableInitials.length > 0 && (
+            <button
+              type="button"
+              className="btn-send-all"
+              disabled={sendingAll}
+              onClick={sendAllInitial}
+              title="Send the initial email to every contact that has a draft and a recipient address"
+            >
+              {sendingAll
+                ? `Sending ${sendableInitials.length}…`
+                : `✈ Send all (${sendableInitials.length})`}
+            </button>
+          )}
           <button
             type="button"
             className="btn-secondary"
@@ -476,7 +554,7 @@ export function MissionPage() {
                             {c.headline && <div className="contact-reason muted">{c.headline}</div>}
                             {c.reasoning && <div className="contact-reason">{c.reasoning}</div>}
 
-                            {seq && <SequenceCard sequence={seq} contact={c} />}
+                            {seq && <SequenceCard key={`${seq.id}:${refreshKey}`} sequence={seq} contact={c} />}
                           </div>
                         );
                       })}
@@ -602,8 +680,10 @@ function SequenceCard({ sequence, contact }: { sequence: EmailSequence; contact:
           {sendErr && <div className="banner-error">{sendErr}</div>}
 
           <Touch
-            label="Initial"
+            label="Initial email"
             touchIndex={0}
+            recipientName={contact.name}
+            recipientEmail={overrideEmail || contact.email || ''}
             subject={draft.subject}
             body={draft.body}
             sent={sentMessages[0]}
@@ -624,8 +704,11 @@ function SequenceCard({ sequence, contact }: { sequence: EmailSequence; contact:
             return (
               <Touch
                 key={i}
-                label={`Follow-up ${i + 1} · day +${f.wait_days}`}
+                label={`Follow-up ${i + 1}`}
+                sublabel={`sends ${f.wait_days} day${f.wait_days === 1 ? '' : 's'} after the previous email`}
                 touchIndex={idx}
+                recipientName={contact.name}
+                recipientEmail={overrideEmail || contact.email || ''}
                 subject={f.subject}
                 body={f.body}
                 sent={sentMessages[idx]}
@@ -671,7 +754,10 @@ function EmailStatusPill({ status }: { status: Contact['email_status'] }) {
 
 function Touch({
   label,
+  sublabel,
   touchIndex,
+  recipientName,
+  recipientEmail,
   subject,
   body,
   sent,
@@ -684,7 +770,10 @@ function Touch({
   disabledReason,
 }: {
   label: string;
+  sublabel?: string;
   touchIndex: number;
+  recipientName: string;
+  recipientEmail: string;
   subject: string;
   body: string;
   sent: SentMessage | undefined;
@@ -699,6 +788,7 @@ function Touch({
   const confirm = useConfirm();
   const isSent = sent?.status === 'sent';
   const isDraft = sent?.status === 'draft';
+  const busy = !!sending;
   const [editing, setEditing] = useState(false);
   const [s, setS] = useState(subject);
   const [b, setB] = useState(body);
@@ -724,66 +814,35 @@ function Touch({
   }
 
   return (
-    <div className="sequence-touch">
-      <div className="sequence-touch-head">
-        <span className="touch-label">
+    <div className={`email-card${isSent ? ' is-sent' : ''}`}>
+      <div className="email-card-head">
+        <span className="email-card-step">
           {label}
-          {isSent && <span className="sent-badge">sent</span>}
-          {isDraft && <span className="sent-badge draft">draft saved</span>}
+          {sublabel && <span className="email-card-sublabel">{sublabel}</span>}
         </span>
-        <div className="touch-actions">
-          {!isSent && !editing && (
-            <button type="button" className="link-button" onClick={() => setEditing(true)}>
-              Edit
-            </button>
-          )}
-          <button type="button" className="link-button" onClick={() => onCopy(`Subject: ${subject}\n\n${body}`)}>
-            {copied ? 'Copied' : 'Copy'}
-          </button>
-          {!isSent && !editing && (
-            <>
-              <button
-                type="button"
-                className="btn-secondary tiny"
-                disabled={!!sending || disabled}
-                title={disabledReason}
-                onClick={() => onSend(touchIndex, 'draft')}
-              >
-                {sending === `draft:${touchIndex}` ? 'Saving…' : isDraft ? 'Update draft' : 'Save draft'}
-              </button>
-              <button
-                type="button"
-                className="btn-primary tiny"
-                disabled={!!sending || disabled}
-                title={disabledReason}
-                onClick={async () => {
-                  if (await confirm({ title: 'Send this email now?', description: `Subject: ${subject}`, confirmText: 'Send now' }))
-                    onSend(touchIndex, 'send');
-                }}
-              >
-                {sending === `send:${touchIndex}` ? 'Sending…' : 'Send now'}
-              </button>
-            </>
-          )}
-        </div>
+        {isSent && <span className="sent-badge">✓ sent</span>}
+        {isDraft && !isSent && <span className="sent-badge draft">draft saved</span>}
       </div>
+
       {editing ? (
-        <div className="sequence-edit">
+        <div className="email-card-edit">
+          <label className="email-field-label">Subject</label>
           <input
             className="reply-subject-input"
             value={s}
             onChange={(e) => setS(e.target.value)}
             placeholder="Subject"
           />
+          <label className="email-field-label">Message</label>
           <textarea
             className="reply-body-input"
             value={b}
             onChange={(e) => setB(e.target.value)}
-            rows={7}
+            rows={9}
           />
-          <div className="sequence-edit-actions">
-            <button type="button" className="btn-primary tiny" onClick={save} disabled={saving || !b.trim()}>
-              {saving ? 'Saving…' : 'Save'}
+          <div className="email-card-actions">
+            <button type="button" className="btn-primary small" onClick={save} disabled={saving || !b.trim()}>
+              {saving ? 'Saving…' : 'Save changes'}
             </button>
             <button
               type="button"
@@ -800,8 +859,64 @@ function Touch({
         </div>
       ) : (
         <>
-          <div className="sequence-subject">{subject}</div>
-          <pre className="sequence-text">{body}</pre>
+          <div className="email-meta">
+            {recipientEmail && (
+              <div className="email-meta-row">
+                <span className="email-meta-key">To</span>
+                <span className="email-meta-val">
+                  {recipientName} <span className="email-meta-addr">&lt;{recipientEmail}&gt;</span>
+                </span>
+              </div>
+            )}
+            <div className="email-meta-row">
+              <span className="email-meta-key">Subject</span>
+              <span className="email-meta-val email-meta-subject">{subject}</span>
+            </div>
+          </div>
+
+          <div className="email-body">{body}</div>
+
+          <div className="email-card-actions">
+            {!isSent && (
+              <button
+                type="button"
+                className="btn-send"
+                disabled={busy || disabled}
+                title={disabledReason}
+                onClick={async () => {
+                  if (
+                    await confirm({
+                      title: 'Send this email now?',
+                      description: `To ${recipientName}${recipientEmail ? ` <${recipientEmail}>` : ''}\nSubject: ${subject}`,
+                      confirmText: 'Send now',
+                    })
+                  )
+                    onSend(touchIndex, 'send');
+                }}
+              >
+                {sending === `send:${touchIndex}` ? 'Sending…' : '✈ Send email'}
+              </button>
+            )}
+            {!isSent && (
+              <button type="button" className="link-button" onClick={() => setEditing(true)}>
+                Edit
+              </button>
+            )}
+            {!isSent && (
+              <button
+                type="button"
+                className="link-button"
+                disabled={busy || disabled}
+                title={disabledReason}
+                onClick={() => onSend(touchIndex, 'draft')}
+              >
+                {sending === `draft:${touchIndex}` ? 'Saving…' : isDraft ? 'Update Gmail draft' : 'Save to Gmail drafts'}
+              </button>
+            )}
+            <button type="button" className="link-button" onClick={() => onCopy(`Subject: ${subject}\n\n${body}`)}>
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+          </div>
         </>
       )}
     </div>

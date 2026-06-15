@@ -1297,6 +1297,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
   cursor: pointer;
 }
 .link-button:hover { color: var(--text); text-decoration: underline; }
+.link-button:disabled { opacity: 0.5; cursor: not-allowed; text-decoration: none; }
 
 .link-pill {
   display: inline-flex;
@@ -1772,6 +1773,122 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
   white-space: pre-wrap;
   line-height: 1.45;
 }
+
+/* Email preview card - makes a drafted email read like an actual email instead
+   of a wall of text: a labeled header, a To/Subject meta block, a readable
+   body, then a clear action bar with a prominent Send button. */
+.email-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.email-card.is-sent { opacity: 0.85; }
+.email-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.875rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.email-card-step {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+.email-card-sublabel {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-muted);
+  opacity: 0.85;
+}
+.email-meta {
+  padding: 0.625rem 0.875rem;
+  border-bottom: 1px dashed var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.email-meta-row { display: flex; gap: 0.5rem; font-size: 0.8125rem; line-height: 1.4; }
+.email-meta-key {
+  flex: 0 0 3.25rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.email-meta-val { color: var(--text); min-width: 0; word-break: break-word; }
+.email-meta-addr { color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.75rem; }
+.email-meta-subject { font-weight: 600; }
+.email-body {
+  padding: 0.875rem;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 22rem;
+  overflow-y: auto;
+}
+.email-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.625rem 0.875rem;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.email-card-edit { padding: 0.75rem 0.875rem; display: flex; flex-direction: column; gap: 0.375rem; }
+.email-field-label {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+.email-field-label:not(:first-child) { margin-top: 0.375rem; }
+
+/* The primary send action - deliberately the most prominent control on the card. */
+.btn-send {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 1rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.btn-send:hover:not(:disabled) { background: var(--primary-hover); }
+.btn-send:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Mission-level bulk send. */
+.btn-send-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.btn-send-all:hover:not(:disabled) { background: var(--primary-hover); }
+.btn-send-all:disabled { opacity: 0.6; cursor: not-allowed; }
 
 /* CSV import */
 .csv-import {
