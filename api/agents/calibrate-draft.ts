@@ -93,7 +93,7 @@ export default async function handler(req: Request, res: Response) {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'unknown_error';
       await failRun(scope, run._id, msg);
-      return res.status(500).json({ error: 'agent_failed', detail: msg });
+      return res.status(500).json({ error: 'agent_failed' });
     }
   }
 
@@ -162,7 +162,7 @@ export default async function handler(req: Request, res: Response) {
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'unknown_error';
     await failRun(scope, run._id, msg);
-    return res.status(500).json({ error: 'agent_failed', detail: msg });
+    return res.status(500).json({ error: 'agent_failed' });
   }
 }
 

@@ -12,6 +12,7 @@
     "server:start": "node dist-server/server.cjs",
     "server:build": "esbuild server/index.ts --bundle --platform=node --format=cjs --packages=external --outfile=dist-server/server.cjs",
     "server:typecheck": "tsc -p tsconfig.server.json --noEmit",
+    "audit": "npm audit --omit=dev --audit-level=high",
     "test": "tsx --test api/**/*.test.ts",
     "mongo:init": "tsx scripts/init-mongo.ts",
     "migrate:from-supabase": "tsx scripts/migrate-from-supabase.ts",

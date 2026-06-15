@@ -82,7 +82,8 @@ export async function verifyEmail(email: string): Promise<VerifyVerdict> {
     }
     return parseVerifyResponse(payload);
   } catch (err) {
-    console.warn('email_verifier_failed', email, err);
+    // Log the domain only - never the full address (PII in logs; checklist #35).
+    console.warn('email_verifier_failed', email.split('@')[1] ?? 'unknown', err);
     return 'verified';
   }
 }

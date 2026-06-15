@@ -192,6 +192,6 @@ export default async function handler(req: Request, res: Response) {
       status: 'failed',
       failedReason: msg,
     });
-    return res.status(500).json({ error: 'send_failed', detail: msg });
+    return res.status(500).json({ error: 'send_failed' });
   }
 }

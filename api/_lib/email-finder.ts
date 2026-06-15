@@ -74,7 +74,8 @@ export async function findEmail(args: {
     });
     return { email: parseFindEmailResponse(raw), raw };
   } catch (err) {
-    console.warn('email_finder_failed', fullName, domain, err);
+    // Log the domain only - the contact's name is PII and stays out of logs (#35).
+    console.warn('email_finder_failed', domain, err);
     return { email: null, raw: null };
   }
 }

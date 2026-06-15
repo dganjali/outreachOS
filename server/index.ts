@@ -153,8 +153,13 @@ app.get('/api/storage-local/get', wrap(localGetHandler));
 app.use('/api/data', dataRouter);
 
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+  // Log the full error (message + stack) server-side only. NEVER return err.message
+  // to the client: unhandled errors here originate deep in the stack (Mongo driver,
+  // GCS, Stripe, the LLM SDK) and routinely embed connection strings, internal
+  // hostnames, query fragments, and stack-trace detail. Surface a stable opaque
+  // code to the caller instead. (Security checklist #12.)
   console.error('[unhandled]', err);
-  res.status(500).json({ error: 'internal_error', detail: err.message });
+  res.status(500).json({ error: 'internal_error' });
 });
 
 function wrap(handler: (req: Request, res: Response) => unknown | Promise<unknown>) {
