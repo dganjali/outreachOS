@@ -71,7 +71,7 @@ test('targeting selects top-N by score and seeds processing', async () => {
   assert.equal(r.phase, 'processing');
   assert.equal(r.status, 'running');
   assert.deepEqual(r.targets.map((t) => t.name), ['Acme', 'Globex']);
-  assert.deepEqual(r.cursor, { targetIndex: 0, step: 'evidence' });
+  assert.deepEqual(r.cursor, { targetIndex: 0, step: 'research' });
 });
 
 test('happy path completes every target through all three steps', async () => {
@@ -174,9 +174,11 @@ test('daily-limit pauses the run and preserves the cursor for resume', async () 
   });
   const end = await runToEnd(baseRun(), exec);
   assert.equal(end.status, 'paused');
-  // cursor still points at the contacts step of the first target
-  assert.deepEqual(end.cursor, { targetIndex: 0, step: 'contacts' });
+  // cursor still points at the research step; evidence (which succeeded
+  // concurrently) is persisted so the resume only retries contacts.
+  assert.deepEqual(end.cursor, { targetIndex: 0, step: 'research' });
   assert.equal(end.targets[0].evidence, 'done');
+  assert.equal(end.targets[0].contacts, 'queued');
 });
 
 test('rate-limit (per-minute) is retryable - it does not corrupt state', async () => {
@@ -192,6 +194,54 @@ test('rate-limit (per-minute) is retryable - it does not corrupt state', async (
   const end = await runToEnd(baseRun(), exec);
   assert.equal(end.status, 'done');
   assert.equal(end.targets[0].evidence, 'done');
+});
+
+test('research runs evidence and contacts concurrently', async () => {
+  let inFlight = 0;
+  let bothInFlight = false;
+  const gate = () => {
+    inFlight++;
+    if (inFlight === 2) bothInFlight = true;
+    return new Promise<void>((res) => setTimeout(res, 5)).then(() => {
+      inFlight--;
+    });
+  };
+  const exec = fakeExec({
+    targeting: async () => [{ id: 't1', name: 'Acme', score: 0.9 }],
+    evidence: async () => {
+      await gate();
+    },
+    contacts: async () => {
+      await gate();
+      return [{ id: 'c1', confidence: 0.8 }];
+    },
+  });
+  const end = await runToEnd(baseRun(), exec);
+  assert.equal(end.status, 'done');
+  assert.ok(bothInFlight, 'evidence and contacts overlap in a single research step');
+});
+
+test('a partial rate-limit retries only the unfinished sub-step (no duplicate calls)', async () => {
+  let evidenceCalls = 0;
+  let contactsCalls = 0;
+  const exec = fakeExec({
+    targeting: async () => [{ id: 't1', name: 'Acme', score: 0.9 }],
+    evidence: async () => {
+      evidenceCalls++;
+      if (evidenceCalls === 1) throw new PipelineRateLimitError('slow down'); // first pass only
+    },
+    contacts: async () => {
+      contactsCalls++;
+      return [{ id: 'c1', confidence: 0.8 }];
+    },
+  });
+  const end = await runToEnd(baseRun(), exec);
+  assert.equal(end.status, 'done');
+  // contacts succeeded on pass 1 and is NOT re-run when evidence retries on pass 2.
+  assert.equal(contactsCalls, 1, 'contacts is not duplicated on the partial retry');
+  assert.equal(evidenceCalls, 2, 'only evidence re-runs after its rate limit');
+  assert.equal(end.targets[0].evidence, 'done');
+  assert.equal(end.targets[0].contacts, 'done');
 });
 
 test('a canceled run is a no-op for the reducer', async () => {

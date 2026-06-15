@@ -423,9 +423,13 @@ export interface PipelineRunDoc extends BaseDoc {
   phase: 'targeting' | 'processing' | 'done';
   config: { targetCount: number; topN: number; topContacts: number };
   targets: PipelineTargetState[];
-  // Resume pointer into `targets`. `contactIndex` tracks which contact's draft is
-  // in flight during the 'sequence' step. null before targeting / after done.
-  cursor: { targetIndex: number; step: 'evidence' | 'contacts' | 'sequence'; contactIndex?: number } | null;
+  // Resume pointer into `targets`. The 'research' step runs evidence + contacts
+  // concurrently (their per-target status fields gate which sub-step still needs
+  // to run on a resume). `contactIndex` tracks which contact's draft is in flight
+  // during the 'sequence' step. null before targeting / after done. (Legacy runs
+  // may carry 'evidence'/'contacts'; the reducer treats anything != 'sequence' as
+  // 'research'.)
+  cursor: { targetIndex: number; step: 'research' | 'sequence'; contactIndex?: number } | null;
   note: string | null;
   error: string | null;
   // Bumped on every persisted step; a stale heartbeat means the driver died and

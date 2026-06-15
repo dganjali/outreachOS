@@ -447,28 +447,47 @@ export async function resolvePoolWithBudget(
     scraped = { domain, emails: [], pattern: null, pagesScraped: [] };
   }
 
-  // Sequential, top-down through the ranked pool. Bounded by both N kept and the
+  // Top-down through the ranked pool, but resolve each batch CONCURRENTLY instead
+  // of one candidate at a time (the per-candidate finder→verifier round-trips were
+  // the dominant per-target latency). Each batch is sized to exactly how many more
+  // deliverables we still need (capped by the remaining attempt budget), so the
+  // fan-out never resolves more candidates than the sequential walk would have -
+  // same finder/verifier spend, just parallelized. Bounded by both N kept and the
   // attempt cap so a bad domain can't burn the whole pool of finder credits.
   const kept: ContactRow[] = [];
   let attempts = 0;
-  for (const row of rows) {
-    if (kept.length >= TARGET_DELIVERABLE || attempts >= RESOLVE_ATTEMPT_CAP) break;
-    attempts++;
-    const resolved = await deps.resolve(
-      row.name,
-      domain,
-      { email: row.email, emailStatus: row.emailStatus, likelyEmailPattern: row.likelyEmailPattern },
-      scraped
+  let i = 0;
+  while (i < rows.length && kept.length < TARGET_DELIVERABLE && attempts < RESOLVE_ATTEMPT_CAP) {
+    const need = TARGET_DELIVERABLE - kept.length;
+    const budget = RESOLVE_ATTEMPT_CAP - attempts;
+    const batch = rows.slice(i, i + Math.min(need, budget));
+    i += batch.length;
+    attempts += batch.length;
+
+    const resolved = await Promise.all(
+      batch.map((row) =>
+        deps.resolve(
+          row.name,
+          domain,
+          { email: row.email, emailStatus: row.emailStatus, likelyEmailPattern: row.likelyEmailPattern },
+          scraped
+        )
+      )
     );
-    if (resolved.email) {
-      kept.push({
-        ...row,
-        email: resolved.email,
-        emailStatus: resolved.emailStatus,
-        likelyEmailPattern: resolved.likelyEmailPattern,
-        emailResolver: resolved.resolver,
-      });
-    }
+
+    // Keep deliverable rows in their ranked (batch) order; never exceed the cap.
+    batch.forEach((row, j) => {
+      const res = resolved[j];
+      if (res.email && kept.length < TARGET_DELIVERABLE) {
+        kept.push({
+          ...row,
+          email: res.email,
+          emailStatus: res.emailStatus,
+          likelyEmailPattern: res.likelyEmailPattern,
+          emailResolver: res.resolver,
+        });
+      }
+    });
   }
 
   // Empty-pool fallback: nothing came back deliverable → ship the top-ranked

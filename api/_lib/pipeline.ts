@@ -105,11 +105,27 @@ function finishProcessing(r: PipelineRunDoc): PipelineRunDoc {
 function toNextTarget(r: PipelineRunDoc): void {
   const next = (r.cursor?.targetIndex ?? 0) + 1;
   if (next < r.targets.length) {
-    r.cursor = { targetIndex: next, step: 'evidence' };
+    r.cursor = { targetIndex: next, step: 'research' };
     r.note = `Researching ${r.targets[next].name}…`;
   } else {
     finishProcessing(r);
   }
+}
+
+const isResolved = (s: PipelineStepStatus) => s === 'done' || s === 'failed';
+
+// Pick the contacts we draft for: top `topContacts` by reply-likelihood. Stored
+// on the target as soon as contacts resolves so the selection survives a partial
+// 'research' retry (when evidence rate-limits but contacts already succeeded).
+function selectContacts(
+  t: PipelineRunDoc['targets'][number],
+  contacts: Array<{ id: string; confidence: number | null }>,
+  topContacts: number,
+): void {
+  const ranked = [...contacts].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
+  t.contactIds = ranked.slice(0, Math.max(1, topContacts)).map((c) => c.id);
+  t.bestContactId = t.contactIds[0] ?? null;
+  t.sequences = t.contactIds.map(() => 'queued');
 }
 
 export async function advancePipeline(run: PipelineRunDoc, exec: PipelineExecutors): Promise<PipelineRunDoc> {
@@ -134,7 +150,7 @@ export async function advancePipeline(run: PipelineRunDoc, exec: PipelineExecuto
       bestContactId: null,
     }));
     r.phase = 'processing';
-    r.cursor = { targetIndex: 0, step: 'evidence' };
+    r.cursor = { targetIndex: 0, step: 'research' };
     r.note = `Researching ${top[0].name}…`;
     return r;
   }
@@ -143,46 +159,74 @@ export async function advancePipeline(run: PipelineRunDoc, exec: PipelineExecuto
   if (!r.cursor || r.cursor.targetIndex >= r.targets.length) return finishProcessing(r);
   const t = r.targets[r.cursor.targetIndex];
 
-  if (r.cursor.step === 'evidence') {
-    try {
-      await exec.evidence(t.targetId);
-      step(t, 'evidence', 'done');
-      r.cursor = { ...r.cursor, step: 'contacts' };
-      r.note = `Finding the right people at ${t.name}…`;
-    } catch (e) {
-      if (e instanceof PipelineRateLimitError) throw e; // driver waits + retries
-      if (e instanceof PipelineDailyLimitError) return pauseForDaily(r);
-      step(t, 'evidence', 'failed');
-      step(t, 'contacts', 'failed');
-      step(t, 'sequence', 'failed');
-      toNextTarget(r);
-    }
-    return r;
-  }
+  // 'research': run evidence + contacts CONCURRENTLY (contacts never reads the
+  // evidence pack; only 'sequence' needs both). Each sub-step is gated on its own
+  // persisted per-target status, so a retry never re-runs a completed sub-step -
+  // the key to staying idempotent when one sub-step rate-limits after the other
+  // already succeeded and persisted.
+  if (r.cursor.step !== 'sequence') {
+    r.cursor = { ...r.cursor, step: 'research' }; // normalize legacy 'evidence'/'contacts'
+    const jobs: Array<'evidence' | 'contacts'> = [];
+    if (!isResolved(t.evidence)) jobs.push('evidence');
+    if (!isResolved(t.contacts)) jobs.push('contacts');
 
-  if (r.cursor.step === 'contacts') {
-    try {
-      const contacts = await exec.contacts(t.targetId);
-      step(t, 'contacts', 'done');
-      // Pursue the top contacts by reply-likelihood, capped at the run's setting.
-      const ranked = [...contacts].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
-      t.contactIds = ranked.slice(0, Math.max(1, r.config.topContacts)).map((c) => c.id);
-      t.bestContactId = t.contactIds[0] ?? null;
-      t.sequences = t.contactIds.map(() => 'queued');
-      if (t.contactIds.length === 0) {
-        step(t, 'sequence', 'failed');
-        toNextTarget(r);
+    const settled = await Promise.allSettled(
+      jobs.map((j) => (j === 'evidence' ? exec.evidence(t.targetId) : exec.contacts(t.targetId)))
+    );
+
+    let rateLimited = false;
+    let dailyLimited = false;
+    let resolvedThisPass = false; // a sub-step reached a terminal state this pass
+    settled.forEach((res, idx) => {
+      const job = jobs[idx];
+      if (res.status === 'fulfilled') {
+        resolvedThisPass = true;
+        if (job === 'evidence') {
+          step(t, 'evidence', 'done');
+        } else {
+          step(t, 'contacts', 'done');
+          selectContacts(t, (res.value ?? []) as Array<{ id: string; confidence: number | null }>, r.config.topContacts);
+        }
       } else {
-        r.cursor = { ...r.cursor, step: 'sequence', contactIndex: 0 };
-        r.note = draftNote(t, 0);
+        const e = res.reason;
+        if (e instanceof PipelineRateLimitError) rateLimited = true;
+        else if (e instanceof PipelineDailyLimitError) dailyLimited = true;
+        else {
+          step(t, job, 'failed');
+          resolvedThisPass = true;
+        }
       }
-    } catch (e) {
-      if (e instanceof PipelineRateLimitError) throw e;
-      if (e instanceof PipelineDailyLimitError) return pauseForDaily(r);
+    });
+
+    // Still incomplete ⇒ a limit error left a sub-step queued.
+    if (!isResolved(t.evidence) || !isResolved(t.contacts)) {
+      // Nothing advanced this pass: hand control back to the driver so it backs
+      // off (per-minute) or pauses (per-day) instead of busy-spinning.
+      if (!resolvedThisPass) {
+        if (rateLimited) throw new PipelineRateLimitError('rate_limited');
+        if (dailyLimited) return pauseForDaily(r);
+      }
+      // Partial success this pass: persist it and stay on 'research'. The next
+      // advance re-runs ONLY the unfinished sub-step (the done one is skipped).
+      if (dailyLimited) return pauseForDaily(r);
+      return r;
+    }
+
+    // Both resolved. Evidence is the precondition for drafting (sequence requires
+    // an evidence pack), so a failed evidence fails the whole target.
+    if (t.evidence === 'failed') {
       step(t, 'contacts', 'failed');
       step(t, 'sequence', 'failed');
       toNextTarget(r);
+      return r;
     }
+    if (t.contacts === 'failed' || t.contactIds.length === 0) {
+      step(t, 'sequence', 'failed');
+      toNextTarget(r);
+      return r;
+    }
+    r.cursor = { targetIndex: r.cursor.targetIndex, step: 'sequence', contactIndex: 0 };
+    r.note = draftNote(t, 0);
     return r;
   }
 
