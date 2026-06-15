@@ -90,6 +90,29 @@ describe('resolvePoolWithBudget', () => {
     assert.equal(calls(), 0, 'no domain → no resolver calls');
     assert.ok(out.every((r) => r.emailResolver === 'none'));
   });
+
+  it('resolves a batch concurrently rather than one-at-a-time', async () => {
+    // Gate every resolve on a barrier that only releases once TARGET_DELIVERABLE
+    // calls are in flight - this only completes if the walk fans them out.
+    let inFlight = 0;
+    let maxInFlight = 0;
+    let release!: () => void;
+    const barrier = new Promise<void>((r) => (release = r));
+    const deps: ResolvePoolDeps = {
+      scrape: async () => emptyScrape,
+      resolve: async (name, domain): Promise<ResolvedEmail> => {
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        if (inFlight >= 3) release();
+        await barrier;
+        inFlight--;
+        return { email: `${name.toLowerCase()}@${domain}`, emailStatus: 'verified', likelyEmailPattern: null, resolver: 'verifier' };
+      },
+    };
+    const out = await resolvePoolWithBudget(['A', 'B', 'C'].map(row), 'acme.co', 't1', deps);
+    assert.equal(out.length, 3);
+    assert.equal(maxInFlight, 3, 'the three needed candidates resolve in parallel');
+  });
 });
 
 // ---------------------------------------------------------------------------

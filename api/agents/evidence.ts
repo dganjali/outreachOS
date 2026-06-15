@@ -71,23 +71,25 @@ export default async function handler(req: Request, res: Response) {
       recency: b.recency,
     }));
 
-    // Embed the concatenated bullets for vector search.
-    let embedding: number[] | undefined;
-    try {
-      const txt = bullets.map((b) => b.fact).join('\n');
-      embedding = await embedOne(txt, 'document');
-    } catch (err) {
-      console.warn('embed_evidence_failed', err);
-    }
-
     const pack = await scope.collection<EvidencePackDoc>('evidence_packs').insertOne({
       _id: newId(),
       targetId: target_id,
       missionId: mission._id,
       bullets,
       citations: parsed.citations,
-      ...(embedding ? { embedding } : {}),
     } as InsertDoc<EvidencePackDoc>);
+
+    // Embed off the critical path - the vector only feeds downstream Atlas Vector
+    // Search, so don't make the caller (pipeline driver) wait on it. Best-effort.
+    void (async () => {
+      try {
+        const txt = bullets.map((b) => b.fact).join('\n');
+        const embedding = await embedOne(txt, 'document');
+        await scope.collection<EvidencePackDoc>('evidence_packs').updateById(pack._id, { embedding } as Partial<EvidencePackDoc>);
+      } catch (err) {
+        console.warn('embed_evidence_failed', err);
+      }
+    })();
 
     await completeRun(scope, run._id, { evidence_pack_id: pack._id, count: bullets.length });
     return res.status(200).json({ run_id: run._id, evidence_pack: pack });
