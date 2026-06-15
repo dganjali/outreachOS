@@ -205,8 +205,7 @@ function buildRfc2822(args: {
   ];
   if (args.inReplyTo) headers.push(`In-Reply-To: ${sanitizeHeader(args.inReplyTo)}`);
   if (args.references) headers.push(`References: ${sanitizeHeader(args.references)}`);
-  const footer = '\r\n\r\n--\r\nTo stop receiving these emails, reply with "UNSUBSCRIBE" in the subject line.';
-  return `${headers.join('\r\n')}\r\n\r\n${args.body.replace(/\r?\n/g, '\r\n')}${footer}`;
+  return `${headers.join('\r\n')}\r\n\r\n${args.body.replace(/\r?\n/g, '\r\n')}`;
 }
 
 function quoteIfNeeded(s: string): string {
