@@ -1,7 +1,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { defaultContactIcp, normalizeIcp, MODE_ICP_PRIOR } from './icp';
-import type { MissionMode } from '../../shared/types';
+import { defaultContactIcp, normalizeIcp, buildContactTypeOptions, MODE_ICP_PRIOR } from './icp';
+import { SENIORITY_RANK } from './seniority';
+import type { MissionMode, SeniorityLevel } from '../../shared/types';
 
 const MODES: MissionMode[] = ['sponsorship', 'bd', 'internship', 'recruiting', 'sales'];
 
@@ -71,5 +72,32 @@ describe('normalizeIcp', () => {
   it('ignores an invalid geo_scope', () => {
     const icp = normalizeIcp('sales', null, { functions: ['ops'], geo_scope: 'galaxy' } as never);
     assert.equal(icp.geo.scope, 'global'); // falls back to default
+  });
+});
+
+describe('buildContactTypeOptions', () => {
+  it('maps every ICP function to a recommended option, ids unique', () => {
+    const icp = defaultContactIcp('sponsorship');
+    const { functions } = buildContactTypeOptions(icp);
+    assert.equal(functions.length, icp.functions.length);
+    assert.ok(functions.every((o) => o.kind === 'function' && o.recommended));
+    assert.equal(new Set(functions.map((o) => o.id)).size, functions.length);
+    // values round-trip back to the raw ICP functions
+    assert.deepEqual(functions.map((o) => o.value), icp.functions);
+  });
+
+  it('offers the ideal band (recommended) and lets the user widen up to maxLevel', () => {
+    const icp = defaultContactIcp('sponsorship'); // ideal manager..director, cap director
+    const { seniority } = buildContactTypeOptions(icp);
+    const byValue = new Map(seniority.map((o) => [o.value, o]));
+    // every ideal level present and pre-checked
+    for (const lvl of icp.seniority.idealLevels) {
+      assert.ok(byValue.get(lvl)?.recommended, `expected ${lvl} recommended`);
+    }
+    // never offers anything above the hard cap
+    assert.ok(!seniority.some((o) => o.value === 'vp' || o.value === 'cxo' || o.value === 'founder'));
+    // sorted junior → senior
+    const ranks = seniority.map((o) => SENIORITY_RANK[o.value as SeniorityLevel]);
+    assert.deepEqual(ranks, [...ranks].sort((a, b) => a - b));
   });
 });

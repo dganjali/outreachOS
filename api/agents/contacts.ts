@@ -29,7 +29,7 @@ import {
   SENIORITY_RANK,
   type Band,
 } from '../_lib/seniority';
-import type { ContactIcp, SeniorityLevel, SizeTier } from '../../shared/types';
+import type { ContactIcp, ContactTypeFilter, SeniorityLevel, SizeTier } from '../../shared/types';
 import type { ContactDoc, MissionDoc, ProfileDoc, TargetDoc } from '../../shared/schemas';
 
 export interface ContactSuggestion {
@@ -59,7 +59,10 @@ export default async function handler(req: Request, res: Response) {
   const scope = forUser(user.id);
   if (!(await checkRateLimit(scope, res))) return;
 
-  const { target_id } = (req.body ?? {}) as { target_id?: string };
+  const { target_id, contact_type_filter } = (req.body ?? {}) as {
+    target_id?: string;
+    contact_type_filter?: ContactTypeFilter;
+  };
   if (!target_id) return res.status(400).json({ error: 'missing_target_id' });
 
   const target = await scope.collection<TargetDoc>('targets').findById(target_id);
@@ -79,7 +82,10 @@ export default async function handler(req: Request, res: Response) {
 
   // The adaptive spec of WHO to reach (CONTACT_ENGINE.md §2). Generated once per
   // mission and cached; size tier is resolved per target so the band shifts.
-  const icp = await getOrCreateContactIcp(scope, mission, mode);
+  const baseIcp = await getOrCreateContactIcp(scope, mission, mode);
+  // Narrow WHO we look for to the user's selection (if any) before discovery;
+  // scoring/ranking already keys off the ICP, so nothing downstream changes.
+  const icp = narrowIcpBySelection(baseIcp, contact_type_filter);
   const employeeCount = await getTargetSize(scope, target, domain);
   const sizeTier = sizeTierFromCount(employeeCount);
 
@@ -144,7 +150,7 @@ export default async function handler(req: Request, res: Response) {
 type Scope = ReturnType<typeof forUser>;
 
 /** Lazily synthesize + cache the mission's ICP; always reflect current geo. */
-async function getOrCreateContactIcp(scope: Scope, mission: MissionDoc, mode: MissionMode): Promise<ContactIcp> {
+export async function getOrCreateContactIcp(scope: Scope, mission: MissionDoc, mode: MissionMode): Promise<ContactIcp> {
   const geo = mission.geo ?? null;
   if (mission.contactIcp) {
     return { ...mission.contactIcp, geo: { ...mission.contactIcp.geo, preferred: geo?.trim() || mission.contactIcp.geo.preferred } };
@@ -167,6 +173,47 @@ async function getOrCreateContactIcp(scope: Scope, mission: MissionDoc, mode: Mi
     console.warn('persist_contact_icp_failed', mission._id, err);
   }
   return icp;
+}
+
+/**
+ * Narrow the ICP to the user's selected contact types. Purely subtractive: we
+ * only ever keep functions/levels the ICP already had, never introduce new ones,
+ * and never raise `maxLevel` (the size-relative cap in seniority.ts still
+ * applies). Any field that would narrow to empty falls back to the full ICP set,
+ * so a stray/empty selection can't produce a zero-function or zero-level ICP
+ * (which would break query construction and scoring). No selection ⇒ unchanged.
+ */
+export function narrowIcpBySelection(icp: ContactIcp, filter?: ContactTypeFilter): ContactIcp {
+  if (!filter) return icp;
+
+  // Functions: intersect with the user's picks (case-insensitive); empty ⇒ keep all.
+  const wantFns = new Set((filter.functions ?? []).map((f) => f.trim().toLowerCase()).filter(Boolean));
+  const keptFns = wantFns.size ? icp.functions.filter((f) => wantFns.has(f.toLowerCase())) : icp.functions;
+  const functions = keptFns.length ? keptFns : icp.functions;
+
+  // Seniority: keep chosen ideal levels that are valid; empty ⇒ keep the band.
+  const wantLevels = (filter.seniority ?? []).filter((l) => l in SENIORITY_RANK);
+  const keptLevels = wantLevels.length ? wantLevels : icp.seniority.idealLevels;
+  const idealLevels = keptLevels.length ? keptLevels : icp.seniority.idealLevels;
+
+  // Restrict query synonyms to the kept functions when we actually narrowed, so
+  // Serper queries don't reintroduce a dropped function. Guard against empty.
+  let functionKeywords = icp.functionKeywords;
+  if (wantFns.size && functions.length) {
+    const narrowed = icp.functionKeywords.filter((kw) =>
+      functions.some(
+        (f) => f.toLowerCase().includes(kw.toLowerCase()) || kw.toLowerCase().includes(f.toLowerCase())
+      )
+    );
+    if (narrowed.length) functionKeywords = narrowed;
+  }
+
+  return {
+    ...icp,
+    functions,
+    functionKeywords,
+    seniority: { idealLevels, maxLevel: icp.seniority.maxLevel },
+  };
 }
 
 /** Resolve + cache the target's headcount so the seniority band can shift. */

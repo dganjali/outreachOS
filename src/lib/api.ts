@@ -206,6 +206,17 @@ export interface PipelineTargetView {
   best_contact_id: string | null;
 }
 
+// A "type of person to reach out to" the user can toggle before a run. Mirrors
+// the server's ContactTypeOption (authedFetch snake-cases keys, but these are
+// already single-word/no-case so they arrive unchanged).
+export interface ContactTypeOptionView {
+  id: string;
+  kind: 'function' | 'seniority';
+  label: string;
+  value: string;
+  recommended: boolean;
+}
+
 export interface PipelineRunView {
   id: string;
   mission_id: string;
@@ -213,7 +224,13 @@ export interface PipelineRunView {
   phase: 'targeting' | 'processing' | 'done';
   note: string | null;
   error: string | null;
-  config: { target_count: number; top_n: number; top_contacts: number };
+  config: {
+    target_count: number;
+    top_n: number;
+    top_contacts: number;
+    selected_functions?: string[];
+    selected_seniority?: string[];
+  };
   cursor: { target_index: number; step: PipelineStep; contact_index?: number } | null;
   targets: PipelineTargetView[];
   started_at: string;
@@ -221,13 +238,29 @@ export interface PipelineRunView {
 }
 
 export const pipeline = {
-  start: (mission_id: string, count?: number, top_n?: number, top_contacts?: number) =>
+  start: (
+    mission_id: string,
+    count?: number,
+    top_n?: number,
+    top_contacts?: number,
+    selected_functions?: string[],
+    selected_seniority?: string[]
+  ) =>
     authedFetch<{ data: PipelineRunView; already_running?: boolean }>('/api/agents/pipeline', {
       mission_id,
       count,
       top_n,
       top_contacts,
+      selected_functions,
+      selected_seniority,
     }),
+  // The AI-proposed menu of contact types for a mission (functions + seniority).
+  contactTypes: (mission_id: string) =>
+    authedFetch<{ data: { functions: ContactTypeOptionView[]; seniority: ContactTypeOptionView[] } }>(
+      `/api/agents/pipeline?contact_types=1&mission_id=${encodeURIComponent(mission_id)}`,
+      null,
+      'GET'
+    ),
   status: (run_id: string) =>
     authedFetch<{ data: PipelineRunView }>(`/api/agents/pipeline?run_id=${encodeURIComponent(run_id)}`, null, 'GET'),
   latestForMission: (mission_id: string) =>
