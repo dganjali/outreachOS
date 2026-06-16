@@ -109,13 +109,6 @@ export default async function handler(req: Request, res: Response) {
 
     const followups = await generateFollowups(ctx.recipient.name, mission.goal, subject, body, ctx.sender?.name ?? null);
 
-    let embedding: number[] | undefined;
-    try {
-      embedding = await embedOne(`${subject}\n\n${body}`, 'document');
-    } catch (err) {
-      console.warn('embed_sequence_failed', err);
-    }
-
     const row = await scope.collection<EmailSequenceDoc>('email_sequences').insertOne({
       _id: newId(),
       contactId: contact_id,
@@ -134,8 +127,18 @@ export default async function handler(req: Request, res: Response) {
       scheduledSendAt: null,
       sentAt: null,
       profileVersionId: null,
-      ...(embedding ? { embedding } : {}),
     } as InsertDoc<EmailSequenceDoc>);
+
+    // Embed off the critical path - the vector only feeds downstream search, so
+    // don't make the caller wait on it. Best-effort.
+    void (async () => {
+      try {
+        const embedding = await embedOne(`${subject}\n\n${body}`, 'document');
+        await scope.collection<EmailSequenceDoc>('email_sequences').updateById(row._id, { embedding } as Partial<EmailSequenceDoc>);
+      } catch (err) {
+        console.warn('embed_sequence_failed', err);
+      }
+    })();
 
     await completeRun(scope, run._id, {
       sequence_id: row._id,

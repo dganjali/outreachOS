@@ -1,8 +1,9 @@
 // Unit tests for the parallel pipeline processor (runPipeline). These exercise
 // the durable state machine directly with fake executors + a fake persist - no
 // Mongo, no network - covering targeting selection, the parallel happy path,
-// partial failures, the daily-limit pause/resume, per-minute retry, and that
-// targets actually run concurrently.
+// partial failures, the daily-limit pause/resume, per-minute retry, that
+// targets run concurrently, and that evidence + contacts run as one research
+// phase.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -51,8 +52,7 @@ function fakeExec(over: Partial<PipelineExecutors> = {}): PipelineExecutors {
 }
 
 // A context wired to fake executors. Persist/sleep are no-ops; concurrency and a
-// zero stagger keep tests fast and deterministic. `latest` captures the run the
-// processor returns. Cancel is observed via a mutable flag the test can flip.
+// zero stagger keep tests fast and deterministic.
 function ctxFor(exec: PipelineExecutors, over: Partial<ProcContext> = {}): ProcContext {
   return {
     exec,
@@ -89,6 +89,31 @@ test('happy path completes every target through all three steps', async () => {
     assert.equal(t.sequence, 'done');
     assert.equal(t.bestContactId, 'c1');
   }
+});
+
+test('evidence and contacts run concurrently within a target', async () => {
+  let bothInFlight = false;
+  let evidenceRunning = false;
+  let contactsRunning = false;
+  const exec = fakeExec({
+    targeting: async () => [{ id: 't1', name: 'Acme', score: 0.9 }],
+    evidence: async () => {
+      evidenceRunning = true;
+      await new Promise((r) => setTimeout(r, 5));
+      if (contactsRunning) bothInFlight = true;
+      evidenceRunning = false;
+    },
+    contacts: async () => {
+      contactsRunning = true;
+      await new Promise((r) => setTimeout(r, 5));
+      if (evidenceRunning) bothInFlight = true;
+      contactsRunning = false;
+      return [{ id: 'c1', confidence: 0.8 }];
+    },
+  });
+  const end = await runPipeline(baseRun({ config: { targetCount: 8, topN: 1, topContacts: 1 } }), ctxFor(exec));
+  assert.equal(end.status, 'done');
+  assert.ok(bothInFlight, 'evidence and contacts should overlap');
 });
 
 test('topContacts drafts the top N contacts per target', async () => {
@@ -150,7 +175,7 @@ test('a failing evidence step marks the whole target failed; others still comple
   const t1 = end.targets.find((t) => t.targetId === 't1')!;
   const t2 = end.targets.find((t) => t.targetId === 't2')!;
   assert.equal(t1.evidence, 'failed');
-  assert.equal(t1.contacts, 'failed');
+  assert.equal(t1.contacts, 'failed'); // evidence is the precondition - cascades
   assert.equal(t1.sequence, 'failed');
   assert.equal(t2.evidence, 'done');
   assert.equal(t2.sequence, 'done');
@@ -168,8 +193,6 @@ test('a target with no contacts fails only the draft step', async () => {
 });
 
 test('daily-limit pauses the run and preserves untouched targets for resume', async () => {
-  // Slow evidence so the daily-limit (thrown on the first contacts call) lands
-  // while other targets are still early - they must stay queued, not run.
   const exec = fakeExec({
     targeting: async () => [
       { id: 't1', name: 'Acme', score: 0.9 },
@@ -187,8 +210,8 @@ test('daily-limit pauses the run and preserves untouched targets for resume', as
   );
   assert.equal(end.status, 'paused');
   const t1 = end.targets.find((t) => t.targetId === 't1')!;
-  assert.equal(t1.evidence, 'done');
-  assert.equal(t1.contacts, 'queued'); // reverted so resume re-runs it
+  assert.equal(t1.evidence, 'done'); // evidence succeeded in the research phase
+  assert.equal(t1.contacts, 'queued'); // reverted so resume re-runs only contacts
   // Targets never reached stay fully queued.
   for (const id of ['t2', 't3']) {
     const t = end.targets.find((x) => x.targetId === id)!;

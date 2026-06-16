@@ -7,17 +7,20 @@
 //     target carries its own step statuses (evidence/contacts/sequence and the
 //     per-contact `sequences[]`), so progress is tracked per-target rather than
 //     through a single cursor.
-//   • Targets are independent: a target's evidence → contacts → sequence chain
-//     never depends on another target's. So the driver fans out across targets
-//     with *bounded* concurrency (and overlaps a target's contact-drafts too).
-//     Within one target the chain stays serial because each step feeds the next.
+//   • Targets are independent: a target's research/draft work never depends on
+//     another target's. So the driver fans out across targets with *bounded*
+//     concurrency. Within one target, evidence + contacts run concurrently (the
+//     "research" phase - contacts never reads the evidence pack; only the draft
+//     step needs both), then the contact drafts overlap. So we parallelize both
+//     across targets and within each target's independent work.
 //   • Concurrency is bounded and launches are staggered. The per-minute LLM
 //     quota and the (non-atomic) daily run cap in runs.ts both punish bursts, so
 //     we keep a small pool and start workers a beat apart.
 //   • Every transition persists and writes a heartbeat, so a dropped connection
 //     or a restarted instance loses nothing - any later poll re-drives the run,
 //     and because each step keys off the target's persisted status the work is
-//     idempotent on resume (`resumeIfStale`).
+//     idempotent on resume (`resumeIfStale`), down to re-running only the one
+//     research sub-step that a rate limit left unfinished.
 
 import { forUser, newId, type UserScope } from './db';
 import type { AuthedUser } from './auth';
@@ -138,6 +141,22 @@ function step(t: PipelineTargetState, key: 'evidence' | 'contacts' | 'sequence',
   t[key] = s;
 }
 
+const isResolved = (s: PipelineStepStatus) => s === 'done' || s === 'failed';
+
+// Pick the contacts we draft for: top `topContacts` by reply-likelihood. Stored
+// on the target as soon as contacts resolves so the selection survives a partial
+// 'research' retry (when evidence rate-limits but contacts already succeeded).
+function selectContacts(
+  t: PipelineTargetState,
+  contacts: Array<{ id: string; confidence: number | null }>,
+  topContacts: number,
+): void {
+  const ranked = [...contacts].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
+  t.contactIds = ranked.slice(0, Math.max(1, topContacts)).map((c) => c.id);
+  t.bestContactId = t.contactIds[0] ?? null;
+  t.sequences = t.contactIds.map(() => 'queued');
+}
+
 function finishProcessing(r: PipelineRunDoc): PipelineRunDoc {
   r.phase = 'done';
   r.status = 'done';
@@ -198,68 +217,72 @@ async function runStep<T>(ctx: ProcContext, fn: () => Promise<T>): Promise<T> {
 
 const halted = (ctx: ProcContext) => ctx.paused || ctx.canceled;
 
-/** Run evidence → contacts → sequence for ONE target, resuming from whatever its
- *  persisted statuses already say is done. Mutates `t` in place and persists
- *  after each transition. Sets ctx.paused on a daily-limit so the pool drains. */
-async function processTarget(r: PipelineRunDoc, t: PipelineTargetState, ctx: ProcContext): Promise<void> {
-  // --- evidence ---
-  if (t.evidence !== 'done') {
-    if (halted(ctx)) return;
-    step(t, 'evidence', 'running');
-    await ctx.persist(r);
-    try {
-      await runStep(ctx, () => ctx.exec.evidence(t.targetId));
-      step(t, 'evidence', 'done');
-    } catch (e) {
-      if (e instanceof PipelineDailyLimitError) {
-        ctx.paused = true;
-        step(t, 'evidence', 'queued'); // revert so resume re-runs cleanly
-        await ctx.persist(r);
-        return;
-      }
-      step(t, 'evidence', 'failed');
-      step(t, 'contacts', 'failed');
-      step(t, 'sequence', 'failed');
-      r.note = progressNote(r);
-      await ctx.persist(r);
+/** Run the evidence sub-step, recording its terminal status on the target. */
+async function runEvidence(t: PipelineTargetState, ctx: ProcContext): Promise<void> {
+  try {
+    await runStep(ctx, () => ctx.exec.evidence(t.targetId));
+    step(t, 'evidence', 'done');
+  } catch (e) {
+    if (e instanceof PipelineDailyLimitError) {
+      ctx.paused = true;
+      step(t, 'evidence', 'queued'); // revert so resume re-runs only this sub-step
       return;
     }
-    await ctx.persist(r);
+    step(t, 'evidence', 'failed');
   }
+}
 
-  // --- contacts ---
-  if (t.contacts !== 'done') {
+/** Run the contacts sub-step, recording status + the pursued-contact selection. */
+async function runContacts(r: PipelineRunDoc, t: PipelineTargetState, ctx: ProcContext): Promise<void> {
+  try {
+    const contacts = await runStep(ctx, () => ctx.exec.contacts(t.targetId));
+    step(t, 'contacts', 'done');
+    selectContacts(t, contacts, r.config.topContacts);
+  } catch (e) {
+    if (e instanceof PipelineDailyLimitError) {
+      ctx.paused = true;
+      step(t, 'contacts', 'queued');
+      return;
+    }
+    step(t, 'contacts', 'failed');
+  }
+}
+
+/** Process ONE target: research (evidence + contacts concurrent) → drafts.
+ *  Resumes from whatever its persisted statuses already say is done; mutates `t`
+ *  in place and persists after each transition. Sets ctx.paused on a daily-limit
+ *  so the pool drains. */
+async function processTarget(r: PipelineRunDoc, t: PipelineTargetState, ctx: ProcContext): Promise<void> {
+  // --- research: evidence + contacts run concurrently (independent work) ---
+  if (!isResolved(t.evidence) || !isResolved(t.contacts)) {
     if (halted(ctx)) return;
-    step(t, 'contacts', 'running');
+    if (!isResolved(t.evidence)) step(t, 'evidence', 'running');
+    if (!isResolved(t.contacts)) step(t, 'contacts', 'running');
     await ctx.persist(r);
-    try {
-      const contacts = await runStep(ctx, () => ctx.exec.contacts(t.targetId));
-      step(t, 'contacts', 'done');
-      // Pursue the top contacts by reply-likelihood, capped at the run's setting.
-      const ranked = [...contacts].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
-      t.contactIds = ranked.slice(0, Math.max(1, r.config.topContacts)).map((c) => c.id);
-      t.bestContactId = t.contactIds[0] ?? null;
-      t.sequences = t.contactIds.map(() => 'queued');
-    } catch (e) {
-      if (e instanceof PipelineDailyLimitError) {
-        ctx.paused = true;
-        step(t, 'contacts', 'queued');
-        await ctx.persist(r);
-        return;
-      }
+
+    const subs: Array<Promise<void>> = [];
+    if (!isResolved(t.evidence)) subs.push(runEvidence(t, ctx));
+    if (!isResolved(t.contacts)) subs.push(runContacts(r, t, ctx));
+    await Promise.all(subs);
+    await ctx.persist(r);
+
+    if (halted(ctx)) return; // a sub-step hit the daily cap and reverted to queued
+
+    // Evidence is the precondition for drafting (the draft step needs the pack),
+    // so a failed evidence fails the whole target.
+    if (t.evidence === 'failed') {
       step(t, 'contacts', 'failed');
       step(t, 'sequence', 'failed');
       r.note = progressNote(r);
       await ctx.persist(r);
       return;
     }
-    if (t.contactIds.length === 0) {
+    if (t.contacts === 'failed' || t.contactIds.length === 0) {
       step(t, 'sequence', 'failed');
       r.note = progressNote(r);
       await ctx.persist(r);
       return;
     }
-    await ctx.persist(r);
   }
 
   // --- sequence: draft each pursued contact, a couple at a time ---

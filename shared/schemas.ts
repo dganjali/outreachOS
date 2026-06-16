@@ -427,8 +427,9 @@ export interface PipelineRunDoc extends BaseDoc {
   targets: PipelineTargetState[];
   // Legacy resume pointer. Processing now runs targets in parallel and tracks
   // progress via each target's per-step status (below), so this stays null during
-  // parallel processing. Kept optional for back-compat / no migration.
-  cursor: { targetIndex: number; step: 'evidence' | 'contacts' | 'sequence'; contactIndex?: number } | null;
+  // parallel processing. Kept optional for back-compat / no migration; the union
+  // still admits values older/remote runs may carry ('research' = evidence+contacts).
+  cursor: { targetIndex: number; step: 'research' | 'evidence' | 'contacts' | 'sequence'; contactIndex?: number } | null;
   note: string | null;
   error: string | null;
   // Bumped on every persisted step; a stale heartbeat means the driver died and
