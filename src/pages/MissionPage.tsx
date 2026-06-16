@@ -7,6 +7,7 @@ import { useConfirm } from '../context/ConfirmContext';
 import { agents, gmail } from '../lib/api';
 import { asScore } from '../lib/score';
 import { CsvImport } from '../components/CsvImport';
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '../components/ui/accordion';
 import type {
   Mission,
   Target,
@@ -315,6 +316,9 @@ export function MissionPage() {
 
   const totalContacts = allContacts.length;
   const totalDrafts = Object.values(sequencesByContact).filter(Boolean).length;
+  // Companies the pipeline dropped for having no reachable contact are marked
+  // 'rejected' - keep them out of the output so the user only sees real targets.
+  const visibleTargets = targets.filter((t) => t.status !== 'rejected');
 
   return (
     <div className="mission-detail">
@@ -327,7 +331,7 @@ export function MissionPage() {
           <h1 style={{ margin: 0 }}>{mission.name}</h1>
           <p className="mission-detail-meta">
             <span className="mode-pill">{MODE_LABEL[mission.mode] ?? mission.mode}</span>
-            <span>· {targets.length} targets · {totalContacts} contacts · {totalDrafts} drafts</span>
+            <span>· {visibleTargets.length} targets · {totalContacts} contacts · {totalDrafts} drafts</span>
           </p>
         </div>
         <div className="mission-detail-actions">
@@ -383,7 +387,7 @@ export function MissionPage() {
 
       <section>
         <h2 style={{ marginBottom: '0.75rem' }}>Targets</h2>
-        {targets.length === 0 ? (
+        {visibleTargets.length === 0 ? (
           <div className="empty-illo">
             <div className="empty-illo-graphic" aria-hidden>🎯</div>
             <h3>No targets yet</h3>
@@ -392,37 +396,52 @@ export function MissionPage() {
             </p>
           </div>
         ) : (
-          <div className="target-list">
-            {targets.map((t) => {
+          <Accordion
+            type="multiple"
+            className="target-accordion"
+            defaultValue={visibleTargets[0] ? [visibleTargets[0].id] : []}
+          >
+            {visibleTargets.map((t) => {
               const contacts = contactsByTarget[t.id] ?? [];
               const pack = packsByTarget[t.id];
-              const isActive = activeTargetId === t.id;
               const score = asScore(t.score);
+              const draftCount = contacts.filter((c) => sequencesByContact[c.id]).length;
               return (
-                <article
+                <AccordionItem
                   key={t.id}
-                  className={`target-card ${isActive ? 'active' : ''} status-${t.status}`}
+                  value={t.id}
+                  className={`target-item status-${t.status} ${activeTargetId === t.id ? 'active' : ''}`}
                 >
-                  <header className="target-card-header">
-                    <div className="target-card-title">
-                      <h3>{t.company_name}</h3>
-                      {t.domain && (
-                        <a href={`https://${t.domain}`} target="_blank" rel="noreferrer" className="target-domain">
-                          {t.domain} ↗
-                        </a>
-                      )}
+                  <AccordionTrigger className="target-trigger">
+                    <span className="target-summary">
+                      <span className="target-summary-name">{t.company_name}</span>
                       {score != null && (
                         <span className="target-score" title="Fit score">
                           {score}
                         </span>
                       )}
                       {t.signal_type && <span className="signal-pill">{t.signal_type}</span>}
+                      <span className="target-summary-spacer" />
+                      <span className="target-summary-meta">
+                        {contacts.length > 0
+                          ? `${contacts.length} contact${contacts.length === 1 ? '' : 's'}`
+                          : 'No contacts yet'}
+                        {draftCount > 0 && ` · ${draftCount} draft${draftCount === 1 ? '' : 's'}`}
+                      </span>
+                    </span>
+                  </AccordionTrigger>
+                  <AccordionContent className="target-content">
+                    <div className="target-content-head">
+                      {t.domain && (
+                        <a href={`https://${t.domain}`} target="_blank" rel="noreferrer" className="target-domain">
+                          {t.domain} ↗
+                        </a>
+                      )}
                       {t.industry && <span className="signal-pill subtle">{t.industry}</span>}
                       {typeof t.employee_count === 'number' && (
                         <span className="signal-pill subtle">{t.employee_count.toLocaleString()} ppl</span>
                       )}
-                    </div>
-                    <div className="target-card-actions">
+                      <span className="target-summary-spacer" />
                       <select
                         value={t.status}
                         onChange={(e) => setTargetStatus(t, e.target.value as Target['status'])}
@@ -441,7 +460,6 @@ export function MissionPage() {
                         ×
                       </button>
                     </div>
-                  </header>
                   {t.why_now && <p className="target-whynow"><strong>Why now:</strong> {t.why_now}</p>}
                   {t.fit_reason && <p className="target-fit">{t.fit_reason}</p>}
 
@@ -560,10 +578,11 @@ export function MissionPage() {
                       })}
                     </div>
                   )}
-                </article>
+                  </AccordionContent>
+                </AccordionItem>
               );
             })}
-          </div>
+          </Accordion>
         )}
       </section>
     </div>
@@ -571,7 +590,9 @@ export function MissionPage() {
 }
 
 function SequenceCard({ sequence, contact }: { sequence: EmailSequence; contact: Contact }) {
-  const [open, setOpen] = useState(true);
+  // Collapsed by default: inside an expanded company, auto-opening every draft is
+  // exactly the wall-of-text the accordion hierarchy is meant to avoid.
+  const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   const [sending, setSending] = useState<string | null>(null);
   const [sendErr, setSendErr] = useState<string | null>(null);

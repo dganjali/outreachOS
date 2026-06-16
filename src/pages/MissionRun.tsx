@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Check } from 'lucide-react';
 import { supabase } from '../supabaseClient';
@@ -83,8 +84,13 @@ export function MissionRun() {
   const [companies, setCompanies] = useState(DEFAULT_COMPANIES);
   const [contacts, setContacts] = useState(DEFAULT_CONTACTS);
   const [priorRun, setPriorRun] = useState<PipelineRunView | null>(null);
-  const [typeOpts, setTypeOpts] = useState<{ functions: ContactTypeOptionView[]; seniority: ContactTypeOptionView[] } | null>(null);
-  const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
+  const [typeOpts, setTypeOpts] = useState<{
+    functions: ContactTypeOptionView[];
+    seniority: ContactTypeOptionView[];
+    sectors: ContactTypeOptionView[];
+  } | null>(null);
+  const [selectedPeople, setSelectedPeople] = useState<Set<string>>(new Set());
+  const [selectedSectors, setSelectedSectors] = useState<Set<string>>(new Set());
   const runIdRef = useRef<string | null>(null);
 
   const phase = phaseOf(run);
@@ -144,11 +150,20 @@ export function MissionRun() {
       .contactTypes(id)
       .then(({ data }) => {
         if (cancelled || !data) return;
-        setTypeOpts(data);
-        const recommended = [...data.functions, ...data.seniority]
+        const normalized = {
+          functions: data.functions ?? [],
+          seniority: data.seniority ?? [],
+          sectors: data.sectors ?? [],
+        };
+        setTypeOpts(normalized);
+        const recommendedPeople = [...normalized.functions, ...normalized.seniority]
           .filter((o) => o.recommended)
           .map((o) => o.id);
-        setSelectedTypes(new Set(recommended));
+        const recommendedSectors = normalized.sectors
+          .filter((o) => o.recommended)
+          .map((o) => o.id);
+        setSelectedPeople(new Set(recommendedPeople));
+        setSelectedSectors(new Set(recommendedSectors));
       })
       .catch(() => undefined);
     return () => {
@@ -156,8 +171,17 @@ export function MissionRun() {
     };
   }, [id]);
 
-  const toggleType = useCallback((optId: string) => {
-    setSelectedTypes((prev) => {
+  const togglePeople = useCallback((optId: string) => {
+    setSelectedPeople((prev) => {
+      const next = new Set(prev);
+      if (next.has(optId)) next.delete(optId);
+      else next.add(optId);
+      return next;
+    });
+  }, []);
+
+  const toggleSector = useCallback((optId: string) => {
+    setSelectedSectors((prev) => {
       const next = new Set(prev);
       if (next.has(optId)) next.delete(optId);
       else next.add(optId);
@@ -208,17 +232,19 @@ export function MissionRun() {
     setStarting(true);
     try {
       const chosen = typeOpts
-        ? [...typeOpts.functions, ...typeOpts.seniority].filter((o) => selectedTypes.has(o.id))
+        ? [...typeOpts.functions, ...typeOpts.seniority].filter((o) => selectedPeople.has(o.id))
         : [];
       const fns = chosen.filter((o) => o.kind === 'function').map((o) => o.value);
       const sens = chosen.filter((o) => o.kind === 'seniority').map((o) => o.value);
+      const sectors = typeOpts ? (typeOpts.sectors ?? []).filter((o) => selectedSectors.has(o.id)).map((o) => o.value) : [];
       const { data } = await pipeline.start(
         mission.id,
         targetCountFor(companies),
         companies,
         contacts,
         fns,
-        sens
+        sens,
+        sectors
       );
       runIdRef.current = data.id;
       setRun(data);
@@ -227,7 +253,7 @@ export function MissionRun() {
     } finally {
       setStarting(false);
     }
-  }, [mission, companies, contacts, typeOpts, selectedTypes]);
+  }, [mission, companies, contacts, typeOpts, selectedPeople, selectedSectors]);
 
   const stop = useCallback(async () => {
     const rid = runIdRef.current;
@@ -343,27 +369,43 @@ export function MissionRun() {
             </div>
           </div>
 
-          {typeOpts && (typeOpts.functions.length > 0 || typeOpts.seniority.length > 0) && (
-            <div className="run-types">
-              <p className="run-types-head">
-                Who should we reach out to?
-                <span className="run-types-sub">We picked the best fits — adjust if you like.</span>
-              </p>
-              {typeOpts.functions.length > 0 && (
-                <ContactTypeGroup
-                  label="Teams & functions"
-                  options={typeOpts.functions}
-                  selected={selectedTypes}
-                  onToggle={toggleType}
-                />
+          {typeOpts && (typeOpts.functions.length > 0 || typeOpts.seniority.length > 0 || typeOpts.sectors.length > 0) && (
+            <div className="run-targeting-controls">
+              {(typeOpts.functions.length > 0 || typeOpts.seniority.length > 0) && (
+                <PickerPanel
+                  title="Types of people"
+                  subtitle="Teams, roles, and seniority to prioritize inside each company."
+                >
+                  {typeOpts.functions.length > 0 && (
+                    <ContactTypeGroup
+                      label="Teams & functions"
+                      options={typeOpts.functions}
+                      selected={selectedPeople}
+                      onToggle={togglePeople}
+                    />
+                  )}
+                  {typeOpts.seniority.length > 0 && (
+                    <ContactTypeGroup
+                      label="Seniority"
+                      options={typeOpts.seniority}
+                      selected={selectedPeople}
+                      onToggle={togglePeople}
+                    />
+                  )}
+                </PickerPanel>
               )}
-              {typeOpts.seniority.length > 0 && (
-                <ContactTypeGroup
-                  label="Seniority"
-                  options={typeOpts.seniority}
-                  selected={selectedTypes}
-                  onToggle={toggleType}
-                />
+              {typeOpts.sectors.length > 0 && (
+                <PickerPanel
+                  title="Types of companies"
+                  subtitle="Sectors to strongly bias company discovery toward."
+                >
+                  <ContactTypeGroup
+                    label="Sectors"
+                    options={typeOpts.sectors}
+                    selected={selectedSectors}
+                    onToggle={toggleSector}
+                  />
+                </PickerPanel>
               )}
             </div>
           )}
@@ -521,7 +563,27 @@ function draftLabel(t: RunTarget): string {
   return `Drafts ${done}/${t.sequences.length}`;
 }
 
-// Checkbox-card group of contact types, reusing the persona-wizard card styling.
+function PickerPanel({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="run-picker-panel">
+      <div className="run-picker-head">
+        <h2>{title}</h2>
+        <p>{subtitle}</p>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+// Toggle-chip group of targeting options.
 function ContactTypeGroup({
   label,
   options,
@@ -536,23 +598,21 @@ function ContactTypeGroup({
   return (
     <div className="run-types-group">
       <span className="run-types-label">{label}</span>
-      <div className="pw-cards">
+      <div className="run-chip-grid">
         {options.map((o) => {
           const on = selected.has(o.id);
           return (
             <button
               key={o.id}
               type="button"
-              className={`pw-card ${on ? 'is-on' : ''}`}
+              className={`run-type-chip ${on ? 'is-on' : ''}`}
               onClick={() => onToggle(o.id)}
               aria-pressed={on}
             >
-              {on && (
-                <span className="pw-card-check">
-                  <Check size={12} />
-                </span>
-              )}
-              <span className="pw-card-title">{o.label}</span>
+              <span className="run-type-check" aria-hidden>
+                {on ? <Check size={13} /> : null}
+              </span>
+              <span>{o.label}</span>
             </button>
           );
         })}

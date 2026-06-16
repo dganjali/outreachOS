@@ -48,52 +48,58 @@ function depsFor(deliverable: Set<string>): { deps: ResolvePoolDeps; calls: () =
 }
 
 describe('resolvePoolWithBudget', () => {
-  it('stops at TARGET_DELIVERABLE (3) once enough are reachable', async () => {
+  it('stops at the requested count once enough are reachable', async () => {
     const pool = ['A', 'B', 'C', 'D', 'E', 'F'].map(row);
     const { deps, calls } = depsFor(new Set(['A', 'B', 'C', 'D', 'E', 'F']));
-    const out = await resolvePoolWithBudget(pool, 'acme.co', 't1', deps);
+    const out = await resolvePoolWithBudget(pool, 'acme.co', 't1', 3, deps);
     assert.equal(out.length, 3);
     assert.equal(calls(), 3, 'should not resolve beyond the 3 it needs');
     assert.deepEqual(out.map((r) => r.name), ['A', 'B', 'C']);
     assert.ok(out.every((r) => r.email && r.emailResolver === 'verifier'));
   });
 
+  it('keeps exactly the requested count (1) even when more are reachable', async () => {
+    const pool = ['A', 'B', 'C', 'D'].map(row);
+    const { deps, calls } = depsFor(new Set(['A', 'B', 'C', 'D']));
+    const out = await resolvePoolWithBudget(pool, 'acme.co', 't1', 1, deps);
+    assert.equal(out.length, 1, 'no extra contacts beyond what was asked for');
+    assert.equal(calls(), 1);
+    assert.deepEqual(out.map((r) => r.name), ['A']);
+  });
+
   it('drops non-deliverable candidates and keeps pulling the next one', async () => {
     // Only D, E, F resolve; the loop must skip A/B/C and still return 3.
     const pool = ['A', 'B', 'C', 'D', 'E', 'F'].map(row);
     const { deps } = depsFor(new Set(['D', 'E', 'F']));
-    const out = await resolvePoolWithBudget(pool, 'acme.co', 't1', deps);
+    const out = await resolvePoolWithBudget(pool, 'acme.co', 't1', 3, deps);
     assert.deepEqual(out.map((r) => r.name), ['D', 'E', 'F']);
   });
 
   it('never attempts more than RESOLVE_ATTEMPT_CAP (8) candidates', async () => {
     const pool = Array.from({ length: 10 }, (_, i) => row(`P${i}`));
     const { deps, calls } = depsFor(new Set()); // nobody resolves
-    await resolvePoolWithBudget(pool, 'acme.co', 't1', deps);
+    await resolvePoolWithBudget(pool, 'acme.co', 't1', 3, deps);
     assert.equal(calls(), 8, 'attempt cap bounds finder/verifier spend');
   });
 
-  it('falls back to top-ranked display-only rows when nothing is deliverable', async () => {
+  it('returns empty when nothing is deliverable (company gets dropped/replaced)', async () => {
     const pool = ['A', 'B', 'C', 'D', 'E'].map(row);
     const { deps } = depsFor(new Set());
-    const out = await resolvePoolWithBudget(pool, 'acme.co', 't1', deps);
-    assert.equal(out.length, 3, 'ships top-3 so a target is never empty');
-    assert.deepEqual(out.map((r) => r.name), ['A', 'B', 'C']);
-    assert.ok(out.every((r) => r.email === null && r.emailResolver === 'none'));
+    const out = await resolvePoolWithBudget(pool, 'acme.co', 't1', 3, deps);
+    assert.equal(out.length, 0, 'never ships display-only rows with no verified email');
   });
 
-  it('returns display-only rows when there is no domain (no resolution possible)', async () => {
+  it('returns empty when there is no domain (no resolution possible)', async () => {
     const pool = ['A', 'B', 'C', 'D'].map(row);
     const { deps, calls } = depsFor(new Set(['A', 'B', 'C', 'D']));
-    const out = await resolvePoolWithBudget(pool, null, 't1', deps);
-    assert.equal(out.length, 3);
+    const out = await resolvePoolWithBudget(pool, null, 't1', 3, deps);
+    assert.equal(out.length, 0);
     assert.equal(calls(), 0, 'no domain → no resolver calls');
-    assert.ok(out.every((r) => r.emailResolver === 'none'));
   });
 
   it('resolves a batch concurrently rather than one-at-a-time', async () => {
-    // Gate every resolve on a barrier that only releases once TARGET_DELIVERABLE
-    // calls are in flight - this only completes if the walk fans them out.
+    // Gate every resolve on a barrier that only releases once the requested count
+    // of calls are in flight - this only completes if the walk fans them out.
     let inFlight = 0;
     let maxInFlight = 0;
     let release!: () => void;
@@ -109,7 +115,7 @@ describe('resolvePoolWithBudget', () => {
         return { email: `${name.toLowerCase()}@${domain}`, emailStatus: 'verified', likelyEmailPattern: null, resolver: 'verifier' };
       },
     };
-    const out = await resolvePoolWithBudget(['A', 'B', 'C'].map(row), 'acme.co', 't1', deps);
+    const out = await resolvePoolWithBudget(['A', 'B', 'C'].map(row), 'acme.co', 't1', 3, deps);
     assert.equal(out.length, 3);
     assert.equal(maxInFlight, 3, 'the three needed candidates resolve in parallel');
   });

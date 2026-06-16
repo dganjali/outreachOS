@@ -16,7 +16,7 @@
 
 import type { EmbedInputType } from '../api/_lib/embeddings';
 import type { PlanId, PlanStatus } from './plans';
-import type { ContactIcp, SeniorityLevel } from './types';
+import type { ContactIcp, SectorSuggestion, SeniorityLevel } from './types';
 
 void ({} as EmbedInputType); // keep the import live for downstream consumers
 
@@ -217,6 +217,9 @@ export interface MissionDoc extends BaseDoc {
   // reused across this mission's targets (CONTACT_ENGINE.md §2/§8). Optional so
   // pre-engine missions read as undefined; lazily backfilled on next run.
   contactIcp?: ContactIcp | null;
+  // Cached AI-suggested company sectors for targeting - generated once on first
+  // launch and reused. Optional so pre-sector missions read as undefined.
+  sectorSuggestions?: SectorSuggestion[] | null;
   status: string;
   archivedAt: Date | null;
   // The persona (reusable voice) this mission drafts as. Required for new
@@ -431,6 +434,9 @@ export interface PipelineRunDoc extends BaseDoc {
     // AI-only default). Narrowed into the ICP at discovery time.
     selectedFunctions?: string[];
     selectedSeniority?: SeniorityLevel[];
+    // User-selected company sectors to bias targeting toward (strong preference,
+    // not a hard filter). Empty/absent ⇒ no sector bias.
+    selectedSectors?: string[];
   };
   targets: PipelineTargetState[];
   // Legacy resume pointer. Processing now runs targets in parallel and tracks

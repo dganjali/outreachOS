@@ -42,6 +42,29 @@ function alreadyTargetedLine(prior: AlreadyTargeted): string {
   return `Already covered in this mission - DO NOT include these; find different companies: ${list}`;
 }
 
+function sanitizeSectors(list?: string[]): string[] {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of list) {
+    const sector = typeof value === 'string' ? value.trim() : '';
+    const key = sector.toLowerCase();
+    if (!sector || seen.has(key)) continue;
+    seen.add(key);
+    out.push(sector);
+    if (out.length >= 10) break;
+  }
+  return out;
+}
+
+function sectorBiasLine(sectors: string[]): string {
+  if (sectors.length === 0) return '';
+  return [
+    `Strong sector preference: prioritize companies in these sectors: ${sectors.join(', ')}.`,
+    'Treat this as a strong targeting bias: most results should clearly fit one of these sectors unless a company is an exceptional match for the mission.',
+  ].join(' ');
+}
+
 // True if a candidate matches a company already surfaced for the mission, by
 // normalized domain (preferred) or name.
 function isAlreadyTargeted(name: string, domain: string | null, prior: AlreadyTargeted): boolean {
@@ -57,7 +80,7 @@ export default async function handler(req: Request, res: Response) {
   const scope = forUser(user.id);
   if (!(await checkRateLimit(scope, res))) return;
 
-  const { mission_id, count } = (req.body ?? {}) as { mission_id?: string; count?: number };
+  const { mission_id, count, sectors } = (req.body ?? {}) as { mission_id?: string; count?: number; sectors?: string[] };
   if (!mission_id) return res.status(400).json({ error: 'missing_mission_id' });
 
   const mission = await scope.collection<MissionDoc>('missions').findById(mission_id);
@@ -66,6 +89,7 @@ export default async function handler(req: Request, res: Response) {
   const profile = await scope.collection<ProfileDoc>('profiles').findOne();
 
   const desired = Math.min(Math.max(count ?? 10, 1), 25);
+  const selectedSectors = sanitizeSectors(sectors);
 
   // Companies already surfaced for this mission. Threaded into the prompts (so
   // the model picks different ones) and used to drop any that slip through, so a
@@ -81,13 +105,13 @@ export default async function handler(req: Request, res: Response) {
   const run = await startRun(scope, {
     agentType: 'targeting',
     missionId: mission_id,
-    input: { count: desired, source: 'web_search' },
+    input: { count: desired, source: 'web_search', sectors: selectedSectors },
   });
 
   const mode = (mission.mode as MissionMode | null) ?? 'sales';
 
   try {
-    const rows = await runWebSearchOnly({ mission, mode, desired, profile, mission_id, alreadyTargeted });
+    const rows = await runWebSearchOnly({ mission, mode, desired, profile, mission_id, alreadyTargeted, sectors: selectedSectors });
 
     if (rows.length === 0) {
       await failRun(scope, run._id, 'no_targets_found');
@@ -121,13 +145,15 @@ async function runWebSearchOnly(args: {
   profile: ProfileDoc | null;
   mission_id: string;
   alreadyTargeted: AlreadyTargeted;
+  sectors: string[];
 }): Promise<Array<Omit<TargetDoc, '_id' | 'userId' | 'createdAt' | 'updatedAt'>>> {
-  const { mission, mode, desired, profile, mission_id, alreadyTargeted } = args;
+  const { mission, mode, desired, profile, mission_id, alreadyTargeted, sectors } = args;
   const userPrompt = [
     `Mission: ${mission.name}`,
     `Mode: ${mode}`,
     `What I'm sending / offer: ${mission.goal}`,
     `Target description (the why): ${mission.targetDescription}`,
+    sectorBiasLine(sectors),
     ...senderContextLines(profile),
     alreadyTargetedLine(alreadyTargeted),
     '',

@@ -47,6 +47,8 @@ function fakeExec(over: Partial<PipelineExecutors> = {}): PipelineExecutors {
     evidence: async () => undefined,
     contacts: async () => [{ id: 'c1', confidence: 0.8 }],
     sequence: async () => undefined,
+    reserve: async () => [],
+    markRejected: async () => undefined,
     ...over,
   };
 }
@@ -93,6 +95,28 @@ test('the run config contact-type filter reaches the contacts executor', async (
   assert.equal(seen.length, 1);
   assert.deepEqual(seen[0].functions, ['community']);
   assert.deepEqual(seen[0].seniority, ['manager']);
+});
+
+test('the run config sector filter reaches the targeting executor', async () => {
+  const seen: string[][] = [];
+  const exec = fakeExec({
+    targeting: async (_missionId, _count, sectors) => {
+      seen.push(sectors ?? []);
+      return [{ id: 't1', name: 'Acme', score: 0.9 }];
+    },
+  });
+  await runPipeline(
+    baseRun({
+      config: {
+        targetCount: 8,
+        topN: 1,
+        topContacts: 1,
+        selectedSectors: ['fintech', 'developer tools'],
+      },
+    }),
+    ctxFor(exec)
+  );
+  assert.deepEqual(seen[0], ['fintech', 'developer tools']);
 });
 
 test('targeting selects top-N by score and processes them', async () => {
@@ -206,8 +230,14 @@ test('a failing evidence step marks the whole target failed; others still comple
   assert.equal(t2.sequence, 'done');
 });
 
-test('a target with no contacts fails only the draft step', async () => {
-  const exec = fakeExec({ contacts: async () => [] });
+test('a contactless company is dropped (rejected) when no replacement exists', async () => {
+  const rejected: string[] = [];
+  const exec = fakeExec({
+    contacts: async () => [],
+    markRejected: async (id) => {
+      rejected.push(id);
+    },
+  });
   const end = await runPipeline(baseRun(), ctxFor(exec));
   assert.equal(end.status, 'done');
   for (const t of end.targets) {
@@ -215,6 +245,48 @@ test('a target with no contacts fails only the draft step', async () => {
     assert.equal(t.contacts, 'done');
     assert.equal(t.sequence, 'failed');
   }
+  // Both pursued companies came up empty; with no reserve/new discovery they're
+  // dropped from the user-facing output rather than shown as empty cards.
+  assert.deepEqual([...rejected].sort(), ['t1', 't2']);
+});
+
+test('a contactless company is dropped and replaced from the reserve', async () => {
+  const rejected: string[] = [];
+  const exec = fakeExec({
+    targeting: async () => [{ id: 't1', name: 'Acme', score: 0.9 }],
+    contacts: async (targetId) => (targetId === 't1' ? [] : [{ id: `${targetId}-c1`, confidence: 0.8 }]),
+    reserve: async (_missionId, exclude) =>
+      ['t2', 't3'].filter((id) => !exclude.includes(id)).map((id) => ({ id, name: id, score: 0.5 })),
+    markRejected: async (id) => {
+      rejected.push(id);
+    },
+  });
+  const end = await runPipeline(baseRun({ config: { targetCount: 8, topN: 1, topContacts: 1 } }), ctxFor(exec));
+  assert.equal(end.status, 'done');
+  assert.deepEqual(rejected, ['t1']); // the empty company was dropped
+  const delivered = end.targets.filter((t) => t.contacts === 'done' && t.contactIds.length > 0);
+  assert.equal(delivered.length, 1); // backfilled to the requested company count
+  assert.equal(delivered[0].targetId, 't2'); // next-best reserve company
+});
+
+test('exhausted reserve triggers re-discovery for replacements', async () => {
+  let targetingCalls = 0;
+  const exec = fakeExec({
+    targeting: async () => {
+      targetingCalls++;
+      // First call seeds the original company; later calls discover a fresh one.
+      return targetingCalls === 1
+        ? [{ id: 't1', name: 'Acme', score: 0.9 }]
+        : [{ id: 't9', name: 'Newco', score: 0.6 }];
+    },
+    contacts: async (targetId) => (targetId === 't1' ? [] : [{ id: `${targetId}-c1`, confidence: 0.8 }]),
+    reserve: async () => [], // nothing on the bench → must re-discover
+  });
+  const end = await runPipeline(baseRun({ config: { targetCount: 8, topN: 1, topContacts: 1 } }), ctxFor(exec));
+  assert.equal(end.status, 'done');
+  assert.ok(targetingCalls >= 2, 're-discovery ran once the reserve was empty');
+  const delivered = end.targets.filter((t) => t.contacts === 'done' && t.contactIds.length > 0);
+  assert.deepEqual(delivered.map((t) => t.targetId), ['t9']);
 });
 
 test('daily-limit pauses the run and preserves untouched targets for resume', async () => {

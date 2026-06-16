@@ -46,9 +46,10 @@ export interface ContactSuggestion {
 
 // Loop-for-another-contact budget. Discovery hands the resolver a ranked
 // candidate pool; the resolver walks it top-down keeping deliverable rows until
-// it has TARGET_DELIVERABLE of them or has attempted RESOLVE_ATTEMPT_CAP
+// it has the requested number of them or has attempted RESOLVE_ATTEMPT_CAP
 // candidates (the per-target cost ceiling - finder/verifier calls cost credits).
-const TARGET_DELIVERABLE = 3;
+const DEFAULT_DELIVERABLE = 1;
+const MAX_CONTACTS_PER_TARGET = 5;
 const RESOLVE_ATTEMPT_CAP = 8;
 const CANDIDATE_POOL_CAP = 10;
 
@@ -59,11 +60,16 @@ export default async function handler(req: Request, res: Response) {
   const scope = forUser(user.id);
   if (!(await checkRateLimit(scope, res))) return;
 
-  const { target_id, contact_type_filter } = (req.body ?? {}) as {
+  const { target_id, contact_type_filter, top_contacts } = (req.body ?? {}) as {
     target_id?: string;
     contact_type_filter?: ContactTypeFilter;
+    top_contacts?: number;
   };
   if (!target_id) return res.status(400).json({ error: 'missing_target_id' });
+  // How many deliverable contacts to keep for this company. Caller-supplied
+  // (the pipeline forwards the run's `topContacts`; the manual button its own
+  // count); defaults to 1 and is clamped to the per-target ceiling.
+  const wanted = Math.min(Math.max(Math.trunc(Number(top_contacts)) || 1, 1), MAX_CONTACTS_PER_TARGET);
 
   const target = await scope.collection<TargetDoc>('targets').findById(target_id);
   if (!target) return res.status(404).json({ error: 'target_not_found' });
@@ -108,7 +114,7 @@ export default async function handler(req: Request, res: Response) {
     const ranked = rankCandidates(suggestions, { icp, sizeTier, target, mission, profile });
 
     let rows = ranked.rows;
-    rows = await resolvePoolWithBudget(rows, domain, target._id);
+    rows = await resolvePoolWithBudget(rows, domain, target._id, wanted);
 
     if (rows.length === 0) {
       await failRun(scope, run._id, 'no_contacts_found');
@@ -471,20 +477,21 @@ const DEFAULT_RESOLVE_DEPS: ResolvePoolDeps = {
 // Walk the ranked candidate pool resolving a trustworthy email for each via the
 // cascade (emailfinder.dev → verifier gate → real scraped email → none). Keeps a
 // row only when it yields a deliverable email ('verified'/'likely'); a 'none'
-// candidate is dropped and we try the next one. Stops at TARGET_DELIVERABLE kept
+// candidate is dropped and we try the next one. Stops at `count` kept
 // or RESOLVE_ATTEMPT_CAP attempts (the per-target cost ceiling). Scrapes the
 // company site once up front and reuses it. Never ships an unverified guess.
 export async function resolvePoolWithBudget(
   rows: ContactRow[],
   domain: string | null,
   targetId: string,
+  count: number = DEFAULT_DELIVERABLE,
   deps: ResolvePoolDeps = DEFAULT_RESOLVE_DEPS
 ): Promise<ContactRow[]> {
+  const want = Math.max(1, count);
   if (rows.length === 0) return rows;
-  // No domain → can't resolve emails; surface the top-ranked rows display-only.
-  if (!domain) {
-    return rows.slice(0, TARGET_DELIVERABLE).map((row) => ({ ...row, emailResolver: 'none' as const }));
-  }
+  // No domain → can't resolve emails, so we can't ship a deliverable contact.
+  // Return empty so the caller drops/replaces this company (no email guesses).
+  if (!domain) return [];
 
   let scraped: ScrapeResult;
   try {
@@ -504,8 +511,8 @@ export async function resolvePoolWithBudget(
   const kept: ContactRow[] = [];
   let attempts = 0;
   let i = 0;
-  while (i < rows.length && kept.length < TARGET_DELIVERABLE && attempts < RESOLVE_ATTEMPT_CAP) {
-    const need = TARGET_DELIVERABLE - kept.length;
+  while (i < rows.length && kept.length < want && attempts < RESOLVE_ATTEMPT_CAP) {
+    const need = want - kept.length;
     const budget = RESOLVE_ATTEMPT_CAP - attempts;
     const batch = rows.slice(i, i + Math.min(need, budget));
     i += batch.length;
@@ -525,7 +532,7 @@ export async function resolvePoolWithBudget(
     // Keep deliverable rows in their ranked (batch) order; never exceed the cap.
     batch.forEach((row, j) => {
       const res = resolved[j];
-      if (res.email && kept.length < TARGET_DELIVERABLE) {
+      if (res.email && kept.length < want) {
         kept.push({
           ...row,
           email: res.email,
@@ -537,11 +544,8 @@ export async function resolvePoolWithBudget(
     });
   }
 
-  // Empty-pool fallback: nothing came back deliverable → ship the top-ranked
-  // rows display-only (email stays null, pattern kept) so a target is never empty.
-  if (kept.length === 0) {
-    return rows.slice(0, TARGET_DELIVERABLE).map((row) => ({ ...row, emailResolver: 'none' as const }));
-  }
+  // Nothing came back deliverable → return empty so the caller drops/replaces
+  // this company. We never ship display-only rows with no verified email.
   return kept;
 }
 

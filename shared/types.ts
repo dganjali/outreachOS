@@ -55,11 +55,19 @@ export interface ContactIcp {
 // run. Derived from the mission's ICP (functions × seniority band) so the AI
 // proposes the menu and the human narrows it instead of the AI guessing alone.
 export interface ContactTypeOption {
-  id: string; // stable, e.g. "fn:community" | "sen:director"
-  kind: 'function' | 'seniority';
-  label: string; // human-friendly, e.g. "Community" | "Director"
-  value: string; // raw ICP value: a function string OR a SeniorityLevel
-  recommended: boolean; // pre-checked = part of the ICP's own set
+  id: string; // stable, e.g. "fn:community" | "sen:director" | "sector:fintech"
+  kind: 'function' | 'seniority' | 'sector';
+  label: string; // human-friendly, e.g. "Community" | "Director" | "Fintech"
+  value: string; // raw value: a function string, a SeniorityLevel, or a sector name
+  recommended: boolean; // pre-checked = part of the AI's own suggested set
+}
+
+// AI-suggested company sector/industry for a mission's targeting. Cached on the
+// mission and surfaced as `kind: 'sector'` options so the user can bias WHICH
+// companies the targeting agent goes after (a strong preference, not a hard filter).
+export interface SectorSuggestion {
+  name: string; // short noun phrase, e.g. "developer tools", "fintech"
+  recommended: boolean; // the AI's strongest fits, pre-checked in the UI
 }
 
 // The user's selection, threaded into discovery to narrow the ICP. Empty/absent

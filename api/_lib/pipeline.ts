@@ -26,7 +26,7 @@ import { forUser, newId, type UserScope } from './db';
 import type { AuthedUser } from './auth';
 import { invokeAgent } from './internal-invoke';
 import { getPlanLimits } from './runs';
-import type { PipelineRunDoc, PipelineStepStatus, PipelineTargetState } from '../../shared/schemas';
+import type { PipelineRunDoc, PipelineStepStatus, PipelineTargetState, TargetDoc } from '../../shared/schemas';
 import type { ContactTypeFilter, SeniorityLevel } from '../../shared/types';
 
 import targetHandler from '../agents/target';
@@ -46,6 +46,10 @@ export const DEFAULT_PIPELINE_CONCURRENCY = 3;
 export const MAX_PIPELINE_CONCURRENCY = 4;
 // Drafts overlapped within a single target (topContacts is small).
 const CONTACT_CONCURRENCY = 2;
+// Ceiling on how many backup companies a single run will pull in to replace
+// ones that yield no reachable contact. Bounds re-discovery cost and guarantees
+// the replenish loop terminates even if every backup also comes up empty.
+const MAX_REPLACEMENTS = 12;
 // Beat between starting successive target workers, to desynchronize the
 // count-then-insert in runs.ts:checkRateLimit (bounds daily-cap overshoot).
 const LAUNCH_STAGGER_MS = 600;
@@ -65,10 +69,16 @@ export class PipelineDailyLimitError extends Error {} // per-day: pause the run
 // existing agent handlers verbatim via in-process invocation; tests pass fakes.
 // ---------------------------------------------------------------------------
 export interface PipelineExecutors {
-  targeting(missionId: string, count: number): Promise<Array<{ id: string; name: string; score: number | null }>>;
+  targeting(missionId: string, count: number, sectors?: string[]): Promise<Array<{ id: string; name: string; score: number | null }>>;
   evidence(targetId: string): Promise<void>;
-  contacts(targetId: string, filter?: ContactTypeFilter): Promise<Array<{ id: string; confidence: number | null }>>;
+  contacts(targetId: string, filter?: ContactTypeFilter, topContacts?: number): Promise<Array<{ id: string; confidence: number | null }>>;
   sequence(contactId: string): Promise<void>;
+  /** Already-discovered companies not yet in the run, ranked by score - the
+   *  over-discovery "reserve" we pull from when a company yields no contact.
+   *  `excludeIds` are targets already in the run. */
+  reserve(missionId: string, excludeIds: string[]): Promise<Array<{ id: string; name: string; score: number | null }>>;
+  /** Drop a company from the user-facing output (no deliverable contact found). */
+  markRejected(targetId: string): Promise<void>;
 }
 
 function classify<T = Record<string, unknown>>(result: { status: number; body: unknown }): T {
@@ -86,23 +96,41 @@ function classify<T = Record<string, unknown>>(result: { status: number; body: u
 
 export function realExecutors(user: AuthedUser): PipelineExecutors {
   return {
-    async targeting(missionId, count) {
+    async targeting(missionId, count, sectors) {
       const body = classify<{ targets?: Array<{ _id: string; companyName: string; score: number | null }> }>(
-        await invokeAgent(targetHandler, { user, body: { mission_id: missionId, count } })
+        await invokeAgent(targetHandler, { user, body: { mission_id: missionId, count, sectors } })
       );
       return (body.targets ?? []).map((t) => ({ id: t._id, name: t.companyName, score: t.score ?? null }));
     },
     async evidence(targetId) {
       classify(await invokeAgent(evidenceHandler, { user, body: { target_id: targetId } }));
     },
-    async contacts(targetId, filter) {
+    async contacts(targetId, filter, topContacts) {
       const body = classify<{ contacts?: Array<{ _id: string; confidence: number | null }> }>(
-        await invokeAgent(contactsHandler, { user, body: { target_id: targetId, contact_type_filter: filter } })
+        await invokeAgent(contactsHandler, {
+          user,
+          body: { target_id: targetId, contact_type_filter: filter, top_contacts: topContacts },
+        })
       );
       return (body.contacts ?? []).map((c) => ({ id: c._id, confidence: c.confidence ?? null }));
     },
     async sequence(contactId) {
       classify(await invokeAgent(sequenceHandler, { user, body: { contact_id: contactId } }));
+    },
+    async reserve(missionId, excludeIds) {
+      const scope = forUser(user.id);
+      const exclude = new Set(excludeIds);
+      // The targeting agent over-discovers and inserts the whole pool as
+      // 'suggested'; the ones we never seeded are our backup bench.
+      const all = await scope.collection<TargetDoc>('targets').find({ missionId, status: 'suggested' });
+      return all
+        .filter((t) => !exclude.has(t._id))
+        .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+        .map((t) => ({ id: t._id, name: t.companyName, score: t.score ?? null }));
+    },
+    async markRejected(targetId) {
+      const scope = forUser(user.id);
+      await scope.collection<TargetDoc>('targets').updateById(targetId, { status: 'rejected' } as Partial<TargetDoc>);
     },
   };
 }
@@ -240,7 +268,7 @@ async function runContacts(r: PipelineRunDoc, t: PipelineTargetState, ctx: ProcC
       functions: r.config.selectedFunctions ?? [],
       seniority: r.config.selectedSeniority ?? [],
     };
-    const contacts = await runStep(ctx, () => ctx.exec.contacts(t.targetId, filter));
+    const contacts = await runStep(ctx, () => ctx.exec.contacts(t.targetId, filter, r.config.topContacts));
     step(t, 'contacts', 'done');
     selectContacts(t, contacts, r.config.topContacts);
   } catch (e) {
@@ -278,12 +306,14 @@ async function processTarget(r: PipelineRunDoc, t: PipelineTargetState, ctx: Pro
     if (t.evidence === 'failed') {
       step(t, 'contacts', 'failed');
       step(t, 'sequence', 'failed');
+      await dropTarget(t, ctx);
       r.note = progressNote(r);
       await ctx.persist(r);
       return;
     }
     if (t.contacts === 'failed' || t.contactIds.length === 0) {
       step(t, 'sequence', 'failed');
+      await dropTarget(t, ctx);
       r.note = progressNote(r);
       await ctx.persist(r);
       return;
@@ -370,6 +400,70 @@ async function observeCancel(ctx: ProcContext): Promise<boolean> {
   return ctx.canceled;
 }
 
+/** Drop a company that produced no deliverable contact from the user-facing
+ *  output. Best-effort: a lingering empty card is tolerable, a crashed run isn't. */
+async function dropTarget(t: PipelineTargetState, ctx: ProcContext): Promise<void> {
+  try {
+    await ctx.exec.markRejected(t.targetId);
+  } catch (err) {
+    console.warn('mark_rejected_failed', t.targetId, err);
+  }
+}
+
+/** Companies that actually yielded a reachable contact - the real deliverables
+ *  the replenish loop counts toward the requested topN. */
+function deliveredCount(r: PipelineRunDoc): number {
+  return r.targets.filter((t) => t.contacts === 'done' && t.contactIds.length > 0).length;
+}
+
+/** Backfill companies that yielded no contact: pull the next-best from the
+ *  already-discovered reserve, then (once it's exhausted) re-discover a fresh
+ *  batch, processing each new company until we have `topN` companies with
+ *  contacts or hit MAX_REPLACEMENTS. Honors pause/cancel like the main pool. */
+async function replenishTargets(r: PipelineRunDoc, ctx: ProcContext): Promise<void> {
+  let added = 0;
+  while (!halted(ctx) && deliveredCount(r) < r.config.topN && added < MAX_REPLACEMENTS) {
+    if (await observeCancel(ctx)) return;
+    const need = r.config.topN - deliveredCount(r);
+    const have = new Set(r.targets.map((t) => t.targetId));
+
+    let candidates: Array<{ id: string; name: string; score: number | null }> = [];
+    try {
+      candidates = await ctx.exec.reserve(r.missionId, [...have]);
+    } catch (err) {
+      console.warn('reserve_lookup_failed', r.missionId, err);
+    }
+
+    if (candidates.length === 0) {
+      // Reserve exhausted → discover a fresh batch (the agent already excludes
+      // companies already targeted in this mission), then keep going.
+      try {
+        const found = await runStep(ctx, () => ctx.exec.targeting(r.missionId, r.config.targetCount, r.config.selectedSectors));
+        candidates = found.filter((f) => !have.has(f.id));
+      } catch (e) {
+        if (e instanceof PipelineDailyLimitError) {
+          ctx.paused = true;
+          return;
+        }
+        return; // re-discovery failed → nothing more we can do this run
+      }
+    }
+    if (candidates.length === 0) return; // genuinely nothing left to try
+
+    const room = MAX_REPLACEMENTS - added;
+    const picks = [...candidates]
+      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+      .slice(0, Math.min(need, room));
+    const fresh = seedTargets(picks, picks.length);
+    r.targets.push(...fresh);
+    added += fresh.length;
+    r.note = 'Finding replacements for companies with no reachable contact…';
+    await ctx.persist(r);
+
+    await runTargetPool(r, ctx); // process the newly queued backups
+  }
+}
+
 function seedTargets(found: Array<{ id: string; name: string; score: number | null }>, topN: number): PipelineTargetState[] {
   const top = [...found].sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, topN);
   return top.map((t) => ({
@@ -398,7 +492,7 @@ export async function runPipeline(run: PipelineRunDoc, ctx: ProcContext): Promis
   if (r.phase === 'targeting') {
     r.status = 'running';
     try {
-      const found = await runStep(ctx, () => ctx.exec.targeting(r.missionId, r.config.targetCount));
+      const found = await runStep(ctx, () => ctx.exec.targeting(r.missionId, r.config.targetCount, r.config.selectedSectors));
       const targets = seedTargets(found, r.config.topN);
       if (targets.length === 0) {
         finishProcessing(r);
@@ -430,6 +524,9 @@ export async function runPipeline(run: PipelineRunDoc, ctx: ProcContext): Promis
 
   // --- processing (parallel across targets) ---
   await runTargetPool(r, ctx);
+  // Backfill any company that came up with no reachable contact so the user
+  // still gets the count they asked for, drawn from backups (no empty cards).
+  await replenishTargets(r, ctx);
 
   if (ctx.canceled) return r; // cancelPipeline already wrote status='canceled'
   if (ctx.paused) {
@@ -544,6 +641,7 @@ export interface StartPipelineArgs {
   topContacts?: number;
   selectedFunctions?: string[];
   selectedSeniority?: SeniorityLevel[];
+  selectedSectors?: string[];
   exec?: PipelineExecutors; // tests inject; prod uses realExecutors
 }
 
@@ -586,6 +684,7 @@ export async function startPipeline(args: StartPipelineArgs): Promise<PipelineRu
       topContacts: Math.min(Math.max(args.topContacts ?? DEFAULT_TOP_CONTACTS, 1), MAX_TOP_CONTACTS),
       selectedFunctions: sanitizeStrings(args.selectedFunctions),
       selectedSeniority: sanitizeLevels(args.selectedSeniority),
+      selectedSectors: sanitizeStrings(args.selectedSectors),
     },
     targets: [],
     cursor: null,

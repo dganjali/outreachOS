@@ -67,10 +67,10 @@ export const agents = {
       mission_id,
       count,
     }),
-  contacts: (target_id: string) =>
+  contacts: (target_id: string, top_contacts = 1) =>
     authedFetch<{ run_id: string; contacts: Contact[]; source: 'serper' | 'web_search' }>(
       '/api/agents/contacts',
-      { target_id }
+      { target_id, top_contacts }
     ),
   evidence: (target_id: string) =>
     authedFetch<{ run_id: string; evidence_pack: EvidencePack }>('/api/agents/evidence', {
@@ -211,7 +211,7 @@ export interface PipelineTargetView {
 // already single-word/no-case so they arrive unchanged).
 export interface ContactTypeOptionView {
   id: string;
-  kind: 'function' | 'seniority';
+  kind: 'function' | 'seniority' | 'sector';
   label: string;
   value: string;
   recommended: boolean;
@@ -230,6 +230,7 @@ export interface PipelineRunView {
     top_contacts: number;
     selected_functions?: string[];
     selected_seniority?: string[];
+    selected_sectors?: string[];
   };
   cursor: { target_index: number; step: PipelineStep; contact_index?: number } | null;
   targets: PipelineTargetView[];
@@ -244,7 +245,8 @@ export const pipeline = {
     top_n?: number,
     top_contacts?: number,
     selected_functions?: string[],
-    selected_seniority?: string[]
+    selected_seniority?: string[],
+    selected_sectors?: string[]
   ) =>
     authedFetch<{ data: PipelineRunView; already_running?: boolean }>('/api/agents/pipeline', {
       mission_id,
@@ -253,10 +255,11 @@ export const pipeline = {
       top_contacts,
       selected_functions,
       selected_seniority,
+      selected_sectors,
     }),
-  // The AI-proposed menu of contact types for a mission (functions + seniority).
+  // The AI-proposed launch menus: people types (functions + seniority) and company sectors.
   contactTypes: (mission_id: string) =>
-    authedFetch<{ data: { functions: ContactTypeOptionView[]; seniority: ContactTypeOptionView[] } }>(
+    authedFetch<{ data: { functions: ContactTypeOptionView[]; seniority: ContactTypeOptionView[]; sectors: ContactTypeOptionView[] } }>(
       `/api/agents/pipeline?contact_types=1&mission_id=${encodeURIComponent(mission_id)}`,
       null,
       'GET'
