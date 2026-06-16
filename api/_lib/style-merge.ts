@@ -17,6 +17,7 @@ export interface StyleDelta {
   rules?: Array<{ rule: string; confidence: number }>;
   bannedPhrases?: string[];
   voiceSummary?: string;
+  subjectStyle?: string;
 }
 
 function mergeDimension(cur: StyleDimension | undefined, next: { value: number; confidence: number }, source: string): StyleDimension {
@@ -64,6 +65,10 @@ export function mergeStyleProfile(cur: StyleProfile, delta: StyleDelta, source: 
   }
 
   const voiceSummary = delta.voiceSummary?.trim() ? delta.voiceSummary.trim() : cur.voiceSummary;
+  // Subject style is the latest explicit preference - a fresh non-empty signal
+  // (the user just confirmed/edited a subject) replaces the prior one; otherwise
+  // carry the existing preference forward.
+  const subjectStyle = delta.subjectStyle?.trim() ? delta.subjectStyle.trim() : cur.subjectStyle ?? '';
 
   // templateStrictness is a user-set knob, not something calibration infers - carry
   // it through untouched so a re-extract never silently resets the slider.
@@ -72,6 +77,7 @@ export function mergeStyleProfile(cur: StyleProfile, delta: StyleDelta, source: 
     rules,
     bannedPhrases,
     voiceSummary,
+    subjectStyle,
     templateStrictness: cur.templateStrictness ?? DEFAULT_TEMPLATE_STRICTNESS,
   };
 }

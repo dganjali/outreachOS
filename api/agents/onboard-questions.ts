@@ -34,7 +34,19 @@ const SCHEMA = {
   required: ['questions'],
 } as const;
 
-const SYSTEM = `You help a user build a reusable outreach persona. Given what we already know about them (their substance/facts, their offer/audience, and example emails), ask the 3–5 questions that would most improve the personalization - prioritize: missing proof/specifics that would make emails concrete, contradictions to resolve, and gaps in voice. Do NOT ask things already answered. Each question must be answerable in 1–2 sentences. For each, give a short "why" (what it unlocks). Output JSON only.`;
+const SYSTEM = `You help a user write better cold outreach by collecting the few CORE facts an email needs to be concrete and credible. Given what we already know (their offer/audience and any facts/examples), ask the 3 SIMPLEST, highest-impact questions that fill the biggest gaps in the core content of an email.
+
+Prioritize, in order:
+1. A concrete proof point or specific result they can cite (numbers, names, outcomes) - this is what makes an email non-generic.
+2. Exactly who they want to reach and what they want them to do (the ask / CTA).
+3. The single most relevant detail about their offer that a recipient would care about.
+
+Rules:
+- Ask at most 3 questions. Fewer is better if the gaps are already filled.
+- Each question must be plain, specific, and answerable in ONE short sentence. No compound or open-ended "tell me about..." questions.
+- Never ask about anything already answered by the facts/offer/audience.
+- Keep "why" to a short phrase (what it unlocks in the email).
+Output JSON only.`;
 
 export default async function handler(req: Request, res: Response) {
   if (req.method !== 'POST') return methodNotAllowed(res, ['POST']);
@@ -72,7 +84,7 @@ export default async function handler(req: Request, res: Response) {
     '',
     `EXAMPLE EMAILS:\n${exemplarText}`,
     '',
-    'Ask the 3–5 highest-value clarifying questions. JSON only.',
+    'Ask at most 3 simple, core clarifying questions. JSON only.',
   ]
     .filter(Boolean)
     .join('\n');
@@ -90,7 +102,7 @@ export default async function handler(req: Request, res: Response) {
       await failRun(scope, run._id, 'parse_failed');
       return res.status(502).json({ error: 'parse_failed', raw: r.raw.slice(0, 500) });
     }
-    const questions = r.data.questions.slice(0, 5);
+    const questions = r.data.questions.slice(0, 3);
     await completeRun(scope, run._id, { persona_id, count: questions.length });
     return res.status(200).json({ run_id: run._id, questions });
   } catch (err: unknown) {

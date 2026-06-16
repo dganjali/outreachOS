@@ -853,11 +853,14 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
 
 /* Mission detail - overview & AI placeholder */
 .mission-overview-card {
-  padding: 1.25rem 1.5rem;
+  padding: var(--space-4) var(--space-5);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  margin-bottom: 1.5rem;
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--space-5);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-4) var(--space-6);
 }
 
 .mission-overview-card h2 {
@@ -870,25 +873,24 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
 }
 
 .mission-overview-row {
-  margin-bottom: 0.75rem;
-}
-
-.mission-overview-row:last-child {
   margin-bottom: 0;
+  min-width: 0;
 }
 
 .mission-overview-row strong {
   display: block;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  color: var(--text-muted);
-  margin-bottom: 0.2rem;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-subtle);
+  margin-bottom: var(--space-1);
 }
 
 .mission-overview-row span {
-  font-size: 0.9375rem;
+  font-size: var(--text-base);
   color: var(--text);
-  line-height: 1.45;
+  line-height: 1.5;
 }
 
 .mission-ai-placeholder {
@@ -1372,13 +1374,13 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
   color: var(--text-muted);
 }
 .angle-pill {
-  margin-left: 0.5rem;
   padding: 0.1rem 0.5rem;
   font-size: 0.7rem;
   background: var(--success-soft);
   color: var(--success);
   border-radius: 999px;
 }
+.sequence-toggle .angle-pill { margin-left: 0; }
 .status-pill {
   display: inline-block;
   padding: 0.15rem 0.5rem;
@@ -1519,21 +1521,43 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
   align-items: flex-start;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 1rem 1.25rem;
-  margin-bottom: 1rem;
+  gap: var(--space-3) var(--space-5);
+  margin-bottom: var(--space-5);
 }
+.mission-detail-headline { min-width: 0; }
 .mission-detail-meta {
-  margin: 0.25rem 0 0;
+  margin: var(--space-2) 0 0;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  font-size: 0.875rem;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
   color: var(--text-muted);
 }
+/* Stats read as discrete dot-separated tokens, not one run-on string. */
+.mission-detail-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.mission-detail-stats > span { position: relative; }
+.mission-detail-stats > span + span::before {
+  content: '';
+  position: absolute;
+  left: calc(-1 * var(--space-2) + 1px);
+  top: 50%;
+  width: 2px;
+  height: 2px;
+  margin-top: -1px;
+  border-radius: 999px;
+  background: var(--fg-faint);
+}
+/* Right cluster: keep the action buttons on one tidy row, never chaotic. */
 .mission-detail-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  justify-content: flex-end;
+  gap: var(--space-2);
   align-items: center;
 }
 .mission-detail-actions .btn-primary.go {
@@ -1570,63 +1594,123 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
 .target-accordion {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--space-2);
 }
 .target-accordion .target-item {
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
-  transition: border-color 0.15s ease;
+  transition: border-color var(--dur) var(--ease-out);
 }
 .target-accordion .target-item.status-approved { border-left: 3px solid var(--success); }
 .target-accordion .target-item.status-contacted { border-left: 3px solid var(--info); }
-.target-accordion .target-item.active { border-color: var(--primary); }
+.target-accordion .target-item.active { border-color: var(--accent); }
 .target-accordion .target-trigger {
-  padding: 0.9rem 1.1rem;
-  font-size: 0.9375rem;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-md);
   text-decoration: none;
 }
 .target-accordion .target-trigger:hover {
   text-decoration: none;
   background: var(--surface);
 }
+/* Trigger layout: company name (primary) on the left, contact/draft counts
+ * right-aligned. Fit-score and signal sit as subtle chips beside the name. */
 .target-accordion .target-summary {
   display: flex;
   flex: 1;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.target-accordion .target-summary-main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   min-width: 0;
 }
 .target-accordion .target-summary-name {
   font-weight: 600;
-  font-size: 1rem;
+  font-size: var(--text-md);
   color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.target-accordion .target-summary-spacer { flex: 1; }
+.target-accordion .target-summary-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 0 0 auto;
+}
 .target-accordion .target-summary-meta {
-  font-size: 0.8125rem;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
   color: var(--text-muted);
   white-space: nowrap;
+  flex: 0 0 auto;
 }
-.target-accordion .target-content { padding: 0 1.1rem 1.1rem; }
+.target-accordion .target-summary-drafts {
+  padding: 0.05rem 0.45rem;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-full);
+}
+.target-accordion .target-content {
+  padding: 0 var(--space-4) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+/* Content head: domain/industry meta on the left, status + delete on the right. */
 .target-content-head {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   flex-wrap: wrap;
-  gap: 0.5rem;
-  padding-top: 0.25rem;
-  margin-bottom: 0.5rem;
+  gap: var(--space-2) var(--space-3);
+  padding-top: var(--space-3);
+  margin-bottom: 0;
+}
+.target-content-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.target-content-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 0 0 auto;
 }
 .target-content-head select {
   padding: 0.25rem 0.5rem;
-  font-size: 0.8125rem;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  font-size: var(--text-sm);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
   background: var(--bg);
   color: var(--text);
 }
+.target-delete {
+  font-size: 1.1rem;
+  line-height: 1;
+  width: 1.5rem;
+  height: 1.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+}
+.target-delete:hover { background: var(--surface-2); text-decoration: none; }
 
 .target-card-header {
   display: flex;
@@ -1666,33 +1750,53 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
   background: var(--bg);
   color: var(--text);
 }
-.target-whynow {
-  margin: 0.25rem 0;
-  font-size: 0.875rem;
-  color: var(--text);
+/* Rationale block: a soft inset well so why-now / fit reasoning reads as
+ * context rather than competing with the action buttons. */
+.target-rationale {
+  padding: var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
 }
-.target-whynow strong { color: var(--text-muted); font-weight: 600; }
+.target-whynow {
+  margin: 0;
+  font-size: var(--text-base);
+  color: var(--text);
+  line-height: 1.5;
+}
+.target-whynow strong {
+  color: var(--text-subtle);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: var(--text-xs);
+  letter-spacing: 0.04em;
+  margin-right: var(--space-1);
+}
 .target-fit {
-  margin: 0.125rem 0 0.75rem;
-  font-size: 0.8125rem;
+  margin: 0;
+  font-size: var(--text-sm);
   color: var(--text-muted);
+  line-height: 1.5;
 }
 .target-actions {
   display: flex;
-  gap: 0.5rem;
-  margin-top: 0.5rem;
+  gap: var(--space-2);
+  margin-top: 0;
 }
 .target-actions .btn-secondary,
 .mission-detail-actions .btn-secondary {
   padding: 0.4rem 0.875rem;
-  font-size: 0.875rem;
+  font-size: var(--text-base);
   font-weight: 500;
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition: background var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out);
 }
 .target-actions .btn-secondary:hover:not(:disabled),
 .mission-detail-actions .btn-secondary:hover:not(:disabled) { background: var(--surface); border-color: var(--fg-subtle); }
@@ -1728,47 +1832,73 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
 
 /* Contact list */
 .contact-list {
-  margin-top: 0.875rem;
-  padding-top: 0.875rem;
+  margin-top: var(--space-1);
+  padding-top: var(--space-3);
   border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  gap: 0.625rem;
+  gap: var(--space-2);
 }
 .contact-list-title {
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-muted);
 }
 .contact-row {
-  padding: 0.75rem 0.875rem;
+  padding: var(--space-3);
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
 }
 .contact-row-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: var(--space-3);
   flex-wrap: wrap;
 }
-.contact-role { color: var(--text-muted); font-size: 0.875rem; }
+/* Name + role + confidence read as one identity cluster on the left. */
+.contact-identity {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.contact-name-line {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.contact-name-line strong { color: var(--text); }
+.contact-role {
+  color: var(--text-muted);
+  font-size: var(--text-base);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .confidence {
-  margin-left: 0.5rem;
+  margin-left: 0;
   padding: 0.05rem 0.4rem;
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   color: var(--text-muted);
+  flex: 0 0 auto;
 }
-.contact-row-actions { display: flex; align-items: center; gap: 0.5rem; }
-.contact-email { margin-top: 0.25rem; font-size: 0.8125rem; color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+/* Contact-level action cluster: LinkedIn, status, Draft email - aligned, even gaps. */
+.contact-row-actions { display: flex; align-items: center; gap: var(--space-2); flex: 0 0 auto; }
+.contact-email { margin-top: 0; font-size: var(--text-sm); color: var(--text); font-family: var(--font-mono); }
 .contact-email.muted { color: var(--text-muted); }
-.contact-reason { margin-top: 0.25rem; font-size: 0.8125rem; color: var(--text-muted); }
+.contact-reason { margin-top: 0; font-size: var(--text-sm); color: var(--text-muted); line-height: 1.5; }
 
 .btn-primary.small {
   padding: 0.35rem 0.75rem;
@@ -1783,33 +1913,48 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
 .btn-primary.small:hover:not(:disabled) { background: var(--primary-hover); }
 .btn-primary.small:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* Sequence card */
+/* Sequence card - the contact's draft. A forest-green left rule ties it visually
+ * to its contact and signals "this is the actionable draft", not more metadata. */
 .sequence-card {
-  margin-top: 0.625rem;
-  padding: 0.625rem 0.875rem;
+  margin-top: var(--space-1);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-left: 2px solid var(--accent-line);
+  border-radius: var(--radius);
+  overflow: hidden;
 }
+.sequence-card.open { border-left-color: var(--accent); }
 .sequence-toggle {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--space-2);
   width: 100%;
   background: none;
   border: none;
-  padding: 0;
-  font-size: 0.8125rem;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--text);
   text-align: left;
   cursor: pointer;
+  transition: background var(--dur) var(--ease-out);
+}
+.sequence-toggle:hover { background: var(--surface-2); }
+.sequence-toggle-caret { color: var(--text-muted); font-size: 0.7rem; flex: 0 0 auto; }
+.sequence-toggle-label { color: var(--text); }
+.sequence-toggle-count {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 .sequence-body {
-  margin-top: 0.625rem;
+  padding: var(--space-3);
+  border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--space-3);
 }
 .sequence-touch { padding: 0.625rem 0.75rem; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; }
 .sequence-touch-head {
@@ -1845,7 +1990,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
 .email-card {
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   overflow: hidden;
 }
 .email-card.is-sent { opacity: 0.85; }
@@ -1853,23 +1998,23 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.5rem 0.875rem;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
   background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
 .email-card-step {
   display: flex;
   align-items: baseline;
-  gap: 0.5rem;
-  font-size: 0.75rem;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-muted);
 }
 .email-card-sublabel {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   font-weight: 500;
   text-transform: none;
   letter-spacing: 0;
@@ -1877,24 +2022,24 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
   opacity: 0.85;
 }
 .email-meta {
-  padding: 0.625rem 0.875rem;
+  padding: var(--space-3);
   border-bottom: 1px dashed var(--border);
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: var(--space-1);
 }
-.email-meta-row { display: flex; gap: 0.5rem; font-size: 0.8125rem; line-height: 1.4; }
+.email-meta-row { display: flex; gap: var(--space-2); font-size: var(--text-sm); line-height: 1.4; }
 .email-meta-key {
   flex: 0 0 3.25rem;
   color: var(--text-muted);
   font-weight: 600;
 }
 .email-meta-val { color: var(--text); min-width: 0; word-break: break-word; }
-.email-meta-addr { color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.75rem; }
+.email-meta-addr { color: var(--text-muted); font-family: var(--font-mono); font-size: var(--text-xs); }
 .email-meta-subject { font-weight: 600; }
 .email-body {
-  padding: 0.875rem;
-  font-size: 0.875rem;
+  padding: var(--space-3);
+  font-size: var(--text-base);
   line-height: 1.6;
   color: var(--text);
   white-space: pre-wrap;
@@ -1902,24 +2047,28 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
   max-height: 22rem;
   overflow-y: auto;
 }
+/* Action bar: a single aligned cluster (Send / Edit / Save to Gmail / Copy) with
+ * an even gap and a clear divider from the body. Send stays the prominent control;
+ * the secondary links sit to its right and never wrap mid-label. */
 .email-card-actions {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: var(--space-3);
   flex-wrap: wrap;
-  padding: 0.625rem 0.875rem;
+  padding: var(--space-3);
   border-top: 1px solid var(--border);
   background: var(--surface);
 }
-.email-card-edit { padding: 0.75rem 0.875rem; display: flex; flex-direction: column; gap: 0.375rem; }
+.email-card-actions .link-button { white-space: nowrap; }
+.email-card-edit { padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }
 .email-field-label {
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-muted);
 }
-.email-field-label:not(:first-child) { margin-top: 0.375rem; }
+.email-field-label:not(:first-child) { margin-top: var(--space-2); }
 
 /* The primary send action - deliberately the most prominent control on the card. */
 .btn-send {
@@ -4007,9 +4156,11 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
 .target-evidence-toggle {
   cursor: pointer;
 }
+/* Evidence pack - discoverable (a labeled, collapsible row) but quiet when
+ * closed: a single hairline-bordered summary on the surface tone, no fill. */
 .evidence-pack-collapsible {
-  margin-top: 0.85rem;
-  padding: 0.65rem 0.85rem;
+  margin-top: 0;
+  padding: var(--space-2) var(--space-3);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -4017,8 +4168,8 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
 .evidence-pack-collapsible > summary {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  font-size: 0.85rem;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--text);
   list-style: none;
@@ -4028,24 +4179,28 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
   content: '▸';
   font-size: 0.7rem;
   color: var(--text-muted);
-  transition: transform 0.15s ease;
+  transition: transform var(--dur) var(--ease-out);
   display: inline-block;
 }
 .evidence-pack-collapsible[open] > summary::before { transform: rotate(90deg); }
+.evidence-pack-collapsible[open] > summary { margin-bottom: var(--space-1); }
 .evidence-pack-collapsible ol {
-  margin: 0.6rem 0 0;
+  margin: var(--space-2) 0 0;
   padding-left: 1.25rem;
-  font-size: 0.875rem;
+  font-size: var(--text-base);
   color: var(--text);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
 }
 .evidence-pack-collapsible li {
-  margin-bottom: 0.5rem;
+  margin-bottom: 0;
   line-height: 1.45;
 }
 
 .target-actions-grouped {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--space-2);
   flex-wrap: wrap;
   align-items: center;
 }

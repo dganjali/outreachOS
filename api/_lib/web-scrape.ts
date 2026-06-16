@@ -4,7 +4,7 @@
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 
-const FETCH_TIMEOUT_MS = 8_000;
+const FETCH_TIMEOUT_MS = 6_000;
 const USER_AGENT =
   'Mozilla/5.0 (compatible; OutreachOS/1.0; +https://outreachos.app) AppleWebKit/537.36';
 
@@ -181,6 +181,55 @@ export async function fetchPageText(url: string): Promise<string | null> {
   }
 }
 
+/**
+ * Cheap "does this domain serve a live page?" probe, reusing the same SSRF guard
+ * + manual-redirect + timeout machinery as fetchPageText. Used by the company
+ * domain-guess fallback to accept a guessed hostname only when it actually
+ * resolves to a real site (2xx, or a 3xx that lands somewhere public). We GET
+ * rather than HEAD because many hosts answer HEAD with 405; we never read the
+ * body, so the cost is just headers. Returns false on any error/timeout.
+ */
+export async function isDomainLive(domain: string): Promise<boolean> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  try {
+    let current = `https://${domain}`;
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      let parsed: URL;
+      try {
+        parsed = new URL(current);
+      } catch {
+        return false;
+      }
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+
+      const pinnedIp = await resolvePublicHost(parsed.hostname);
+      if (!pinnedIp) return false;
+
+      const res = await fetch(current, {
+        signal: ctrl.signal,
+        headers: { 'User-Agent': USER_AGENT, Accept: 'text/html,application/xhtml+xml' },
+        redirect: 'manual',
+      });
+
+      // Re-validate each redirect hop (a public host could 3xx onto internal IP).
+      if (res.status >= 300 && res.status < 400) {
+        const loc = res.headers.get('location');
+        if (!loc) return false;
+        current = new URL(loc, current).toString();
+        continue;
+      }
+      // A 2xx (or any non-redirect success-ish status < 400) means the host is up.
+      return res.status < 400;
+    }
+    return false; // too many redirects
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function extractEmailsFromHtml(html: string, domain?: string): string[] {
   const found = new Set<string>();
 
@@ -309,21 +358,24 @@ export function matchEmailForPerson(
 const COMMON_PATHS = ['', '/about', '/about-us', '/team', '/people', '/company', '/contact', '/contact-us'];
 
 export async function scrapeCompanyEmails(domain: string): Promise<ScrapeResult> {
-  const pagesScraped: string[] = [];
   const allEmails = new Set<string>();
 
+  // Fetch every (base × path) page CONCURRENTLY rather than one-at-a-time. The
+  // sequential walk's early-out (`>= 12`/`>= 8` emails) only ever shaved a page
+  // or two off a ~16-page crawl while paying full latency per page; firing them
+  // all at once and merging the results is far faster and yields the same set.
+  // allSettled so one dead/timed-out page never sinks the rest.
   const bases = [`https://${domain}`, `https://www.${domain}`];
-  for (const base of bases) {
-    for (const path of COMMON_PATHS) {
-      const url = `${base}${path}`;
-      const html = await fetchPageText(url);
-      if (!html) continue;
-      pagesScraped.push(url);
-      for (const e of extractEmailsFromHtml(html, domain)) allEmails.add(e);
-      if (allEmails.size >= 12) break;
-    }
-    if (allEmails.size >= 8) break;
-  }
+  const urls = bases.flatMap((base) => COMMON_PATHS.map((path) => `${base}${path}`));
+  const settled = await Promise.allSettled(urls.map((url) => fetchPageText(url)));
+
+  // Merge in URL order so dedup/precedence is identical to the old serial walk.
+  const pagesScraped: string[] = [];
+  settled.forEach((s, idx) => {
+    if (s.status !== 'fulfilled' || !s.value) return;
+    pagesScraped.push(urls[idx]);
+    for (const e of extractEmailsFromHtml(s.value, domain)) allEmails.add(e);
+  });
 
   const emails = [...allEmails];
   return {

@@ -43,6 +43,7 @@ import {
   deleteExemplar,
   emptyStyleProfile,
   getPersonaBundle,
+  isPersonaCalibrated,
   listContextFacts,
   updatePersona,
   type PersonaBundle,
@@ -116,6 +117,10 @@ export function PersonaWizard({
   const [calSubject, setCalSubject] = useState('');
   const [calBody, setCalBody] = useState('');
   const [calInstructions, setCalInstructions] = useState<string[]>([]);
+  // The draft EXACTLY as the engine first generated it, before any hand-edits.
+  // Diffed against the confirmed draft at commit time so manual edits (not just
+  // chat instructions) are learned as taste/feedback.
+  const calOriginalRef = useRef<{ subject: string; body: string } | null>(null);
   // persona (created lazily; the StyleProfile shown on the overview)
   const [persona, setPersona] = useState<Persona | null>(null);
   const personaIdRef = useRef<string | null>(initialPersonaId ?? null);
@@ -319,9 +324,23 @@ export function PersonaWizard({
   async function commitCalibration() {
     const pid = await ensurePersona();
     if (calBody.trim()) {
+      // Capture any manual edits (the user hand-edited the generated draft
+      // without telling the chat) as edit-deltas, so the learning loop sees
+      // them as feedback alongside explicit instructions.
+      const orig = calOriginalRef.current;
+      const editDeltas: Array<{ original: string; final: string }> = [];
+      if (orig) {
+        if (orig.subject.trim() !== calSubject.trim()) {
+          editDeltas.push({ original: orig.subject, final: calSubject });
+        }
+        if (orig.body.trim() !== calBody.trim()) {
+          editDeltas.push({ original: orig.body, final: calBody });
+        }
+      }
       await agents.extractStyle({
         persona_id: pid,
         chat_instructions: calInstructions,
+        ...(editDeltas.length ? { edit_deltas: editDeltas } : {}),
         confirmed_exemplar: { subject: calSubject || null, body: calBody },
         source: 'onboarding',
       });
@@ -429,6 +448,9 @@ export function PersonaWizard({
               instructions={calInstructions}
               setInstructions={setCalInstructions}
               ensurePersona={ensurePersona}
+              onGenerated={(d) => {
+                calOriginalRef.current = d;
+              }}
             />
           )}
           {step === 'overview' && (
@@ -809,6 +831,18 @@ function ClarifyStep({
     }
   }
 
+  // Auto-generate the questions the moment the user lands on this step (once),
+  // so they never have to press a button and wait. Needs at least one fact to
+  // adapt to; if there's nothing yet we stay quiet until they add substance.
+  const autoAskedRef = useRef(false);
+  useEffect(() => {
+    if (autoAskedRef.current || asked || loading) return;
+    if (facts.length === 0) return;
+    autoAskedRef.current = true;
+    void ask();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [facts.length]);
+
   function saveAnswer(q: Question) {
     const a = answers[q.id]?.trim();
     if (!a) return;
@@ -820,17 +854,21 @@ function ClarifyStep({
   return (
     <div className="pw-step">
       <StepHead
-        q="Mind a few quick questions?"
-        hint="The agent reads what you've added and asks only what fills the biggest gaps. Optional - answer what's useful, skip the rest."
+        q="A couple of quick questions."
+        hint="We read what you've added and ask only what fills the biggest gaps. Optional - answer what's useful, skip the rest."
       />
-      {!asked && (
-        <button type="button" className="pw-btn-add" onClick={ask} disabled={loading || facts.length === 0}>
-          {loading ? <Loader2 className="pw-spin" size={14} /> : <Sparkles size={14} />}
-          {loading ? 'Thinking…' : 'Ask me questions'}
-        </button>
+      {loading && (
+        <p className="pw-calib-meta">
+          <Loader2 className="pw-spin" size={13} /> Reading your substance…
+        </p>
       )}
-      {facts.length === 0 && !asked && (
+      {facts.length === 0 && !asked && !loading && (
         <p className="pw-empty">Add a fact or two on the previous step first - the questions adapt to you.</p>
+      )}
+      {asked && !loading && (
+        <button type="button" className="pw-calib-regen" onClick={ask} disabled={loading}>
+          <Sparkles size={13} /> Regenerate questions
+        </button>
       )}
       {error && <p className="pw-error">{error}</p>}
       <div className="pw-clar-list">
@@ -971,6 +1009,7 @@ function CalibrateStep({
   instructions,
   setInstructions,
   ensurePersona,
+  onGenerated,
 }: {
   subject: string;
   setSubject: (v: string) => void;
@@ -979,6 +1018,7 @@ function CalibrateStep({
   instructions: string[];
   setInstructions: React.Dispatch<React.SetStateAction<string[]>>;
   ensurePersona: () => Promise<string>;
+  onGenerated: (draft: { subject: string; body: string }) => void;
 }) {
   const [instruction, setInstruction] = useState('');
   const [busy, setBusy] = useState(false);
@@ -1021,6 +1061,8 @@ function CalibrateStep({
       setSubject(data.subject);
       setBody(data.body);
       setBodyVersion((v) => v + 1);
+      // Remember the pristine generated draft so manual edits can be diffed.
+      onGenerated({ subject: data.subject, body: data.body });
       setGenState('ready');
     } catch (e) {
       setGenError(e instanceof Error ? e.message : 'Could not draft right now - edit below or regenerate.');
@@ -1028,7 +1070,7 @@ function CalibrateStep({
     } finally {
       setGenerating(false);
     }
-  }, [ensurePersona, setSubject, setBody]);
+  }, [ensurePersona, setSubject, setBody, onGenerated]);
 
   // Generate a draft on first entry (only if we don't already have one).
   const triedRef = useRef(false);
@@ -1038,6 +1080,8 @@ function CalibrateStep({
     if (body.trim()) {
       setGenState('ready');
       setBodyVersion((v) => v + 1);
+      // We re-entered with an existing draft - treat it as the baseline.
+      onGenerated({ subject, body });
     } else {
       generate();
     }
@@ -1085,6 +1129,9 @@ function CalibrateStep({
       setSubject(r.subject);
       setBody(r.body);
       setBodyVersion((v) => v + 1);
+      // The refined output is the new machine baseline; the instruction itself
+      // is already captured separately, so later hand-edits diff against this.
+      onGenerated({ subject: r.subject, body: r.body });
       setInstructions((prev) => [...prev, instr]);
       if (isSpan) {
         setPopover(null);
@@ -1275,12 +1322,18 @@ function OverviewStep({
 function VoiceProfile({ persona }: { persona: Persona | null }) {
   const sp = persona?.style_profile;
   const dims = Object.entries(sp?.dimensions ?? {});
-  if (!sp || (!sp.voice_summary && dims.length === 0)) {
+  const calibrated = isPersonaCalibrated(persona);
+  // Only show "not calibrated" when the persona truly hasn't been through
+  // Calibrate. Once a draft has been confirmed (onboarding completed), the
+  // extractor can still be too conservative to emit dimensions/summary - so we
+  // treat the persona as calibrated and show whatever voice signal we have.
+  if (!calibrated && (!sp || (!sp.voice_summary && dims.length === 0))) {
     return <p className="pw-empty">Not calibrated yet - run a draft through Calibrate to learn your voice.</p>;
   }
+  const summary = sp?.voice_summary?.trim() || 'Calibrated on your confirmed draft.';
   return (
     <div className="pw-voice">
-      {sp.voice_summary && <p className="pw-ov-snippet">“{sp.voice_summary}”</p>}
+      <p className="pw-ov-snippet">“{summary}”</p>
       {dims.length > 0 && (
         <div className="pw-voice-dims">
           {dims.map(([n, d]) => (
@@ -1293,16 +1346,16 @@ function VoiceProfile({ persona }: { persona: Persona | null }) {
           ))}
         </div>
       )}
-      {(sp.rules?.length ?? 0) > 0 && (
+      {(sp?.rules?.length ?? 0) > 0 && (
         <ul className="pw-ov-list">
-          {sp.rules.slice(0, 3).map((r, i) => (
+          {sp!.rules.slice(0, 3).map((r, i) => (
             <li key={i}>{r.rule}</li>
           ))}
         </ul>
       )}
-      {(sp.banned_phrases?.length ?? 0) > 0 && (
+      {(sp?.banned_phrases?.length ?? 0) > 0 && (
         <div className="pw-chips">
-          {sp.banned_phrases.map((p) => (
+          {sp!.banned_phrases.map((p) => (
             <span key={p} className="pw-chip pw-chip-avoid">
               {p}
             </span>

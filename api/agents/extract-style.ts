@@ -21,6 +21,7 @@ interface DeltaOut {
   rules: Array<{ rule: string; confidence: number }>;
   bannedPhrases: string[];
   voiceSummary: string;
+  subjectStyle: string;
 }
 
 const SCHEMA = {
@@ -48,15 +49,17 @@ const SCHEMA = {
     },
     bannedPhrases: { type: 'array', items: { type: 'string' } },
     voiceSummary: { type: 'string' },
+    subjectStyle: { type: 'string' },
   },
-  required: ['dimensions', 'rules', 'bannedPhrases', 'voiceSummary'],
+  required: ['dimensions', 'rules', 'bannedPhrases', 'voiceSummary', 'subjectStyle'],
 } as const;
 
 const SYSTEM = `You extract a CONSERVATIVE style delta for a user's outreach persona from calibration signal. Rules:
 - Known dimensions (0..1): formality, warmth, directness, hedging, emoji, jargon, enthusiasm, brevity. Only emit a dimension you have real evidence for.
 - Confidence calibration: an EXPLICIT instruction ("make it less formal") → high confidence (0.7–0.9) because the user directly told us. An inference from a single edit-delta → low/medium (0.2–0.4). Never assert high confidence from one noisy sample.
 - rules: only durable, explicit do/don'ts the user expressed. bannedPhrases: only phrases they clearly rejected.
-- voiceSummary: a 1–2 sentence prose summary, or "" if you can't improve on what's known.
+- voiceSummary: ALWAYS return a 1–2 sentence prose summary of how this person writes, based on the signal (the confirmed email is strong evidence). Only return "" if there is genuinely no signal at all.
+- subjectStyle: if a CONFIRMED SUBJECT or a subject edit-delta is present, return a short directive describing how this sender likes their subject lines - capture length (e.g. "2–4 words"), casing (lowercase / Title Case / Sentence case), punctuation, and any pattern (e.g. "no greeting, leads with the ask", "references the company"). Base it on the ACTUAL subject they confirmed/edited. If there is no subject signal, return "".
 Output JSON only.`;
 
 export default async function handler(req: Request, res: Response) {
@@ -96,6 +99,9 @@ export default async function handler(req: Request, res: Response) {
           .join('\n')}`
       );
     }
+    if (body.confirmed_exemplar?.subject?.trim()) {
+      signalParts.push(`CONFIRMED SUBJECT (learn the subject-line style from this):\n${body.confirmed_exemplar.subject.trim()}`);
+    }
     if (body.confirmed_exemplar?.body) {
       signalParts.push(`CONFIRMED GOOD EMAIL:\n${body.confirmed_exemplar.body}`);
     }
@@ -120,8 +126,16 @@ export default async function handler(req: Request, res: Response) {
           rules: r.data.rules ?? [],
           bannedPhrases: r.data.bannedPhrases ?? [],
           voiceSummary: r.data.voiceSummary ?? '',
+          subjectStyle: r.data.subjectStyle ?? '',
         };
       }
+    }
+
+    // Calibration should never leave a confirmed persona looking "uncalibrated".
+    // If the extractor was too conservative to emit a summary but the user just
+    // confirmed a real draft, seed a minimal summary so the voice reads as set.
+    if (!delta.voiceSummary?.trim() && !persona.styleProfile.voiceSummary?.trim() && body.confirmed_exemplar?.body) {
+      delta.voiceSummary = 'Calibrated on a confirmed draft in the sender’s own voice.';
     }
 
     const merged = mergeStyleProfile(persona.styleProfile, delta, source);

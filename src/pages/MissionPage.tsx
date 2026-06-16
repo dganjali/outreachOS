@@ -327,12 +327,16 @@ export function MissionPage() {
       </Link>
 
       <header className="mission-detail-header">
-        <div>
+        <div className="mission-detail-headline">
           <h1 style={{ margin: 0 }}>{mission.name}</h1>
-          <p className="mission-detail-meta">
+          <div className="mission-detail-meta">
             <span className="mode-pill">{MODE_LABEL[mission.mode] ?? mission.mode}</span>
-            <span>· {visibleTargets.length} targets · {totalContacts} contacts · {totalDrafts} drafts</span>
-          </p>
+            <span className="mission-detail-stats">
+              <span>{visibleTargets.length} targets</span>
+              <span>{totalContacts} contacts</span>
+              <span>{totalDrafts} drafts</span>
+            </span>
+          </div>
         </div>
         <div className="mission-detail-actions">
           <CsvImport missionId={mission.id} onImported={loadTargets} />
@@ -414,54 +418,71 @@ export function MissionPage() {
                 >
                   <AccordionTrigger className="target-trigger">
                     <span className="target-summary">
-                      <span className="target-summary-name">{t.company_name}</span>
-                      {score != null && (
-                        <span className="target-score" title="Fit score">
-                          {score}
+                      <span className="target-summary-main">
+                        <span className="target-summary-name">{t.company_name}</span>
+                        <span className="target-summary-chips">
+                          {score != null && (
+                            <span className="target-score" title="Fit score">
+                              {score}
+                            </span>
+                          )}
+                          {t.signal_type && <span className="signal-pill subtle">{t.signal_type}</span>}
                         </span>
-                      )}
-                      {t.signal_type && <span className="signal-pill">{t.signal_type}</span>}
-                      <span className="target-summary-spacer" />
+                      </span>
                       <span className="target-summary-meta">
-                        {contacts.length > 0
-                          ? `${contacts.length} contact${contacts.length === 1 ? '' : 's'}`
-                          : 'No contacts yet'}
-                        {draftCount > 0 && ` · ${draftCount} draft${draftCount === 1 ? '' : 's'}`}
+                        <span>
+                          {contacts.length > 0
+                            ? `${contacts.length} contact${contacts.length === 1 ? '' : 's'}`
+                            : 'No contacts'}
+                        </span>
+                        {draftCount > 0 && (
+                          <span className="target-summary-drafts">
+                            {draftCount} draft{draftCount === 1 ? '' : 's'}
+                          </span>
+                        )}
                       </span>
                     </span>
                   </AccordionTrigger>
                   <AccordionContent className="target-content">
                     <div className="target-content-head">
-                      {t.domain && (
-                        <a href={`https://${t.domain}`} target="_blank" rel="noreferrer" className="target-domain">
-                          {t.domain} ↗
-                        </a>
-                      )}
-                      {t.industry && <span className="signal-pill subtle">{t.industry}</span>}
-                      {typeof t.employee_count === 'number' && (
-                        <span className="signal-pill subtle">{t.employee_count.toLocaleString()} ppl</span>
-                      )}
-                      <span className="target-summary-spacer" />
-                      <select
-                        value={t.status}
-                        onChange={(e) => setTargetStatus(t, e.target.value as Target['status'])}
-                      >
-                        <option value="suggested">Suggested</option>
-                        <option value="approved">Approved</option>
-                        <option value="rejected">Rejected</option>
-                        <option value="contacted">Contacted</option>
-                      </select>
-                      <button
-                        type="button"
-                        className="link-button"
-                        onClick={() => deleteTarget(t)}
-                        title="Remove target"
-                      >
-                        ×
-                      </button>
+                      <div className="target-content-meta">
+                        {t.domain && (
+                          <a href={`https://${t.domain}`} target="_blank" rel="noreferrer" className="target-domain">
+                            {t.domain} ↗
+                          </a>
+                        )}
+                        {t.industry && <span className="signal-pill subtle">{t.industry}</span>}
+                        {typeof t.employee_count === 'number' && (
+                          <span className="signal-pill subtle">{t.employee_count.toLocaleString()} ppl</span>
+                        )}
+                      </div>
+                      <div className="target-content-controls">
+                        <select
+                          value={t.status}
+                          onChange={(e) => setTargetStatus(t, e.target.value as Target['status'])}
+                        >
+                          <option value="suggested">Suggested</option>
+                          <option value="approved">Approved</option>
+                          <option value="rejected">Rejected</option>
+                          <option value="contacted">Contacted</option>
+                        </select>
+                        <button
+                          type="button"
+                          className="link-button target-delete"
+                          onClick={() => deleteTarget(t)}
+                          title="Remove target"
+                        >
+                          ×
+                        </button>
+                      </div>
                     </div>
-                  {t.why_now && <p className="target-whynow"><strong>Why now:</strong> {t.why_now}</p>}
-                  {t.fit_reason && <p className="target-fit">{t.fit_reason}</p>}
+
+                  {(t.why_now || t.fit_reason) && (
+                    <div className="target-rationale">
+                      {t.why_now && <p className="target-whynow"><strong>Why now</strong> {t.why_now}</p>}
+                      {t.fit_reason && <p className="target-fit">{t.fit_reason}</p>}
+                    </div>
+                  )}
 
                   <div className="target-actions target-actions-grouped">
                     <button
@@ -520,9 +541,11 @@ export function MissionPage() {
                         return (
                           <div key={c.id} className="contact-row">
                             <div className="contact-row-head">
-                              <div>
-                                <strong>{c.name}</strong>
-                                <span className="contact-role"> · {c.role}</span>
+                              <div className="contact-identity">
+                                <span className="contact-name-line">
+                                  <strong>{c.name}</strong>
+                                  <span className="contact-role">{c.role}</span>
+                                </span>
                                 {typeof c.confidence === 'number' && (
                                   <span className="confidence" title="Confidence">
                                     {Math.round(c.confidence * 100)}%
@@ -676,10 +699,14 @@ function SequenceCard({ sequence, contact }: { sequence: EmailSequence; contact:
   }
 
   return (
-    <div className="sequence-card">
+    <div className={`sequence-card${open ? ' open' : ''}`}>
       <button type="button" className="sequence-toggle" onClick={() => setOpen((o) => !o)}>
-        {open ? '▾' : '▸'} Email sequence
+        <span className="sequence-toggle-caret" aria-hidden>{open ? '▾' : '▸'}</span>
+        <span className="sequence-toggle-label">Draft email{draft.followups.length > 0 ? ' sequence' : ''}</span>
         {sequence.primary_angle && <span className="angle-pill">{sequence.primary_angle}</span>}
+        {!open && draft.followups.length > 0 && (
+          <span className="sequence-toggle-count">{draft.followups.length + 1} emails</span>
+        )}
       </button>
       {open && (
         <div className="sequence-body">

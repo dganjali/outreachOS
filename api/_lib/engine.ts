@@ -157,6 +157,7 @@ const DRAFT_SYSTEM = `You are the drafting engine for OutreachOS. You write one 
 Non-negotiable rules:
 - GROUNDING: You may only assert facts that appear in ALLOWED FACTS. Every factual claim in the email MUST be listed in "claims" with the exact id of the fact that supports it. If you cannot support a statement with an allowed fact, do not write it. Never invent metrics, names, dates, or events.
 - VOICE: Match the sender's exemplars and style profile - imitate their rhythm, structure, and register. Do NOT regress to generic "professional email" voice.
+- SUBJECT: If the style profile specifies a SUBJECT-LINE STYLE, the subject MUST follow it exactly (length, casing, punctuation, pattern). Otherwise mirror the subject style of the sender's exemplars. Never default to a generic "Quick question" style subject.
 - NO SLOP: No "I hope this finds you well", no "I came across your company", no filler, no hedging, no flattery. Respect the sender's banned-phrase list absolutely.
 - FORMAT: Initial email under the word target. Plain text. One specific, low-friction, time-boxed CTA.
 - SIGN-OFF: Always end the body with a short closing line (e.g. "Best,") followed by the sender's name on the next line. Use the SENDER name provided verbatim - NEVER leave a placeholder like "[Your Name]", "[Name]", or "{{name}}". The sign-off is part of the body, not the subject.
@@ -188,6 +189,7 @@ function styleProfileBlock(sp: StyleProfile): string {
   const rules = (sp.rules ?? []).map((r) => `  - ${r.rule}`).join('\n');
   return [
     sp.voiceSummary ? `VOICE SUMMARY:\n${sp.voiceSummary}` : '',
+    sp.subjectStyle?.trim() ? `SUBJECT-LINE STYLE (the subject MUST follow this):\n${sp.subjectStyle.trim()}` : '',
     dims ? `STYLE DIMENSIONS:\n${dims}` : '',
     rules ? `RULES (hard do/don'ts):\n${rules}` : '',
     sp.bannedPhrases?.length ? `BANNED PHRASES (never use):\n  - ${sp.bannedPhrases.join('\n  - ')}` : '',

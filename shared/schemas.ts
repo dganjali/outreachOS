@@ -136,6 +136,11 @@ export interface StyleProfile {
   bannedPhrases: string[];
   // Short prose summary regenerated from the above, injected into the prompt.
   voiceSummary: string;
+  // Learned subject-line preference - a short directive describing how the
+  // sender likes subjects (length, casing, punctuation, style). Captured from
+  // the subject the user confirms/edits during calibration and applied to every
+  // generated draft so the subjects that actually get SENT match their format.
+  subjectStyle?: string;
   // How closely the generator should hug the persona's exemplar emails as a
   // template: 0 = loose inspiration (borrow only the voice), 100 = follow the
   // structure/phrasing of the closest exemplar almost verbatim. User-set via the
@@ -145,7 +150,7 @@ export interface StyleProfile {
 
 /** A fresh, empty StyleProfile (persona v1 before any calibration). */
 export function emptyStyleProfile(): StyleProfile {
-  return { dimensions: {}, rules: [], bannedPhrases: [], voiceSummary: '', templateStrictness: DEFAULT_TEMPLATE_STRICTNESS };
+  return { dimensions: {}, rules: [], bannedPhrases: [], voiceSummary: '', subjectStyle: '', templateStrictness: DEFAULT_TEMPLATE_STRICTNESS };
 }
 
 /** Mid-scale default: lean on the exemplar voice without copying its structure. */

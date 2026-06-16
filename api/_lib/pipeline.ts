@@ -42,8 +42,12 @@ export const MAX_TOP_CONTACTS = 5;
 // How many targets run at once. Derived per-run from the plan's per-minute cap
 // (with headroom) and clamped to this ceiling so a generous plan can't burst the
 // LLM quota or badly overshoot the daily cap.
-export const DEFAULT_PIPELINE_CONCURRENCY = 3;
-export const MAX_PIPELINE_CONCURRENCY = 4;
+// Safe to raise: the real quota guard is runs.ts:checkRateLimit (per-minute and
+// per-day caps), and runStep retries/pauses on those - so concurrency only sets
+// how hard we push toward the cap, never past it. With the smallest plan at 20
+// runs/min, the per-run cap is floor(20/4)=5, so 5 keeps the /4 burst headroom.
+export const DEFAULT_PIPELINE_CONCURRENCY = 4;
+export const MAX_PIPELINE_CONCURRENCY = 5;
 // Drafts overlapped within a single target (topContacts is small).
 const CONTACT_CONCURRENCY = 2;
 // Ceiling on how many backup companies a single run will pull in to replace
