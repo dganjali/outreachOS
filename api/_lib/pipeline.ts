@@ -1,20 +1,29 @@
-// Durable, resumable pipeline orchestration - the server-side replacement for
-// the old browser-driven run (which executed ~16 agent calls in the tab and
-// died on close).
+// Durable, resumable, *parallel* pipeline orchestration - the server-side
+// replacement for the old browser-driven run (which executed ~16 agent calls in
+// the tab and died on close).
 //
 // Design:
-//   • The `pipeline_runs` doc is the single source of truth for progress.
-//   • `advancePipeline()` is a pure-ish reducer: given a run + executors, it
-//     performs exactly ONE unit of work and returns the next run state. No I/O
-//     to Mongo lives in it, so it is trivially unit-testable with fake executors.
-//   • The driver loop persists after every step and writes a heartbeat, so a
-//     dropped connection or a restarted instance loses nothing - any later poll
-//     re-drives the run from its cursor (`resumeIfStale`).
+//   • The `pipeline_runs` doc is the single source of truth for progress. Each
+//     target carries its own step statuses (evidence/contacts/sequence and the
+//     per-contact `sequences[]`), so progress is tracked per-target rather than
+//     through a single cursor.
+//   • Targets are independent: a target's evidence → contacts → sequence chain
+//     never depends on another target's. So the driver fans out across targets
+//     with *bounded* concurrency (and overlaps a target's contact-drafts too).
+//     Within one target the chain stays serial because each step feeds the next.
+//   • Concurrency is bounded and launches are staggered. The per-minute LLM
+//     quota and the (non-atomic) daily run cap in runs.ts both punish bursts, so
+//     we keep a small pool and start workers a beat apart.
+//   • Every transition persists and writes a heartbeat, so a dropped connection
+//     or a restarted instance loses nothing - any later poll re-drives the run,
+//     and because each step keys off the target's persisted status the work is
+//     idempotent on resume (`resumeIfStale`).
 
 import { forUser, newId, type UserScope } from './db';
 import type { AuthedUser } from './auth';
 import { invokeAgent } from './internal-invoke';
-import type { PipelineRunDoc, PipelineStepStatus } from '../../shared/schemas';
+import { getPlanLimits } from './runs';
+import type { PipelineRunDoc, PipelineStepStatus, PipelineTargetState } from '../../shared/schemas';
 
 import targetHandler from '../agents/target';
 import evidenceHandler from '../agents/evidence';
@@ -26,19 +35,29 @@ export const DEFAULT_TOP_N = 5;
 export const DEFAULT_TOP_CONTACTS = 1;
 export const MAX_TOP_CONTACTS = 5;
 
-const PACE_MS = 2_500; // gap between steps so a per-minute cap doesn't stall us
+// How many targets run at once. Derived per-run from the plan's per-minute cap
+// (with headroom) and clamped to this ceiling so a generous plan can't burst the
+// LLM quota or badly overshoot the daily cap.
+export const DEFAULT_PIPELINE_CONCURRENCY = 3;
+export const MAX_PIPELINE_CONCURRENCY = 4;
+// Drafts overlapped within a single target (topContacts is small).
+const CONTACT_CONCURRENCY = 2;
+// Beat between starting successive target workers, to desynchronize the
+// count-then-insert in runs.ts:checkRateLimit (bounds daily-cap overshoot).
+const LAUNCH_STAGGER_MS = 600;
+
 const MINUTE_RETRY_WAIT_MS = 35_000;
 const MINUTE_RETRY_MAX = 2;
 export const STALE_HEARTBEAT_MS = 90_000; // older than this ⇒ driver is dead
 
 // ---------------------------------------------------------------------------
-// Typed errors so the reducer can tell "wait a minute" from "stop for today".
+// Typed errors so a step can tell "wait a minute" from "stop for today".
 // ---------------------------------------------------------------------------
 export class PipelineRateLimitError extends Error {} // per-minute: retryable
 export class PipelineDailyLimitError extends Error {} // per-day: pause the run
 
 // ---------------------------------------------------------------------------
-// Executors - the side-effecting calls the reducer drives. Real ones reuse the
+// Executors - the side-effecting calls the driver runs. Real ones reuse the
 // existing agent handlers verbatim via in-process invocation; tests pass fakes.
 // ---------------------------------------------------------------------------
 export interface PipelineExecutors {
@@ -85,11 +104,37 @@ export function realExecutors(user: AuthedUser): PipelineExecutors {
 }
 
 // ---------------------------------------------------------------------------
-// The reducer. One call = one unit of work. Returns the next run state.
+// The parallel processor. `runPipeline` advances a run to a terminal/paused
+// state, mutating a *copy* of the input (callers persist via the context). No
+// Mongo lives here, so it is unit-testable with fake executors + fake persist.
 // ---------------------------------------------------------------------------
 const HALTED: ReadonlySet<PipelineRunDoc['status']> = new Set(['paused', 'done', 'error', 'canceled']);
 
-function step(t: PipelineRunDoc['targets'][number], key: 'evidence' | 'contacts' | 'sequence', s: PipelineStepStatus) {
+/** Driver-supplied side effects + shared run flags. */
+export interface ProcContext {
+  exec: PipelineExecutors;
+  /** Max targets in flight at once. */
+  concurrency: number;
+  /** Max contact-drafts in flight within one target. */
+  contactConcurrency?: number;
+  /** Delay between starting successive target workers. */
+  launchStaggerMs?: number;
+  minuteRetryMax?: number;
+  minuteRetryWaitMs?: number;
+  /** Set true when any step hits the per-day cap; stops new work. */
+  paused: boolean;
+  /** Set true when an external cancel is observed; stops new work. */
+  canceled: boolean;
+  /** Persist target/note progress (never status) - safe to race with cancel. */
+  persist: (run: PipelineRunDoc) => Promise<void>;
+  /** Persist a status transition (running/paused/done/error). */
+  persistStatus: (run: PipelineRunDoc) => Promise<void>;
+  sleep: (ms: number) => Promise<void>;
+  /** Optional: re-read the run to notice an external cancel. */
+  checkCanceled?: () => Promise<boolean>;
+}
+
+function step(t: PipelineTargetState, key: 'evidence' | 'contacts' | 'sequence', s: PipelineStepStatus) {
   t[key] = s;
 }
 
@@ -102,133 +147,284 @@ function finishProcessing(r: PipelineRunDoc): PipelineRunDoc {
   return r;
 }
 
-function toNextTarget(r: PipelineRunDoc): void {
-  const next = (r.cursor?.targetIndex ?? 0) + 1;
-  if (next < r.targets.length) {
-    r.cursor = { targetIndex: next, step: 'evidence' };
-    r.note = `Researching ${r.targets[next].name}…`;
-  } else {
-    finishProcessing(r);
+function pauseForDaily(r: PipelineRunDoc): PipelineRunDoc {
+  r.status = 'paused';
+  r.cursor = null;
+  r.note = 'Daily agent-run limit reached - finished targets are ready; the rest resume tomorrow.';
+  return r; // per-target statuses preserved so a later run resumes exactly here
+}
+
+/** A target is finished once its aggregate draft status is terminal; every
+ *  failure path cascades to sequence='failed', so this single field decides it. */
+function targetTerminal(t: PipelineTargetState): boolean {
+  return t.sequence === 'done' || t.sequence === 'failed';
+}
+
+function progressNote(r: PipelineRunDoc): string {
+  const total = r.targets.length;
+  const done = r.targets.filter(targetTerminal).length;
+  return `Researched ${done} of ${total} companies…`;
+}
+
+function cloneRun(run: PipelineRunDoc): PipelineRunDoc {
+  return {
+    ...run,
+    targets: run.targets.map((t) => ({ ...t, contactIds: [...t.contactIds], sequences: [...t.sequences] })),
+    cursor: null,
+  };
+}
+
+/** Run one step, retrying a few times on a per-minute rate limit. Re-throws the
+ *  rate-limit error if retries are exhausted (caller marks the step failed) and
+ *  bubbles a daily-limit error immediately (caller pauses the run). */
+async function runStep<T>(ctx: ProcContext, fn: () => Promise<T>): Promise<T> {
+  const maxRetries = ctx.minuteRetryMax ?? MINUTE_RETRY_MAX;
+  const waitMs = ctx.minuteRetryWaitMs ?? MINUTE_RETRY_WAIT_MS;
+  let attempt = 0;
+  for (;;) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (e instanceof PipelineRateLimitError) {
+        if (++attempt > maxRetries) throw e;
+        await ctx.sleep(waitMs);
+        if (ctx.paused || ctx.canceled) throw e; // halted while waiting - give up
+        continue;
+      }
+      throw e;
+    }
   }
 }
 
-export async function advancePipeline(run: PipelineRunDoc, exec: PipelineExecutors): Promise<PipelineRunDoc> {
-  // Work on a copy so callers can diff/compare; the driver persists the result.
-  const r: PipelineRunDoc = { ...run, targets: run.targets.map((t) => ({ ...t })), cursor: run.cursor ? { ...run.cursor } : null };
-  if (HALTED.has(r.status)) return r;
-  r.status = 'running';
+const halted = (ctx: ProcContext) => ctx.paused || ctx.canceled;
 
-  if (r.phase === 'targeting') {
-    const found = await exec.targeting(r.missionId, r.config.targetCount);
-    const top = [...found].sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, r.config.topN);
-    if (top.length === 0) return finishProcessing(r);
-    r.targets = top.map((t) => ({
-      targetId: t.id,
-      name: t.name,
-      score: t.score,
-      evidence: 'queued',
-      contacts: 'queued',
-      sequence: 'queued',
-      contactIds: [],
-      sequences: [],
-      bestContactId: null,
-    }));
-    r.phase = 'processing';
-    r.cursor = { targetIndex: 0, step: 'evidence' };
-    r.note = `Researching ${top[0].name}…`;
-    return r;
-  }
-
-  // phase === 'processing'
-  if (!r.cursor || r.cursor.targetIndex >= r.targets.length) return finishProcessing(r);
-  const t = r.targets[r.cursor.targetIndex];
-
-  if (r.cursor.step === 'evidence') {
+/** Run evidence → contacts → sequence for ONE target, resuming from whatever its
+ *  persisted statuses already say is done. Mutates `t` in place and persists
+ *  after each transition. Sets ctx.paused on a daily-limit so the pool drains. */
+async function processTarget(r: PipelineRunDoc, t: PipelineTargetState, ctx: ProcContext): Promise<void> {
+  // --- evidence ---
+  if (t.evidence !== 'done') {
+    if (halted(ctx)) return;
+    step(t, 'evidence', 'running');
+    await ctx.persist(r);
     try {
-      await exec.evidence(t.targetId);
+      await runStep(ctx, () => ctx.exec.evidence(t.targetId));
       step(t, 'evidence', 'done');
-      r.cursor = { ...r.cursor, step: 'contacts' };
-      r.note = `Finding the right people at ${t.name}…`;
     } catch (e) {
-      if (e instanceof PipelineRateLimitError) throw e; // driver waits + retries
-      if (e instanceof PipelineDailyLimitError) return pauseForDaily(r);
+      if (e instanceof PipelineDailyLimitError) {
+        ctx.paused = true;
+        step(t, 'evidence', 'queued'); // revert so resume re-runs cleanly
+        await ctx.persist(r);
+        return;
+      }
       step(t, 'evidence', 'failed');
       step(t, 'contacts', 'failed');
       step(t, 'sequence', 'failed');
-      toNextTarget(r);
+      r.note = progressNote(r);
+      await ctx.persist(r);
+      return;
     }
-    return r;
+    await ctx.persist(r);
   }
 
-  if (r.cursor.step === 'contacts') {
+  // --- contacts ---
+  if (t.contacts !== 'done') {
+    if (halted(ctx)) return;
+    step(t, 'contacts', 'running');
+    await ctx.persist(r);
     try {
-      const contacts = await exec.contacts(t.targetId);
+      const contacts = await runStep(ctx, () => ctx.exec.contacts(t.targetId));
       step(t, 'contacts', 'done');
       // Pursue the top contacts by reply-likelihood, capped at the run's setting.
       const ranked = [...contacts].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
       t.contactIds = ranked.slice(0, Math.max(1, r.config.topContacts)).map((c) => c.id);
       t.bestContactId = t.contactIds[0] ?? null;
       t.sequences = t.contactIds.map(() => 'queued');
-      if (t.contactIds.length === 0) {
-        step(t, 'sequence', 'failed');
-        toNextTarget(r);
-      } else {
-        r.cursor = { ...r.cursor, step: 'sequence', contactIndex: 0 };
-        r.note = draftNote(t, 0);
-      }
     } catch (e) {
-      if (e instanceof PipelineRateLimitError) throw e;
-      if (e instanceof PipelineDailyLimitError) return pauseForDaily(r);
+      if (e instanceof PipelineDailyLimitError) {
+        ctx.paused = true;
+        step(t, 'contacts', 'queued');
+        await ctx.persist(r);
+        return;
+      }
       step(t, 'contacts', 'failed');
       step(t, 'sequence', 'failed');
-      toNextTarget(r);
+      r.note = progressNote(r);
+      await ctx.persist(r);
+      return;
     }
-    return r;
+    if (t.contactIds.length === 0) {
+      step(t, 'sequence', 'failed');
+      r.note = progressNote(r);
+      await ctx.persist(r);
+      return;
+    }
+    await ctx.persist(r);
   }
 
-  // r.cursor.step === 'sequence' - draft one contact per advance so a rate limit
-  // or daily cap pauses cleanly between drafts and resumes at this contactIndex.
-  const ci = r.cursor.contactIndex ?? 0;
-  const contactId = t.contactIds[ci];
-  try {
-    if (!contactId) throw new Error('no_contact');
-    await exec.sequence(contactId);
-    t.sequences[ci] = 'done';
-  } catch (e) {
-    if (e instanceof PipelineRateLimitError) throw e;
-    if (e instanceof PipelineDailyLimitError) return pauseForDaily(r);
-    t.sequences[ci] = 'failed';
+  // --- sequence: draft each pursued contact, a couple at a time ---
+  if (t.sequence !== 'done') {
+    if (halted(ctx)) return;
+    step(t, 'sequence', 'running');
+    await ctx.persist(r);
+    const pending = t.contactIds.map((_, i) => i).filter((i) => t.sequences[i] !== 'done');
+    await mapPool(pending, ctx.contactConcurrency ?? CONTACT_CONCURRENCY, async (i) => {
+      if (halted(ctx)) return;
+      t.sequences[i] = 'running';
+      await ctx.persist(r);
+      try {
+        await runStep(ctx, () => ctx.exec.sequence(t.contactIds[i]));
+        t.sequences[i] = 'done';
+      } catch (e) {
+        if (e instanceof PipelineDailyLimitError) {
+          ctx.paused = true;
+          t.sequences[i] = 'queued';
+          await ctx.persist(r);
+          return;
+        }
+        t.sequences[i] = 'failed';
+      }
+      await ctx.persist(r);
+    });
+    if (halted(ctx)) {
+      // Leave the aggregate non-terminal so a resume re-enters this step and
+      // redraws only the still-queued contacts.
+      step(t, 'sequence', 'queued');
+      await ctx.persist(r);
+      return;
+    }
+    step(t, 'sequence', t.sequences.some((s) => s === 'done') ? 'done' : 'failed');
+    r.note = progressNote(r);
+    await ctx.persist(r);
   }
-  const nextCi = ci + 1;
-  if (nextCi < t.contactIds.length) {
-    r.cursor = { ...r.cursor, step: 'sequence', contactIndex: nextCi };
-    r.note = draftNote(t, nextCi);
+}
+
+/** Bounded-concurrency map over a list, no result collection. */
+async function mapPool<T>(items: T[], concurrency: number, fn: (item: T) => Promise<void>): Promise<void> {
+  if (items.length === 0) return;
+  let next = 0;
+  const n = Math.max(1, Math.min(concurrency, items.length));
+  const worker = async () => {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      await fn(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: n }, () => worker()));
+}
+
+/** Pull non-terminal targets through `processTarget` with bounded concurrency,
+ *  starting workers a beat apart and stopping early on pause/cancel. */
+async function runTargetPool(r: PipelineRunDoc, ctx: ProcContext): Promise<void> {
+  const queue = r.targets.filter((t) => !targetTerminal(t));
+  if (queue.length === 0) return;
+  let next = 0;
+  const stagger = ctx.launchStaggerMs ?? LAUNCH_STAGGER_MS;
+  const n = Math.max(1, Math.min(ctx.concurrency, queue.length));
+
+  const worker = async (workerIndex: number) => {
+    if (workerIndex > 0 && stagger) await ctx.sleep(workerIndex * stagger);
+    for (;;) {
+      if (ctx.paused) return;
+      if (await observeCancel(ctx)) return;
+      const i = next++;
+      if (i >= queue.length) return;
+      await processTarget(r, queue[i], ctx);
+    }
+  };
+  await Promise.all(Array.from({ length: n }, (_, w) => worker(w)));
+}
+
+async function observeCancel(ctx: ProcContext): Promise<boolean> {
+  if (ctx.canceled) return true;
+  if (ctx.checkCanceled && (await ctx.checkCanceled())) ctx.canceled = true;
+  return ctx.canceled;
+}
+
+function seedTargets(found: Array<{ id: string; name: string; score: number | null }>, topN: number): PipelineTargetState[] {
+  const top = [...found].sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, topN);
+  return top.map((t) => ({
+    targetId: t.id,
+    name: t.name,
+    score: t.score,
+    evidence: 'queued',
+    contacts: 'queued',
+    sequence: 'queued',
+    contactIds: [],
+    sequences: [],
+    bestContactId: null,
+  }));
+}
+
+/**
+ * Advance a run to a terminal (done/error) or paused state. Targeting runs once,
+ * then the processing pool fans out across targets. Operates on a copy; the
+ * context's persist callbacks are the only writers.
+ */
+export async function runPipeline(run: PipelineRunDoc, ctx: ProcContext): Promise<PipelineRunDoc> {
+  const r = cloneRun(run);
+  if (HALTED.has(r.status)) return r;
+
+  // --- targeting ---
+  if (r.phase === 'targeting') {
+    r.status = 'running';
+    try {
+      const found = await runStep(ctx, () => ctx.exec.targeting(r.missionId, r.config.targetCount));
+      const targets = seedTargets(found, r.config.topN);
+      if (targets.length === 0) {
+        finishProcessing(r);
+        await ctx.persistStatus(r);
+        return r;
+      }
+      r.targets = targets;
+      r.phase = 'processing';
+      r.cursor = null;
+      r.note = `Researching ${targets.length} companies in parallel…`;
+      await ctx.persistStatus(r);
+    } catch (e) {
+      if (e instanceof PipelineDailyLimitError) {
+        pauseForDaily(r);
+        await ctx.persistStatus(r);
+        return r;
+      }
+      r.status = 'error';
+      r.error = e instanceof Error ? e.message : 'pipeline_failed';
+      await ctx.persistStatus(r);
+      return r;
+    }
+  } else if (r.status !== 'running') {
+    // Resuming a processing run: mark running so the client shows it live.
+    r.status = 'running';
+    r.note = progressNote(r);
+    await ctx.persistStatus(r);
+  }
+
+  // --- processing (parallel across targets) ---
+  await runTargetPool(r, ctx);
+
+  if (ctx.canceled) return r; // cancelPipeline already wrote status='canceled'
+  if (ctx.paused) {
+    pauseForDaily(r);
+    await ctx.persistStatus(r);
     return r;
   }
-  // All contacts attempted - the target's draft step is done if any succeeded.
-  step(t, 'sequence', t.sequences.some((s) => s === 'done') ? 'done' : 'failed');
-  toNextTarget(r);
+  finishProcessing(r);
+  await ctx.persistStatus(r);
   return r;
-}
-
-// Note shown while drafting; names the contact position when pursuing several.
-function draftNote(t: PipelineRunDoc['targets'][number], contactIndex: number): string {
-  const total = t.contactIds.length;
-  return total > 1
-    ? `Drafting personalized emails for ${t.name} (${contactIndex + 1} of ${total})…`
-    : `Drafting a personalized email for ${t.name}…`;
-}
-
-function pauseForDaily(r: PipelineRunDoc): PipelineRunDoc {
-  r.status = 'paused';
-  r.note = "Daily agent-run limit reached - finished targets are ready; the rest resume tomorrow.";
-  return r; // cursor preserved so a later run resumes exactly here
 }
 
 // ---------------------------------------------------------------------------
 // Persistence-backed driver.
 // ---------------------------------------------------------------------------
-function persistableFields(r: PipelineRunDoc) {
+const PIPELINE_RUNS = 'pipeline_runs' as const;
+
+// Only target/note progress - never status, so a worker write can't clobber a
+// concurrent cancel.
+function progressFields(r: PipelineRunDoc) {
+  return { targets: r.targets, note: r.note, heartbeatAt: new Date() };
+}
+function statusFields(r: PipelineRunDoc) {
   return {
     status: r.status,
     phase: r.phase,
@@ -241,8 +437,6 @@ function persistableFields(r: PipelineRunDoc) {
   };
 }
 
-const PIPELINE_RUNS = 'pipeline_runs' as const;
-
 // Runs currently being driven *in this process* - prevents a start and a
 // concurrent resume-poll from double-driving the same run.
 const active = new Set<string>();
@@ -251,46 +445,56 @@ async function loadRun(scope: UserScope, runId: string): Promise<PipelineRunDoc 
   return (await scope.collection<PipelineRunDoc>(PIPELINE_RUNS).findById(runId)) as PipelineRunDoc | null;
 }
 
-async function driveLoop(scope: UserScope, runId: string, exec: PipelineExecutors): Promise<void> {
-  const sleep = (ms: number) => new Promise<void>((res) => setTimeout(res, ms));
-  for (;;) {
-    const run = await loadRun(scope, runId);
-    if (!run || HALTED.has(run.status)) return;
-
-    let next: PipelineRunDoc;
-    try {
-      next = await advancePipeline(run, exec);
-    } catch (e) {
-      if (e instanceof PipelineRateLimitError) {
-        // Per-minute throttle - pace and retry the same cursor a few times.
-        const tries = ((run as PipelineRunDoc & { _minuteRetries?: number })._minuteRetries ?? 0) + 1;
-        await scope.collection<PipelineRunDoc>(PIPELINE_RUNS).updateById(runId, {
-          note: 'Pacing requests, resuming shortly…',
-          heartbeatAt: new Date(),
-        });
-        if (tries > MINUTE_RETRY_MAX) {
-          await scope.collection<PipelineRunDoc>(PIPELINE_RUNS).updateById(runId, {
-            status: 'error',
-            error: 'rate_limited',
-            heartbeatAt: new Date(),
-          });
-          return;
-        }
-        await sleep(MINUTE_RETRY_WAIT_MS);
-        continue;
-      }
-      await scope.collection<PipelineRunDoc>(PIPELINE_RUNS).updateById(runId, {
-        status: 'error',
-        error: e instanceof Error ? e.message : 'pipeline_failed',
-        heartbeatAt: new Date(),
-      });
-      return;
-    }
-
-    await scope.collection<PipelineRunDoc>(PIPELINE_RUNS).updateById(runId, persistableFields(next));
-    if (HALTED.has(next.status)) return;
-    await sleep(PACE_MS);
+/** Per-run target concurrency, derived from the plan's per-minute cap with
+ *  headroom and clamped to a small ceiling. */
+async function pipelineConcurrency(scope: UserScope): Promise<number> {
+  try {
+    const limits = await getPlanLimits(scope);
+    const fromPlan = Math.floor((limits.agentRunsPerMinute ?? 0) / 4); // leave burst headroom
+    return Math.max(1, Math.min(MAX_PIPELINE_CONCURRENCY, fromPlan || DEFAULT_PIPELINE_CONCURRENCY));
+  } catch {
+    return DEFAULT_PIPELINE_CONCURRENCY;
   }
+}
+
+async function driveLoop(scope: UserScope, runId: string, exec: PipelineExecutors): Promise<void> {
+  const run = await loadRun(scope, runId);
+  if (!run || HALTED.has(run.status)) return;
+
+  const runs = scope.collection<PipelineRunDoc>(PIPELINE_RUNS);
+  // Serialize Mongo writes so progress and status updates stay FIFO-ordered.
+  let chain: Promise<unknown> = Promise.resolve();
+  const enqueue = (fields: Record<string, unknown>) => {
+    chain = chain.then(() => runs.updateById(runId, fields as never));
+    return chain.then(() => undefined);
+  };
+
+  const ctx: ProcContext = {
+    exec,
+    concurrency: await pipelineConcurrency(scope),
+    contactConcurrency: CONTACT_CONCURRENCY,
+    launchStaggerMs: LAUNCH_STAGGER_MS,
+    paused: false,
+    canceled: false,
+    persist: (r) => enqueue(progressFields(r)),
+    persistStatus: (r) => enqueue(statusFields(r)),
+    sleep: (ms) => new Promise<void>((res) => setTimeout(res, ms)),
+    checkCanceled: async () => {
+      const cur = await loadRun(scope, runId);
+      return !cur || cur.status === 'canceled';
+    },
+  };
+
+  try {
+    await runPipeline(run, ctx);
+  } catch (e) {
+    await enqueue({
+      status: 'error',
+      error: e instanceof Error ? e.message : 'pipeline_failed',
+      heartbeatAt: new Date(),
+    });
+  }
+  await chain; // ensure the final write lands before the driver releases the run
 }
 
 /** Start (or resume) driving a run in the background of this process. Idempotent. */

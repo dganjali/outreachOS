@@ -394,9 +394,11 @@ export interface UserIntegrationDoc extends BaseDoc {
 // Pipeline runs - the durable, resumable record of a full mission pipeline.
 //
 // Replaces the old browser-driven orchestration (which died when the tab
-// closed). The server advances this doc one step at a time; it IS the source of
-// truth for progress, so any driver - in-process loop, a resumed poll, or a
-// Cloud Tasks worker - can pick up exactly where the last one stopped.
+// closed). The server processes targets in parallel and records each target's
+// per-step status here; this doc IS the source of truth for progress, so any
+// driver - in-process loop, a resumed poll, or a Cloud Tasks worker - can pick up
+// exactly where the last one stopped (each step keys off its target's status, so
+// resuming is idempotent).
 // ---------------------------------------------------------------------------
 export type PipelineStepStatus = 'queued' | 'running' | 'done' | 'failed';
 
@@ -423,8 +425,9 @@ export interface PipelineRunDoc extends BaseDoc {
   phase: 'targeting' | 'processing' | 'done';
   config: { targetCount: number; topN: number; topContacts: number };
   targets: PipelineTargetState[];
-  // Resume pointer into `targets`. `contactIndex` tracks which contact's draft is
-  // in flight during the 'sequence' step. null before targeting / after done.
+  // Legacy resume pointer. Processing now runs targets in parallel and tracks
+  // progress via each target's per-step status (below), so this stays null during
+  // parallel processing. Kept optional for back-compat / no migration.
   cursor: { targetIndex: number; step: 'evidence' | 'contacts' | 'sequence'; contactIndex?: number } | null;
   note: string | null;
   error: string | null;

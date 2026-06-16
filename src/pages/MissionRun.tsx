@@ -55,24 +55,20 @@ function phaseOf(run: PipelineRunView | null): Phase {
   }
 }
 
-// The server stores step status as queued/done/failed; the in-flight step is
-// derived from the run cursor so we can render it as "running" live.
+// The server now writes each step's status directly (including 'running' while a
+// step is in flight), so the view reads per-target status as-is. Because targets
+// are processed in parallel, several can show 'running' at once.
 function targetsOf(run: PipelineRunView | null): RunTarget[] {
   if (!run) return [];
-  return run.targets.map((t, i) => {
-    const live = run.status === 'running' && run.cursor?.target_index === i;
-    const mark = (step: 'evidence' | 'contacts' | 'sequence'): StepStatus =>
-      live && run.cursor?.step === step && t[step] === 'queued' ? 'running' : t[step];
-    return {
-      id: t.target_id,
-      name: t.name,
-      score: asScore(t.score),
-      evidence: mark('evidence'),
-      contacts: mark('contacts'),
-      sequence: mark('sequence'),
-      sequences: t.sequences ?? [],
-    };
-  });
+  return run.targets.map((t) => ({
+    id: t.target_id,
+    name: t.name,
+    score: asScore(t.score),
+    evidence: t.evidence,
+    contacts: t.contacts,
+    sequence: t.sequence,
+    sequences: t.sequences ?? [],
+  }));
 }
 
 export function MissionRun() {

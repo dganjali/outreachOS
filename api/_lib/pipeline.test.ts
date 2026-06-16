@@ -1,15 +1,17 @@
-// Unit tests for the pipeline reducer (advancePipeline). These exercise the
-// durable state machine directly with fake executors - no Mongo, no network -
-// covering the happy path, partial failures, and the daily-limit pause that the
-// browser orchestration used to handle ad hoc.
+// Unit tests for the parallel pipeline processor (runPipeline). These exercise
+// the durable state machine directly with fake executors + a fake persist - no
+// Mongo, no network - covering targeting selection, the parallel happy path,
+// partial failures, the daily-limit pause/resume, per-minute retry, and that
+// targets actually run concurrently.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  advancePipeline,
+  runPipeline,
   PipelineDailyLimitError,
   PipelineRateLimitError,
   type PipelineExecutors,
+  type ProcContext,
 } from './pipeline';
 import type { PipelineRunDoc } from '../../shared/schemas';
 
@@ -48,34 +50,35 @@ function fakeExec(over: Partial<PipelineExecutors> = {}): PipelineExecutors {
   };
 }
 
-// Drive a run to a terminal state, mirroring the production loop but synchronous.
-async function runToEnd(run: PipelineRunDoc, exec: PipelineExecutors): Promise<PipelineRunDoc> {
-  let cur = run;
-  for (let i = 0; i < 200; i++) {
-    if (['done', 'error', 'paused', 'canceled'].includes(cur.status)) return cur;
-    try {
-      cur = await advancePipeline(cur, exec);
-    } catch (e) {
-      if (e instanceof PipelineRateLimitError) {
-        // production driver waits + retries the same cursor; here we just retry
-        continue;
-      }
-      throw e;
-    }
-  }
-  throw new Error('did not terminate');
+// A context wired to fake executors. Persist/sleep are no-ops; concurrency and a
+// zero stagger keep tests fast and deterministic. `latest` captures the run the
+// processor returns. Cancel is observed via a mutable flag the test can flip.
+function ctxFor(exec: PipelineExecutors, over: Partial<ProcContext> = {}): ProcContext {
+  return {
+    exec,
+    concurrency: 3,
+    contactConcurrency: 2,
+    launchStaggerMs: 0,
+    minuteRetryMax: 3,
+    minuteRetryWaitMs: 0,
+    paused: false,
+    canceled: false,
+    persist: async () => undefined,
+    persistStatus: async () => undefined,
+    sleep: async () => undefined,
+    ...over,
+  };
 }
 
-test('targeting selects top-N by score and seeds processing', async () => {
-  const r = await advancePipeline(baseRun(), fakeExec());
-  assert.equal(r.phase, 'processing');
-  assert.equal(r.status, 'running');
-  assert.deepEqual(r.targets.map((t) => t.name), ['Acme', 'Globex']);
-  assert.deepEqual(r.cursor, { targetIndex: 0, step: 'evidence' });
+test('targeting selects top-N by score and processes them', async () => {
+  const end = await runPipeline(baseRun({ config: { targetCount: 8, topN: 1, topContacts: 1 } }), ctxFor(fakeExec()));
+  assert.equal(end.phase, 'done');
+  // Only the top-scored target was pursued.
+  assert.deepEqual(end.targets.map((t) => t.name), ['Acme']);
 });
 
 test('happy path completes every target through all three steps', async () => {
-  const end = await runToEnd(baseRun(), fakeExec());
+  const end = await runPipeline(baseRun(), ctxFor(fakeExec()));
   assert.equal(end.status, 'done');
   assert.equal(end.phase, 'done');
   assert.equal(end.cursor, null);
@@ -102,62 +105,60 @@ test('topContacts drafts the top N contacts per target', async () => {
       sequenceCalls++;
     },
   });
-  const end = await runToEnd(baseRun({ config: { targetCount: 8, topN: 3, topContacts: 3 } }), exec);
+  const end = await runPipeline(baseRun({ config: { targetCount: 8, topN: 3, topContacts: 3 } }), ctxFor(exec));
   assert.equal(end.status, 'done');
   const t = end.targets[0];
-  assert.deepEqual(t.contactIds, ['c1', 'c2', 'c3']); // capped at topContacts, by confidence
+  assert.deepEqual([...t.contactIds].sort(), ['c1', 'c2', 'c3']); // capped at topContacts, by confidence
   assert.equal(t.bestContactId, 'c1');
-  assert.deepEqual(t.sequences, ['done', 'done', 'done']);
+  assert.equal(t.sequences.filter((s) => s === 'done').length, 3);
   assert.equal(t.sequence, 'done');
   assert.equal(sequenceCalls, 3);
 });
 
 test('a target draft step is done if any contact draft succeeds', async () => {
-  let calls = 0;
   const exec = fakeExec({
     targeting: async () => [{ id: 't1', name: 'Acme', score: 0.9 }],
     contacts: async () => [
       { id: 'c1', confidence: 0.9 },
       { id: 'c2', confidence: 0.7 },
     ],
-    sequence: async () => {
-      calls++;
-      if (calls === 1) throw new Error('draft_failed'); // first contact only
+    sequence: async (id) => {
+      if (id === 'c1') throw new Error('draft_failed'); // top contact fails
     },
   });
-  const end = await runToEnd(baseRun({ config: { targetCount: 8, topN: 3, topContacts: 2 } }), exec);
+  const end = await runPipeline(baseRun({ config: { targetCount: 8, topN: 3, topContacts: 2 } }), ctxFor(exec));
   const t = end.targets[0];
-  assert.deepEqual(t.sequences, ['failed', 'done']);
+  assert.equal(t.sequences[0], 'failed');
+  assert.equal(t.sequences[1], 'done');
   assert.equal(t.sequence, 'done');
 });
 
 test('no targets found ends the run cleanly', async () => {
-  const end = await runToEnd(baseRun(), fakeExec({ targeting: async () => [] }));
+  const end = await runPipeline(baseRun(), ctxFor(fakeExec({ targeting: async () => [] })));
   assert.equal(end.status, 'done');
   assert.equal(end.targets.length, 0);
 });
 
-test('a failing evidence step marks the whole target failed and moves on', async () => {
-  let calls = 0;
+test('a failing evidence step marks the whole target failed; others still complete', async () => {
   const exec = fakeExec({
-    evidence: async () => {
-      calls++;
-      if (calls === 1) throw new Error('parse_failed'); // first target only
+    evidence: async (targetId) => {
+      if (targetId === 't1') throw new Error('parse_failed'); // first target only
     },
   });
-  const end = await runToEnd(baseRun(), exec);
+  const end = await runPipeline(baseRun(), ctxFor(exec));
   assert.equal(end.status, 'done');
-  assert.equal(end.targets[0].evidence, 'failed');
-  assert.equal(end.targets[0].contacts, 'failed');
-  assert.equal(end.targets[0].sequence, 'failed');
-  // second target still processed fully
-  assert.equal(end.targets[1].evidence, 'done');
-  assert.equal(end.targets[1].sequence, 'done');
+  const t1 = end.targets.find((t) => t.targetId === 't1')!;
+  const t2 = end.targets.find((t) => t.targetId === 't2')!;
+  assert.equal(t1.evidence, 'failed');
+  assert.equal(t1.contacts, 'failed');
+  assert.equal(t1.sequence, 'failed');
+  assert.equal(t2.evidence, 'done');
+  assert.equal(t2.sequence, 'done');
 });
 
 test('a target with no contacts fails only the draft step', async () => {
   const exec = fakeExec({ contacts: async () => [] });
-  const end = await runToEnd(baseRun(), exec);
+  const end = await runPipeline(baseRun(), ctxFor(exec));
   assert.equal(end.status, 'done');
   for (const t of end.targets) {
     assert.equal(t.evidence, 'done');
@@ -166,20 +167,86 @@ test('a target with no contacts fails only the draft step', async () => {
   }
 });
 
-test('daily-limit pauses the run and preserves the cursor for resume', async () => {
+test('daily-limit pauses the run and preserves untouched targets for resume', async () => {
+  // Slow evidence so the daily-limit (thrown on the first contacts call) lands
+  // while other targets are still early - they must stay queued, not run.
   const exec = fakeExec({
+    targeting: async () => [
+      { id: 't1', name: 'Acme', score: 0.9 },
+      { id: 't2', name: 'Globex', score: 0.8 },
+      { id: 't3', name: 'Initech', score: 0.7 },
+    ],
     contacts: async () => {
       throw new PipelineDailyLimitError('Daily agent run limit reached.');
     },
   });
-  const end = await runToEnd(baseRun(), exec);
+  // concurrency 1 so only t1 is touched before the pause.
+  const end = await runPipeline(
+    baseRun({ config: { targetCount: 8, topN: 3, topContacts: 1 } }),
+    ctxFor(exec, { concurrency: 1 })
+  );
   assert.equal(end.status, 'paused');
-  // cursor still points at the contacts step of the first target
-  assert.deepEqual(end.cursor, { targetIndex: 0, step: 'contacts' });
-  assert.equal(end.targets[0].evidence, 'done');
+  const t1 = end.targets.find((t) => t.targetId === 't1')!;
+  assert.equal(t1.evidence, 'done');
+  assert.equal(t1.contacts, 'queued'); // reverted so resume re-runs it
+  // Targets never reached stay fully queued.
+  for (const id of ['t2', 't3']) {
+    const t = end.targets.find((x) => x.targetId === id)!;
+    assert.equal(t.evidence, 'queued');
+    assert.equal(t.sequence, 'queued');
+  }
 });
 
-test('rate-limit (per-minute) is retryable - it does not corrupt state', async () => {
+test('re-driving a stale processing run only finishes the unfinished targets (idempotent resume)', async () => {
+  // Simulate a driver that died mid-run: t1 fully done, t2 still queued. This is
+  // the state resumeIfStale re-drives (a 'running' run with a stale heartbeat).
+  let evidenceCalls = 0;
+  const exec = fakeExec({
+    evidence: async () => {
+      evidenceCalls++;
+    },
+    contacts: async (targetId) => [{ id: `${targetId}-c1`, confidence: 0.8 }],
+  });
+  const partial = baseRun({
+    status: 'running',
+    phase: 'processing',
+    config: { targetCount: 8, topN: 2, topContacts: 1 },
+    cursor: null,
+    targets: [
+      {
+        targetId: 't1',
+        name: 'Acme',
+        score: 0.9,
+        evidence: 'done',
+        contacts: 'done',
+        sequence: 'done',
+        contactIds: ['t1-c1'],
+        sequences: ['done'],
+        bestContactId: 't1-c1',
+      },
+      {
+        targetId: 't2',
+        name: 'Globex',
+        score: 0.8,
+        evidence: 'queued',
+        contacts: 'queued',
+        sequence: 'queued',
+        contactIds: [],
+        sequences: [],
+        bestContactId: null,
+      },
+    ],
+  });
+  const end = await runPipeline(partial, ctxFor(exec));
+  assert.equal(end.status, 'done');
+  assert.equal(evidenceCalls, 1); // only t2 re-ran; t1's done work was not redone
+  const t2 = end.targets.find((t) => t.targetId === 't2')!;
+  assert.equal(t2.evidence, 'done');
+  assert.equal(t2.contacts, 'done');
+  assert.equal(t2.sequence, 'done');
+});
+
+test('per-minute rate-limit is retried and does not corrupt state', async () => {
   let first = true;
   const exec = fakeExec({
     evidence: async () => {
@@ -189,20 +256,43 @@ test('rate-limit (per-minute) is retryable - it does not corrupt state', async (
       }
     },
   });
-  const end = await runToEnd(baseRun(), exec);
+  const end = await runPipeline(baseRun(), ctxFor(exec));
   assert.equal(end.status, 'done');
-  assert.equal(end.targets[0].evidence, 'done');
+  for (const t of end.targets) assert.equal(t.evidence, 'done');
 });
 
-test('a canceled run is a no-op for the reducer', async () => {
-  const r = await advancePipeline(baseRun({ status: 'canceled' }), fakeExec());
-  assert.equal(r.status, 'canceled');
-  assert.equal(r.phase, 'targeting'); // untouched
+test('targets run concurrently', async () => {
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const exec = fakeExec({
+    targeting: async () => [
+      { id: 't1', name: 'Acme', score: 0.9 },
+      { id: 't2', name: 'Globex', score: 0.8 },
+      { id: 't3', name: 'Initech', score: 0.7 },
+    ],
+    evidence: async () => {
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((r) => setTimeout(r, 5));
+      inFlight--;
+    },
+  });
+  const end = await runPipeline(baseRun({ config: { targetCount: 8, topN: 3, topContacts: 1 } }), ctxFor(exec, { concurrency: 3 }));
+  assert.equal(end.status, 'done');
+  assert.ok(maxInFlight >= 2, `expected overlap, saw max ${maxInFlight}`);
 });
 
-test('the reducer does not mutate the input run', async () => {
+test('an observed cancel stops the run without finishing it', async () => {
+  const exec = fakeExec();
+  const ctx = ctxFor(exec, { concurrency: 1, checkCanceled: async () => true });
+  const end = await runPipeline(baseRun(), ctx);
+  // Cancel is observed before any target runs; status is left for cancelPipeline.
+  assert.notEqual(end.status, 'done');
+});
+
+test('runPipeline does not mutate the input run', async () => {
   const input = baseRun();
   const snapshot = JSON.stringify(input);
-  await advancePipeline(input, fakeExec());
+  await runPipeline(input, ctxFor(fakeExec()));
   assert.equal(JSON.stringify(input), snapshot);
 });
