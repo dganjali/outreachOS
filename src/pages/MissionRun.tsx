@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { Check } from 'lucide-react';
 import { supabase } from '../supabaseClient';
-import { pipeline, type PipelineRunView, type PipelineStepStatus } from '../lib/api';
+import { pipeline, type ContactTypeOptionView, type PipelineRunView, type PipelineStepStatus } from '../lib/api';
 import { asScore } from '../lib/score';
 import { LogoMark } from '../components/Logo';
 import type { Mission } from '../types';
@@ -82,6 +83,8 @@ export function MissionRun() {
   const [companies, setCompanies] = useState(DEFAULT_COMPANIES);
   const [contacts, setContacts] = useState(DEFAULT_CONTACTS);
   const [priorRun, setPriorRun] = useState<PipelineRunView | null>(null);
+  const [typeOpts, setTypeOpts] = useState<{ functions: ContactTypeOptionView[]; seniority: ContactTypeOptionView[] } | null>(null);
+  const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
   const runIdRef = useRef<string | null>(null);
 
   const phase = phaseOf(run);
@@ -131,6 +134,37 @@ export function MissionRun() {
     };
   }, [id]);
 
+  // Ask the AI for the menu of contact types to reach out to (functions +
+  // seniority, derived from the mission's ICP), then pre-check the recommended
+  // ones. If it fails we just don't show the section and run unfiltered.
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    pipeline
+      .contactTypes(id)
+      .then(({ data }) => {
+        if (cancelled || !data) return;
+        setTypeOpts(data);
+        const recommended = [...data.functions, ...data.seniority]
+          .filter((o) => o.recommended)
+          .map((o) => o.id);
+        setSelectedTypes(new Set(recommended));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  const toggleType = useCallback((optId: string) => {
+    setSelectedTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(optId)) next.delete(optId);
+      else next.add(optId);
+      return next;
+    });
+  }, []);
+
   // Elapsed clock - derived from the run's start, ticks only while live.
   useEffect(() => {
     if (!run) return;
@@ -173,7 +207,19 @@ export function MissionRun() {
     setError(null);
     setStarting(true);
     try {
-      const { data } = await pipeline.start(mission.id, targetCountFor(companies), companies, contacts);
+      const chosen = typeOpts
+        ? [...typeOpts.functions, ...typeOpts.seniority].filter((o) => selectedTypes.has(o.id))
+        : [];
+      const fns = chosen.filter((o) => o.kind === 'function').map((o) => o.value);
+      const sens = chosen.filter((o) => o.kind === 'seniority').map((o) => o.value);
+      const { data } = await pipeline.start(
+        mission.id,
+        targetCountFor(companies),
+        companies,
+        contacts,
+        fns,
+        sens
+      );
       runIdRef.current = data.id;
       setRun(data);
     } catch (err) {
@@ -181,7 +227,7 @@ export function MissionRun() {
     } finally {
       setStarting(false);
     }
-  }, [mission, companies, contacts]);
+  }, [mission, companies, contacts, typeOpts, selectedTypes]);
 
   const stop = useCallback(async () => {
     const rid = runIdRef.current;
@@ -296,6 +342,31 @@ export function MissionRun() {
               </button>
             </div>
           </div>
+
+          {typeOpts && (typeOpts.functions.length > 0 || typeOpts.seniority.length > 0) && (
+            <div className="run-types">
+              <p className="run-types-head">
+                Who should we reach out to?
+                <span className="run-types-sub">We picked the best fits — adjust if you like.</span>
+              </p>
+              {typeOpts.functions.length > 0 && (
+                <ContactTypeGroup
+                  label="Teams & functions"
+                  options={typeOpts.functions}
+                  selected={selectedTypes}
+                  onToggle={toggleType}
+                />
+              )}
+              {typeOpts.seniority.length > 0 && (
+                <ContactTypeGroup
+                  label="Seniority"
+                  options={typeOpts.seniority}
+                  selected={selectedTypes}
+                  onToggle={toggleType}
+                />
+              )}
+            </div>
+          )}
 
           {priorRun && (
             <p className="run-ready-note">
@@ -448,6 +519,46 @@ function draftLabel(t: RunTarget): string {
   if (t.sequences.length <= 1) return 'Draft';
   const done = t.sequences.filter((s) => s === 'done').length;
   return `Drafts ${done}/${t.sequences.length}`;
+}
+
+// Checkbox-card group of contact types, reusing the persona-wizard card styling.
+function ContactTypeGroup({
+  label,
+  options,
+  selected,
+  onToggle,
+}: {
+  label: string;
+  options: ContactTypeOptionView[];
+  selected: Set<string>;
+  onToggle: (id: string) => void;
+}) {
+  return (
+    <div className="run-types-group">
+      <span className="run-types-label">{label}</span>
+      <div className="pw-cards">
+        {options.map((o) => {
+          const on = selected.has(o.id);
+          return (
+            <button
+              key={o.id}
+              type="button"
+              className={`pw-card ${on ? 'is-on' : ''}`}
+              onClick={() => onToggle(o.id)}
+              aria-pressed={on}
+            >
+              {on && (
+                <span className="pw-card-check">
+                  <Check size={12} />
+                </span>
+              )}
+              <span className="pw-card-title">{o.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function StepChip({ label, status }: { label: string; status: StepStatus }) {

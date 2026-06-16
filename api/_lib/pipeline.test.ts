@@ -70,6 +70,31 @@ function ctxFor(exec: PipelineExecutors, over: Partial<ProcContext> = {}): ProcC
   };
 }
 
+test('the run config contact-type filter reaches the contacts executor', async () => {
+  const seen: Array<{ functions?: string[]; seniority?: string[] }> = [];
+  const exec = fakeExec({
+    contacts: async (_targetId, filter) => {
+      seen.push({ functions: filter?.functions, seniority: filter?.seniority });
+      return [{ id: 'c1', confidence: 0.8 }];
+    },
+  });
+  await runPipeline(
+    baseRun({
+      config: {
+        targetCount: 8,
+        topN: 1,
+        topContacts: 1,
+        selectedFunctions: ['community'],
+        selectedSeniority: ['manager'],
+      },
+    }),
+    ctxFor(exec)
+  );
+  assert.equal(seen.length, 1);
+  assert.deepEqual(seen[0].functions, ['community']);
+  assert.deepEqual(seen[0].seniority, ['manager']);
+});
+
 test('targeting selects top-N by score and processes them', async () => {
   const end = await runPipeline(baseRun({ config: { targetCount: 8, topN: 1, topContacts: 1 } }), ctxFor(fakeExec()));
   assert.equal(end.phase, 'done');

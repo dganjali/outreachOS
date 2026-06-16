@@ -14,7 +14,10 @@ import type { Request, Response } from 'express';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { forUser } from '../_lib/db';
 import { startPipeline, resumeIfStale, cancelPipeline } from '../_lib/pipeline';
+import { getOrCreateContactIcp } from './contacts';
+import { buildContactTypeOptions } from '../_lib/icp';
 import type { MissionDoc, PipelineRunDoc } from '../../shared/schemas';
+import type { MissionMode, SeniorityLevel } from '../../shared/types';
 
 export default async function handler(req: Request, res: Response) {
   const user = await requireUser(req, res);
@@ -22,11 +25,13 @@ export default async function handler(req: Request, res: Response) {
   const scope = forUser(user.id);
 
   if (req.method === 'POST') {
-    const { mission_id, count, top_n, top_contacts } = (req.body ?? {}) as {
+    const { mission_id, count, top_n, top_contacts, selected_functions, selected_seniority } = (req.body ?? {}) as {
       mission_id?: string;
       count?: number;
       top_n?: number;
       top_contacts?: number;
+      selected_functions?: string[];
+      selected_seniority?: SeniorityLevel[];
     };
     if (!mission_id) return res.status(400).json({ error: 'missing_mission_id' });
 
@@ -49,6 +54,8 @@ export default async function handler(req: Request, res: Response) {
       targetCount: count,
       topN: top_n,
       topContacts: top_contacts,
+      selectedFunctions: selected_functions,
+      selectedSeniority: selected_seniority,
     });
     return res.status(201).json({ data: serialize(run) });
   }
@@ -56,6 +63,17 @@ export default async function handler(req: Request, res: Response) {
   if (req.method === 'GET') {
     const runId = req.query.run_id as string | undefined;
     const missionId = req.query.mission_id as string | undefined;
+
+    // Generate the "types of people to reach out to" menu from the mission's ICP
+    // so the client can let the user narrow WHO to contact before launching.
+    if (req.query.contact_types) {
+      if (!missionId) return res.status(400).json({ error: 'missing_mission_id' });
+      const mission = await scope.collection<MissionDoc>('missions').findById(missionId);
+      if (!mission) return res.status(404).json({ error: 'mission_not_found' });
+      const mode = (mission.mode as MissionMode | null) ?? 'sales';
+      const icp = await getOrCreateContactIcp(scope, mission, mode);
+      return res.status(200).json({ data: buildContactTypeOptions(icp) });
+    }
 
     let run: PipelineRunDoc | null = null;
     if (runId) {

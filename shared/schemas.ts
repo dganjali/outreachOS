@@ -16,7 +16,7 @@
 
 import type { EmbedInputType } from '../api/_lib/embeddings';
 import type { PlanId, PlanStatus } from './plans';
-import type { ContactIcp } from './types';
+import type { ContactIcp, SeniorityLevel } from './types';
 
 void ({} as EmbedInputType); // keep the import live for downstream consumers
 
@@ -423,7 +423,15 @@ export interface PipelineRunDoc extends BaseDoc {
   missionId: string;
   status: 'pending' | 'running' | 'paused' | 'done' | 'error' | 'canceled';
   phase: 'targeting' | 'processing' | 'done';
-  config: { targetCount: number; topN: number; topContacts: number };
+  config: {
+    targetCount: number;
+    topN: number;
+    topContacts: number;
+    // User-selected contact-type filters. Empty/absent ⇒ unfiltered ICP (the
+    // AI-only default). Narrowed into the ICP at discovery time.
+    selectedFunctions?: string[];
+    selectedSeniority?: SeniorityLevel[];
+  };
   targets: PipelineTargetState[];
   // Legacy resume pointer. Processing now runs targets in parallel and tracks
   // progress via each target's per-step status (below), so this stays null during

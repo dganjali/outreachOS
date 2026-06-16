@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolvePoolWithBudget, rankCandidates, type ResolvePoolDeps, type ContactSuggestion } from './contacts';
+import { resolvePoolWithBudget, rankCandidates, narrowIcpBySelection, type ResolvePoolDeps, type ContactSuggestion } from './contacts';
 import { defaultContactIcp } from '../_lib/icp';
 import type { ResolvedEmail } from '../_lib/email-resolver';
 import type { ScrapeResult } from '../_lib/web-scrape';
@@ -176,6 +176,57 @@ describe('rankCandidates - the bank example at enterprise size', () => {
     // ordering is by confidence (= composite reply-likelihood score)
     const confs = result.rows.map((r) => r.confidence ?? 0);
     assert.deepEqual(confs, [...confs].sort((a, b) => b - a));
+  });
+});
+
+describe('narrowIcpBySelection - user-chosen contact types narrow the ICP', () => {
+  const icp = {
+    ...defaultContactIcp('sponsorship'),
+    functions: ['community', 'sponsorships', 'partnerships'],
+    functionKeywords: ['community', 'sponsorship', 'partnerships'],
+    seniority: { idealLevels: ['manager', 'senior_manager', 'director'] as const, maxLevel: 'director' as const },
+  };
+
+  it('no filter ⇒ unchanged ICP (AI-only default)', () => {
+    assert.deepEqual(narrowIcpBySelection(icp, undefined), icp);
+  });
+
+  it('empty selection ⇒ keeps the full ICP (back-compat)', () => {
+    const out = narrowIcpBySelection(icp, { functions: [], seniority: [] });
+    assert.deepEqual(out.functions, icp.functions);
+    assert.deepEqual(out.seniority.idealLevels, icp.seniority.idealLevels);
+  });
+
+  it('keeps only the chosen functions and levels (case-insensitive)', () => {
+    const out = narrowIcpBySelection(icp, { functions: ['Community'], seniority: ['director'] });
+    assert.deepEqual(out.functions, ['community']);
+    assert.deepEqual(out.seniority.idealLevels, ['director']);
+  });
+
+  it('never raises maxLevel (the size-relative cap is untouched)', () => {
+    const out = narrowIcpBySelection(icp, { functions: ['community'], seniority: ['manager'] });
+    assert.equal(out.seniority.maxLevel, 'director');
+  });
+
+  it('a selection that intersects to empty falls back to the full set', () => {
+    const out = narrowIcpBySelection(icp, { functions: ['nonexistent'], seniority: [] });
+    assert.deepEqual(out.functions, icp.functions, 'never produces a zero-function ICP');
+  });
+
+  it('drops invalid seniority values rather than trusting them', () => {
+    const out = narrowIcpBySelection(icp, { seniority: ['director', 'galaxy_emperor' as never] });
+    assert.deepEqual(out.seniority.idealLevels, ['director']);
+  });
+
+  it('narrowing functions still finds the right people end-to-end', () => {
+    const narrowed = narrowIcpBySelection(icp, { functions: ['community'], seniority: ['manager', 'senior_manager'] });
+    const suggestions = [
+      suggestion('Manny Mgr', 'Senior Community Investment Manager'),
+      suggestion('Pat Partner', 'Partnerships Manager'),
+    ];
+    const result = rankCandidates(suggestions, { icp: narrowed, sizeTier: 'enterprise', target, mission, profile: null });
+    // the partnerships person is now off-function and ranks below the community manager
+    assert.equal(result.rows[0].name, 'Manny Mgr');
   });
 });
 

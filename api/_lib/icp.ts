@@ -11,9 +11,10 @@
 //     re-introduce exec bias); per-target size shifting happens later in
 //     seniority.ts.
 
-import type { ContactIcp, MissionMode } from '../../shared/types';
+import type { ContactIcp, ContactTypeOption, MissionMode, SeniorityLevel } from '../../shared/types';
 import { generateJson, MODEL } from './llm';
 import { CONTACT_ICP_SYSTEM } from './prompts';
+import { SENIORITY_RANK } from './seniority';
 
 type Prior = Pick<ContactIcp, 'functions' | 'functionKeywords' | 'seniority' | 'disqualifierKeywords' | 'routerOk' | 'rationale'>;
 
@@ -97,6 +98,65 @@ export function defaultContactIcp(mode: MissionMode, geo?: string | null): Conta
     geo: { preferred: geo?.trim() || null, scope: 'global', strict: false },
     rationale: prior.rationale,
   };
+}
+
+// Human-friendly labels for each seniority level, used when we present the
+// band as a checkbox menu the user can narrow.
+const SENIORITY_LABEL: Record<SeniorityLevel, string> = {
+  ic: 'Individual contributor',
+  senior_ic: 'Senior IC',
+  lead: 'Lead',
+  manager: 'Manager',
+  senior_manager: 'Senior manager',
+  director: 'Director',
+  senior_director: 'Senior director',
+  vp: 'VP',
+  svp: 'SVP',
+  cxo: 'C-suite',
+  founder: 'Founder',
+};
+
+function titleCase(s: string): string {
+  return s.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/**
+ * Turn an ICP into the checkbox menu of "types of people to reach out to": one
+ * option per target function, plus the seniority levels in the ideal band (up to
+ * the hard cap, so the user can widen within bounds). The ICP's own functions and
+ * ideal levels are marked `recommended` so the UI pre-checks them - the AI
+ * proposes the menu, the human narrows it.
+ */
+export function buildContactTypeOptions(icp: ContactIcp): {
+  functions: ContactTypeOption[];
+  seniority: ContactTypeOption[];
+} {
+  const functions: ContactTypeOption[] = icp.functions.map((fn) => ({
+    id: `fn:${fn.toLowerCase()}`,
+    kind: 'function',
+    label: titleCase(fn),
+    value: fn,
+    recommended: true,
+  }));
+
+  const ideal = new Set(icp.seniority.idealLevels);
+  const idealMin = Math.min(...icp.seniority.idealLevels.map((l) => SENIORITY_RANK[l]));
+  const maxRank = SENIORITY_RANK[icp.seniority.maxLevel];
+  const seniority: ContactTypeOption[] = (Object.keys(SENIORITY_LABEL) as SeniorityLevel[])
+    .filter((l) => {
+      const r = SENIORITY_RANK[l];
+      return ideal.has(l) || (r >= idealMin && r <= maxRank);
+    })
+    .sort((a, b) => SENIORITY_RANK[a] - SENIORITY_RANK[b])
+    .map((l) => ({
+      id: `sen:${l}`,
+      kind: 'seniority',
+      label: SENIORITY_LABEL[l],
+      value: l,
+      recommended: ideal.has(l),
+    }));
+
+  return { functions, seniority };
 }
 
 interface RawIcp {

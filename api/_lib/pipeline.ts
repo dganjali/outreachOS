@@ -27,6 +27,7 @@ import type { AuthedUser } from './auth';
 import { invokeAgent } from './internal-invoke';
 import { getPlanLimits } from './runs';
 import type { PipelineRunDoc, PipelineStepStatus, PipelineTargetState } from '../../shared/schemas';
+import type { ContactTypeFilter, SeniorityLevel } from '../../shared/types';
 
 import targetHandler from '../agents/target';
 import evidenceHandler from '../agents/evidence';
@@ -66,7 +67,7 @@ export class PipelineDailyLimitError extends Error {} // per-day: pause the run
 export interface PipelineExecutors {
   targeting(missionId: string, count: number): Promise<Array<{ id: string; name: string; score: number | null }>>;
   evidence(targetId: string): Promise<void>;
-  contacts(targetId: string): Promise<Array<{ id: string; confidence: number | null }>>;
+  contacts(targetId: string, filter?: ContactTypeFilter): Promise<Array<{ id: string; confidence: number | null }>>;
   sequence(contactId: string): Promise<void>;
 }
 
@@ -94,9 +95,9 @@ export function realExecutors(user: AuthedUser): PipelineExecutors {
     async evidence(targetId) {
       classify(await invokeAgent(evidenceHandler, { user, body: { target_id: targetId } }));
     },
-    async contacts(targetId) {
+    async contacts(targetId, filter) {
       const body = classify<{ contacts?: Array<{ _id: string; confidence: number | null }> }>(
-        await invokeAgent(contactsHandler, { user, body: { target_id: targetId } })
+        await invokeAgent(contactsHandler, { user, body: { target_id: targetId, contact_type_filter: filter } })
       );
       return (body.contacts ?? []).map((c) => ({ id: c._id, confidence: c.confidence ?? null }));
     },
@@ -235,7 +236,11 @@ async function runEvidence(t: PipelineTargetState, ctx: ProcContext): Promise<vo
 /** Run the contacts sub-step, recording status + the pursued-contact selection. */
 async function runContacts(r: PipelineRunDoc, t: PipelineTargetState, ctx: ProcContext): Promise<void> {
   try {
-    const contacts = await runStep(ctx, () => ctx.exec.contacts(t.targetId));
+    const filter: ContactTypeFilter = {
+      functions: r.config.selectedFunctions ?? [],
+      seniority: r.config.selectedSeniority ?? [],
+    };
+    const contacts = await runStep(ctx, () => ctx.exec.contacts(t.targetId, filter));
     step(t, 'contacts', 'done');
     selectContacts(t, contacts, r.config.topContacts);
   } catch (e) {
@@ -537,7 +542,33 @@ export interface StartPipelineArgs {
   targetCount?: number;
   topN?: number;
   topContacts?: number;
+  selectedFunctions?: string[];
+  selectedSeniority?: SeniorityLevel[];
   exec?: PipelineExecutors; // tests inject; prod uses realExecutors
+}
+
+const VALID_LEVELS: ReadonlySet<string> = new Set<SeniorityLevel>([
+  'ic', 'senior_ic', 'lead', 'manager', 'senior_manager', 'director',
+  'senior_director', 'vp', 'svp', 'cxo', 'founder',
+]);
+
+function sanitizeStrings(list?: string[]): string[] {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const s of list) {
+    const t = typeof s === 'string' ? s.trim() : '';
+    if (t && !seen.has(t.toLowerCase())) {
+      seen.add(t.toLowerCase());
+      out.push(t);
+    }
+  }
+  return out;
+}
+
+function sanitizeLevels(list?: SeniorityLevel[]): SeniorityLevel[] {
+  if (!Array.isArray(list)) return [];
+  return [...new Set(list)].filter((l): l is SeniorityLevel => VALID_LEVELS.has(l));
 }
 
 /** Create a run doc and kick off the background driver. Returns the run id. */
@@ -553,6 +584,8 @@ export async function startPipeline(args: StartPipelineArgs): Promise<PipelineRu
       targetCount: Math.min(Math.max(args.targetCount ?? DEFAULT_TARGET_COUNT, 1), 25),
       topN: Math.min(Math.max(args.topN ?? DEFAULT_TOP_N, 1), 15),
       topContacts: Math.min(Math.max(args.topContacts ?? DEFAULT_TOP_CONTACTS, 1), MAX_TOP_CONTACTS),
+      selectedFunctions: sanitizeStrings(args.selectedFunctions),
+      selectedSeniority: sanitizeLevels(args.selectedSeniority),
     },
     targets: [],
     cursor: null,

@@ -51,6 +51,24 @@ export interface ContactIcp {
   rationale: string; // one line: why this band for this mission
 }
 
+// A single "type of person to reach out to" the user can toggle on/off before a
+// run. Derived from the mission's ICP (functions × seniority band) so the AI
+// proposes the menu and the human narrows it instead of the AI guessing alone.
+export interface ContactTypeOption {
+  id: string; // stable, e.g. "fn:community" | "sen:director"
+  kind: 'function' | 'seniority';
+  label: string; // human-friendly, e.g. "Community" | "Director"
+  value: string; // raw ICP value: a function string OR a SeniorityLevel
+  recommended: boolean; // pre-checked = part of the ICP's own set
+}
+
+// The user's selection, threaded into discovery to narrow the ICP. Empty/absent
+// fields mean "no narrowing" so the run behaves exactly as the AI-only default.
+export interface ContactTypeFilter {
+  functions?: string[]; // ICP function values the user kept
+  seniority?: SeniorityLevel[]; // SeniorityLevel values the user kept
+}
+
 export type TargetStatus = 'suggested' | 'approved' | 'rejected' | 'contacted';
 export type TargetSource = 'web_search' | 'csv' | 'manual';
 
