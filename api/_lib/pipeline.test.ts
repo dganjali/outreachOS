@@ -269,6 +269,51 @@ test('a contactless company is dropped and replaced from the reserve', async () 
   assert.equal(delivered[0].targetId, 't2'); // next-best reserve company
 });
 
+test('a contactless company is replaced while slower original targets are still running', async () => {
+  let releaseSlow!: () => void;
+  let slowReleased = false;
+  let slowContactsStarted = false;
+  let replacementDraftedBeforeSlowFinished = false;
+  const slowContacts = new Promise<void>((resolve) => {
+    releaseSlow = () => {
+      slowReleased = true;
+      resolve();
+    };
+  });
+
+  const exec = fakeExec({
+    targeting: async () => [
+      { id: 't1', name: 'EmptyCo', score: 0.9 },
+      { id: 't2', name: 'SlowCo', score: 0.8 },
+    ],
+    contacts: async (targetId) => {
+      if (targetId === 't1') return [];
+      if (targetId === 't2') {
+        slowContactsStarted = true;
+        await slowContacts;
+      }
+      return [{ id: `${targetId}-c1`, confidence: 0.8 }];
+    },
+    reserve: async (_missionId, exclude) =>
+      exclude.includes('t3') ? [] : [{ id: 't3', name: 'ReserveCo', score: 0.7 }],
+    sequence: async (contactId) => {
+      if (contactId === 't3-c1' && slowContactsStarted && !slowReleased) {
+        replacementDraftedBeforeSlowFinished = true;
+        releaseSlow();
+      }
+    },
+  });
+
+  const end = await runPipeline(
+    baseRun({ config: { targetCount: 8, topN: 2, topContacts: 1 } }),
+    ctxFor(exec, { concurrency: 2 })
+  );
+  assert.equal(end.status, 'done');
+  assert.equal(replacementDraftedBeforeSlowFinished, true);
+  assert.equal(end.targets.find((t) => t.targetId === 't1')?.sequence, 'failed');
+  assert.equal(end.targets.find((t) => t.targetId === 't3')?.sequence, 'done');
+});
+
 test('exhausted reserve triggers re-discovery for replacements', async () => {
   let targetingCalls = 0;
   const exec = fakeExec({
@@ -287,6 +332,19 @@ test('exhausted reserve triggers re-discovery for replacements', async () => {
   assert.ok(targetingCalls >= 2, 're-discovery ran once the reserve was empty');
   const delivered = end.targets.filter((t) => t.contacts === 'done' && t.contactIds.length > 0);
   assert.deepEqual(delivered.map((t) => t.targetId), ['t9']);
+});
+
+test('pipeline metrics capture timing, agent calls, and the first draft timestamp', async () => {
+  const end = await runPipeline(baseRun({ config: { targetCount: 8, topN: 1, topContacts: 1 } }), ctxFor(fakeExec()));
+  assert.equal(end.status, 'done');
+  assert.ok(end.metrics?.firstDraftAt instanceof Date);
+  assert.equal(end.metrics?.agentCalls?.targeting, 1);
+  assert.equal(end.metrics?.agentCalls?.evidence, 1);
+  assert.equal(end.metrics?.agentCalls?.contacts, 1);
+  assert.equal(end.metrics?.agentCalls?.sequence, 1);
+  assert.equal(typeof end.metrics?.targetingMs, 'number');
+  assert.equal(typeof end.metrics?.processingMs, 'number');
+  assert.equal(typeof end.metrics?.totalMs, 'number');
 });
 
 test('daily-limit pauses the run and preserves untouched targets for resume', async () => {

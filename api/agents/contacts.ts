@@ -52,6 +52,7 @@ const DEFAULT_DELIVERABLE = 1;
 const MAX_CONTACTS_PER_TARGET = 5;
 const RESOLVE_ATTEMPT_CAP = 8;
 const CANDIDATE_POOL_CAP = 10;
+const RESOLVE_LOOKAHEAD = 3;
 
 export default async function handler(req: Request, res: Response) {
   if (req.method !== 'POST') return methodNotAllowed(res, ['POST']);
@@ -501,20 +502,19 @@ export async function resolvePoolWithBudget(
     scraped = { domain, emails: [], pattern: null, pagesScraped: [] };
   }
 
-  // Top-down through the ranked pool, but resolve each batch CONCURRENTLY instead
-  // of one candidate at a time (the per-candidate finder→verifier round-trips were
-  // the dominant per-target latency). Each batch is sized to exactly how many more
-  // deliverables we still need (capped by the remaining attempt budget), so the
-  // fan-out never resolves more candidates than the sequential walk would have -
-  // same finder/verifier spend, just parallelized. Bounded by both N kept and the
-  // attempt cap so a bad domain can't burn the whole pool of finder credits.
+  // Top-down through the ranked pool, resolving a small lookahead batch
+  // CONCURRENTLY instead of one candidate at a time. For the common "keep 1"
+  // case this may spend a couple of extra finder/verifier attempts when the top
+  // result would have worked, but it removes the worst latency cliff: waiting
+  // through several serial misses at one company.
   const kept: ContactRow[] = [];
   let attempts = 0;
   let i = 0;
   while (i < rows.length && kept.length < want && attempts < RESOLVE_ATTEMPT_CAP) {
     const need = want - kept.length;
     const budget = RESOLVE_ATTEMPT_CAP - attempts;
-    const batch = rows.slice(i, i + Math.min(need, budget));
+    const batchSize = Math.min(Math.max(need, RESOLVE_LOOKAHEAD), budget);
+    const batch = rows.slice(i, i + batchSize);
     i += batch.length;
     attempts += batch.length;
 

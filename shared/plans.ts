@@ -20,9 +20,9 @@ export interface PlanLimits {
   /** Cost guard - agent runs (LLM + web-search calls) allowed per rolling 24h. */
   agentRunsPerDay: number;
   /**
-   * Burst guard - agent runs per rolling 60s. Must stay >= 20 for every plan:
-   * one mission pipeline legitimately fires ~12 agent calls/minute, so a lower
-   * cap would rate-limit the app's own orchestrator mid-run.
+   * Burst guard - agent runs per rolling 60s. Must stay high enough for the
+   * app's own parallel mission pipeline: a 15-company run needs ~46 agent runs
+   * before replacements, so low burst caps make normal runs appear stalled.
    */
   agentRunsPerMinute: number;
 }
@@ -48,7 +48,7 @@ export const PLANS: Record<PlanId, Plan> = {
     priceMonthly: 0,
     blurb: 'Kick the tires on real outreach.',
     features: ['3 mission launches / month', 'Up to 60 agent runs / day', 'Manual follow-ups'],
-    limits: { missionsPerMonth: 3, agentRunsPerDay: 60, agentRunsPerMinute: 20 },
+    limits: { missionsPerMonth: 3, agentRunsPerDay: 60, agentRunsPerMinute: 60 },
     purchasable: false,
   },
   starter: {
@@ -57,7 +57,7 @@ export const PLANS: Record<PlanId, Plan> = {
     priceMonthly: 10,
     blurb: 'For trying real campaigns without the Pro commitment.',
     features: ['10 mission launches / month', 'Up to 150 agent runs / day', 'Email + reply triage'],
-    limits: { missionsPerMonth: 10, agentRunsPerDay: 150, agentRunsPerMinute: 20 },
+    limits: { missionsPerMonth: 10, agentRunsPerDay: 150, agentRunsPerMinute: 60 },
     purchasable: true,
   },
   pro: {
@@ -71,7 +71,7 @@ export const PLANS: Record<PlanId, Plan> = {
       'Priority pipeline throughput',
       'Email + reply triage',
     ],
-    limits: { missionsPerMonth: 30, agentRunsPerDay: 400, agentRunsPerMinute: 20 },
+    limits: { missionsPerMonth: 30, agentRunsPerDay: 400, agentRunsPerMinute: 90 },
     purchasable: true,
   },
   scale: {
@@ -85,7 +85,7 @@ export const PLANS: Record<PlanId, Plan> = {
       'Highest burst throughput',
       'Everything in Pro',
     ],
-    limits: { missionsPerMonth: 150, agentRunsPerDay: 1500, agentRunsPerMinute: 30 },
+    limits: { missionsPerMonth: 150, agentRunsPerDay: 1500, agentRunsPerMinute: 120 },
     purchasable: true,
   },
 };

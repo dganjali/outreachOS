@@ -427,6 +427,23 @@ export interface PipelineTargetState {
   bestContactId: string | null;
 }
 
+export interface PipelineRunMetrics {
+  /** First time any initial draft finished for this run. */
+  firstDraftAt?: Date | null;
+  /** Wall-clock time spent in the initial targeting call. */
+  targetingMs?: number;
+  /** Wall-clock time spent processing targets, including bounded parallel work. */
+  processingMs?: number;
+  /** Wall-clock time spent selecting/discovering replacement targets. */
+  replacementMs?: number;
+  /** End-to-end wall-clock time from run start to terminal completion. */
+  totalMs?: number;
+  /** Cumulative observed duration by agent type, measured around pipeline calls. */
+  agentMs?: Partial<Record<AgentRunDoc['agentType'], number>>;
+  /** Count of agent calls made by this pipeline driver, by agent type. */
+  agentCalls?: Partial<Record<AgentRunDoc['agentType'], number>>;
+}
+
 export interface PipelineRunDoc extends BaseDoc {
   missionId: string;
   status: 'pending' | 'running' | 'paused' | 'done' | 'error' | 'canceled';
@@ -454,6 +471,7 @@ export interface PipelineRunDoc extends BaseDoc {
   // Bumped on every persisted step; a stale heartbeat means the driver died and
   // the run is safe to resume.
   heartbeatAt: Date;
+  metrics?: PipelineRunMetrics;
   startedAt: Date;
   completedAt: Date | null;
 }

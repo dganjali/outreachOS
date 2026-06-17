@@ -121,7 +121,7 @@ export default async function handler(req: Request, res: Response) {
     const facts = await assembleAllowedFacts(scope, user.id, persona._id, '__calibrate_synthetic__', rankQuery, {
       excludedFactIds: persona.excludedFactIds ?? [],
     });
-    const exemplarDocs = await fetchExemplars(user.id, persona._id, rankQuery);
+    const exemplarDocs = await fetchExemplars(scope, user.id, persona._id, rankQuery);
 
     const ctx: AssembledContext = {
       mode,
