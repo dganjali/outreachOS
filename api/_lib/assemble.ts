@@ -26,6 +26,7 @@ const MAX_FACTS = 12;
 const MAX_EXEMPLARS = 3;
 
 type Scope = ReturnType<typeof forUser>;
+const CACHE_MARKER = Symbol('DraftContextCache');
 
 export interface AssembledBundle {
   ctx: AssembledContext;
@@ -35,8 +36,45 @@ export interface AssembledBundle {
   personaVersion: number | null;
 }
 
+export interface DraftContextCache {
+  readonly [CACHE_MARKER]: true;
+  personas: Map<string, Promise<PersonaDoc | null>>;
+  profile: Promise<ProfileDoc | null> | null;
+  contextFacts: Map<string, Promise<AllowedFact[]>>;
+  exemplars: Map<string, Promise<Array<{ id: string; subject: string | null; body: string }>>>;
+  queryVectors: Map<string, Promise<number[]>>;
+}
+
+export function createDraftContextCache(): DraftContextCache {
+  return {
+    [CACHE_MARKER]: true,
+    personas: new Map(),
+    profile: null,
+    contextFacts: new Map(),
+    exemplars: new Map(),
+    queryVectors: new Map(),
+  };
+}
+
+export function isDraftContextCache(value: unknown): value is DraftContextCache {
+  return !!value && typeof value === 'object' && (value as Partial<DraftContextCache>)[CACHE_MARKER] === true;
+}
+
 /** Prefer the mission's persona; fall back to the user's default (oldest, non-archived). */
-export async function resolvePersona(scope: Scope, personaId: string | null): Promise<PersonaDoc | null> {
+export async function resolvePersona(
+  scope: Scope,
+  personaId: string | null,
+  cache?: DraftContextCache
+): Promise<PersonaDoc | null> {
+  if (cache) {
+    const key = personaId ?? '__default__';
+    let p = cache.personas.get(key);
+    if (!p) {
+      p = resolvePersona(scope, personaId);
+      cache.personas.set(key, p);
+    }
+    return p;
+  }
   if (personaId) {
     const p = await scope.collection<PersonaDoc>('personas').findById(personaId);
     if (p && !p.archivedAt) return p;
@@ -50,16 +88,17 @@ export async function resolvePersona(scope: Scope, personaId: string | null): Pr
 export async function assembleDraftContext(
   scope: Scope,
   uid: string,
-  args: { contact: ContactDoc; target: TargetDoc; mission: MissionDoc; persona: PersonaDoc | null }
+  args: { contact: ContactDoc; target: TargetDoc; mission: MissionDoc; persona: PersonaDoc | null },
+  cache?: DraftContextCache
 ): Promise<AssembledBundle> {
   const { contact, target, mission, persona } = args;
 
   const facts = await assembleAllowedFacts(scope, uid, persona?._id ?? null, target._id, mission.goal, {
     excludedFactIds: persona?.excludedFactIds ?? [],
-  });
-  const exemplarDocs = persona ? await fetchExemplars(uid, persona._id, mission.goal) : [];
+  }, cache);
+  const exemplarDocs = persona ? await fetchExemplars(scope, uid, persona._id, mission.goal, cache) : [];
   // Sender identity - anchors a real sign-off on every email (engine.ts).
-  const profile = await scope.collection<ProfileDoc>('profiles').findOne();
+  const profile = await fetchProfile(scope, cache);
 
   const ctx: AssembledContext = {
     mode: mission.mode ?? 'sales',
@@ -93,27 +132,17 @@ export async function assembleAllowedFacts(
   personaId: string | null,
   targetId: string,
   missionGoal: string,
-  opts: { excludedFactIds?: string[] } = {}
+  opts: { excludedFactIds?: string[] } = {},
+  cache?: DraftContextCache
 ): Promise<AllowedFact[]> {
   const facts: AllowedFact[] = [];
   // Default (person-level) facts this voice opted out of - drop them from
   // grounding so a cleared default never resurfaces in a generated email.
   const excluded = new Set(opts.excludedFactIds ?? []);
 
-  const ranked = await fetchRankedContextFacts(uid, personaId, missionGoal);
-  let contextFacts = ranked;
-  if (contextFacts === null) {
-    const candidates = await scope.collection<ContextFactDoc>('context_facts').find(
-      personaId
-        ? ({ $or: [{ scope: 'person' }, { scope: 'persona', personaId }] } as Record<string, unknown>)
-        : { scope: 'person' }
-    );
-    candidates.sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0));
-    contextFacts = candidates.slice(0, MAX_FACTS);
-  }
+  const contextFacts = await fetchContextAllowedFacts(scope, uid, personaId, missionGoal, excluded, cache);
   for (const f of contextFacts) {
-    if (excluded.has(f._id)) continue;
-    facts.push({ id: f._id, claim: f.claim, source: 'context_fact' });
+    facts.push(f);
   }
 
   const packs = await scope.collection<EvidencePackDoc>('evidence_packs').find({ targetId });
@@ -128,14 +157,78 @@ export async function assembleAllowedFacts(
   return facts;
 }
 
+async function fetchProfile(scope: Scope, cache?: DraftContextCache): Promise<ProfileDoc | null> {
+  if (!cache) return scope.collection<ProfileDoc>('profiles').findOne();
+  if (!cache.profile) cache.profile = scope.collection<ProfileDoc>('profiles').findOne();
+  return cache.profile;
+}
+
+async function fetchContextAllowedFacts(
+  scope: Scope,
+  uid: string,
+  personaId: string | null,
+  missionGoal: string,
+  excluded: Set<string>,
+  cache?: DraftContextCache
+): Promise<AllowedFact[]> {
+  const key = `${uid}|${personaId ?? ''}|${missionGoal}|${[...excluded].sort().join(',')}`;
+  if (cache) {
+    let p = cache.contextFacts.get(key);
+    if (!p) {
+      p = loadContextAllowedFacts(scope, uid, personaId, missionGoal, excluded, cache);
+      cache.contextFacts.set(key, p);
+    }
+    return p;
+  }
+  return loadContextAllowedFacts(scope, uid, personaId, missionGoal, excluded);
+}
+
+async function loadContextAllowedFacts(
+  scope: Scope,
+  uid: string,
+  personaId: string | null,
+  missionGoal: string,
+  excluded: Set<string>,
+  cache?: DraftContextCache
+): Promise<AllowedFact[]> {
+  const ranked = await fetchRankedContextFacts(uid, personaId, missionGoal, cache);
+  let contextFacts = ranked;
+  if (contextFacts === null) {
+    const candidates = await scope.collection<ContextFactDoc>('context_facts').find(
+      personaId
+        ? ({ $or: [{ scope: 'person' }, { scope: 'persona', personaId }] } as Record<string, unknown>)
+        : { scope: 'person' }
+    );
+    candidates.sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0));
+    contextFacts = candidates.slice(0, MAX_FACTS);
+  }
+  return contextFacts
+    .filter((f) => !excluded.has(f._id))
+    .map((f) => ({ id: f._id, claim: f.claim, source: 'context_fact' }));
+}
+
+async function queryVectorForMissionGoal(missionGoal: string, cache?: DraftContextCache): Promise<number[]> {
+  if (!cache) return embedOne(missionGoal, 'query');
+  let p = cache.queryVectors.get(missionGoal);
+  if (!p) {
+    p = embedOne(missionGoal, 'query').catch((err) => {
+      cache.queryVectors.delete(missionGoal);
+      throw err;
+    });
+    cache.queryVectors.set(missionGoal, p);
+  }
+  return p;
+}
+
 /** Relevance-rank the context bank via Atlas Vector Search. null ⇒ unavailable. */
 async function fetchRankedContextFacts(
   uid: string,
   personaId: string | null,
-  missionGoal: string
+  missionGoal: string,
+  cache?: DraftContextCache
 ): Promise<Array<{ _id: string; claim: string }> | null> {
   try {
-    const queryVector = await embedOne(missionGoal, 'query');
+    const queryVector = await queryVectorForMissionGoal(missionGoal, cache);
     const db = await adminDb();
     const search = (filter: Record<string, unknown>) =>
       db
@@ -168,12 +261,33 @@ async function fetchRankedContextFacts(
 
 /** Retrieve the persona's most relevant gold exemplars (with ids). [] if none. */
 export async function fetchExemplars(
+  scope: Scope,
   uid: string,
   personaId: string,
-  missionGoal: string
+  missionGoal: string,
+  cache?: DraftContextCache
+): Promise<Array<{ id: string; subject: string | null; body: string }>> {
+  const key = `${uid}|${personaId}|${missionGoal}`;
+  if (cache) {
+    let p = cache.exemplars.get(key);
+    if (!p) {
+      p = loadExemplars(scope, uid, personaId, missionGoal, cache);
+      cache.exemplars.set(key, p);
+    }
+    return p;
+  }
+  return loadExemplars(scope, uid, personaId, missionGoal);
+}
+
+async function loadExemplars(
+  scope: Scope,
+  uid: string,
+  personaId: string,
+  missionGoal: string,
+  cache?: DraftContextCache
 ): Promise<Array<{ id: string; subject: string | null; body: string }>> {
   try {
-    const queryVector = await embedOne(missionGoal, 'query');
+    const queryVector = await queryVectorForMissionGoal(missionGoal, cache);
     const db = await adminDb();
     const docs = await db
       .collection('style_exemplars')
@@ -196,7 +310,7 @@ export async function fetchExemplars(
   } catch {
     // fall through to recency
   }
-  const recent = await forUser(uid).collection<StyleExemplarDoc>('style_exemplars').find({ personaId });
+  const recent = await scope.collection<StyleExemplarDoc>('style_exemplars').find({ personaId });
   recent.sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0));
   return recent.slice(0, MAX_EXEMPLARS).map((e) => ({ id: e._id, subject: e.subject, body: e.body }));
 }

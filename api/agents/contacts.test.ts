@@ -5,6 +5,7 @@ import { defaultContactIcp } from '../_lib/icp';
 import type { ResolvedEmail } from '../_lib/email-resolver';
 import type { ScrapeResult } from '../_lib/web-scrape';
 import type { ContactDoc, MissionDoc, TargetDoc } from '../../shared/schemas';
+import type { ContactIcp } from '../../shared/types';
 
 type ContactRow = Omit<ContactDoc, '_id' | 'userId' | 'createdAt' | 'updatedAt'>;
 
@@ -58,12 +59,12 @@ describe('resolvePoolWithBudget', () => {
     assert.ok(out.every((r) => r.email && r.emailResolver === 'verifier'));
   });
 
-  it('keeps exactly the requested count (1) even when more are reachable', async () => {
+  it('keeps exactly the requested count (1) while resolving a small speed batch', async () => {
     const pool = ['A', 'B', 'C', 'D'].map(row);
     const { deps, calls } = depsFor(new Set(['A', 'B', 'C', 'D']));
     const out = await resolvePoolWithBudget(pool, 'acme.co', 't1', 1, deps);
     assert.equal(out.length, 1, 'no extra contacts beyond what was asked for');
-    assert.equal(calls(), 1);
+    assert.equal(calls(), 3, 'looks ahead so one slow/missing candidate does not stall the company');
     assert.deepEqual(out.map((r) => r.name), ['A']);
   });
 
@@ -186,11 +187,11 @@ describe('rankCandidates - the bank example at enterprise size', () => {
 });
 
 describe('narrowIcpBySelection - user-chosen contact types narrow the ICP', () => {
-  const icp = {
+  const icp: ContactIcp = {
     ...defaultContactIcp('sponsorship'),
     functions: ['community', 'sponsorships', 'partnerships'],
     functionKeywords: ['community', 'sponsorship', 'partnerships'],
-    seniority: { idealLevels: ['manager', 'senior_manager', 'director'] as const, maxLevel: 'director' as const },
+    seniority: { idealLevels: ['manager', 'senior_manager', 'director'], maxLevel: 'director' },
   };
 
   it('no filter ⇒ unchanged ICP (AI-only default)', () => {

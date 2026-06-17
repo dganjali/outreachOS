@@ -13,7 +13,7 @@ import { generateJson, MODEL } from '../_lib/llm';
 import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
 import { embedOne } from '../_lib/embeddings';
 import { runDraftEngine, ensureSignOff } from '../_lib/engine';
-import { resolvePersona, assembleDraftContext } from '../_lib/assemble';
+import { resolvePersona, assembleDraftContext, isDraftContextCache } from '../_lib/assemble';
 import type {
   ContactDoc,
   EmailSequenceDoc,
@@ -68,7 +68,8 @@ export default async function handler(req: Request, res: Response) {
   const scope = forUser(user.id);
   if (!(await checkRateLimit(scope, res))) return;
 
-  const { contact_id } = (req.body ?? {}) as { contact_id?: string };
+  const { contact_id, draft_context_cache } = (req.body ?? {}) as { contact_id?: string; draft_context_cache?: unknown };
+  const draftContextCache = isDraftContextCache(draft_context_cache) ? draft_context_cache : undefined;
   if (!contact_id) return res.status(400).json({ error: 'missing_contact_id' });
 
   const contact = await scope.collection<ContactDoc>('contacts').findById(contact_id);
@@ -95,19 +96,17 @@ export default async function handler(req: Request, res: Response) {
   });
 
   try {
-    const persona = await resolvePersona(scope, mission.personaId);
+    const persona = await resolvePersona(scope, mission.personaId, draftContextCache);
     const { ctx, factIds, exemplarIds, personaVersion } = await assembleDraftContext(scope, user.id, {
       contact,
       target,
       mission,
       persona,
-    });
+    }, draftContextCache);
 
     // Initial email - grounded engine, single critique pass (bulk tier).
     const result = await runDraftEngine(ctx, 'bulk');
     const { subject, body, angle, claims } = result.draft;
-
-    const followups = await generateFollowups(ctx.recipient.name, mission.goal, subject, body, ctx.sender?.name ?? null);
 
     const row = await scope.collection<EmailSequenceDoc>('email_sequences').insertOne({
       _id: newId(),
@@ -122,7 +121,7 @@ export default async function handler(req: Request, res: Response) {
       // Immutable baseline for the edit-delta (learning loop compares vs final).
       originalSubject: subject,
       originalBody: body,
-      followups,
+      followups: [],
       status: 'draft',
       scheduledSendAt: null,
       sentAt: null,
@@ -137,6 +136,20 @@ export default async function handler(req: Request, res: Response) {
         await scope.collection<EmailSequenceDoc>('email_sequences').updateById(row._id, { embedding } as Partial<EmailSequenceDoc>);
       } catch (err) {
         console.warn('embed_sequence_failed', err);
+      }
+    })();
+
+    // Follow-ups are useful, but the initial personalized email is the critical
+    // pipeline deliverable. Fill them in asynchronously so bulk runs do not wait
+    // on one extra LLM call per contact before marking a draft ready.
+    void (async () => {
+      try {
+        const followups = await generateFollowups(ctx.recipient.name, mission.goal, subject, body, ctx.sender?.name ?? null);
+        if (followups.length > 0) {
+          await scope.collection<EmailSequenceDoc>('email_sequences').updateById(row._id, { followups } as Partial<EmailSequenceDoc>);
+        }
+      } catch (err) {
+        console.warn('generate_followups_failed', err);
       }
     })();
 

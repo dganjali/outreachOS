@@ -26,7 +26,15 @@ import { forUser, newId, type UserScope } from './db';
 import type { AuthedUser } from './auth';
 import { invokeAgent } from './internal-invoke';
 import { getPlanLimits } from './runs';
-import type { PipelineRunDoc, PipelineStepStatus, PipelineTargetState, TargetDoc } from '../../shared/schemas';
+import { createDraftContextCache } from './assemble';
+import type {
+  AgentRunDoc,
+  PipelineRunDoc,
+  PipelineRunMetrics,
+  PipelineStepStatus,
+  PipelineTargetState,
+  TargetDoc,
+} from '../../shared/schemas';
 import type { ContactTypeFilter, SeniorityLevel } from '../../shared/types';
 
 import targetHandler from '../agents/target';
@@ -42,17 +50,17 @@ export const MAX_TOP_CONTACTS = 5;
 // How many targets run at once. Derived per-run from the plan's per-minute cap
 // (with headroom) and clamped to this ceiling so a generous plan can't burst the
 // LLM quota or badly overshoot the daily cap.
-export const DEFAULT_PIPELINE_CONCURRENCY = 3;
-export const MAX_PIPELINE_CONCURRENCY = 4;
+export const DEFAULT_PIPELINE_CONCURRENCY = 4;
+export const MAX_PIPELINE_CONCURRENCY = 8;
 // Drafts overlapped within a single target (topContacts is small).
-const CONTACT_CONCURRENCY = 2;
+const CONTACT_CONCURRENCY = 3;
 // Ceiling on how many backup companies a single run will pull in to replace
 // ones that yield no reachable contact. Bounds re-discovery cost and guarantees
 // the replenish loop terminates even if every backup also comes up empty.
 const MAX_REPLACEMENTS = 12;
 // Beat between starting successive target workers, to desynchronize the
 // count-then-insert in runs.ts:checkRateLimit (bounds daily-cap overshoot).
-const LAUNCH_STAGGER_MS = 600;
+const LAUNCH_STAGGER_MS = 200;
 
 const MINUTE_RETRY_WAIT_MS = 35_000;
 const MINUTE_RETRY_MAX = 2;
@@ -95,6 +103,7 @@ function classify<T = Record<string, unknown>>(result: { status: number; body: u
 }
 
 export function realExecutors(user: AuthedUser): PipelineExecutors {
+  const draftContextCache = createDraftContextCache();
   return {
     async targeting(missionId, count, sectors) {
       const body = classify<{ targets?: Array<{ _id: string; companyName: string; score: number | null }> }>(
@@ -115,7 +124,7 @@ export function realExecutors(user: AuthedUser): PipelineExecutors {
       return (body.contacts ?? []).map((c) => ({ id: c._id, confidence: c.confidence ?? null }));
     },
     async sequence(contactId) {
-      classify(await invokeAgent(sequenceHandler, { user, body: { contact_id: contactId } }));
+      classify(await invokeAgent(sequenceHandler, { user, body: { contact_id: contactId, draft_context_cache: draftContextCache } }));
     },
     async reserve(missionId, excludeIds) {
       const scope = forUser(user.id);
@@ -192,6 +201,7 @@ function finishProcessing(r: PipelineRunDoc): PipelineRunDoc {
   r.cursor = null;
   r.note = null;
   r.completedAt = new Date();
+  markTotalMs(r);
   return r;
 }
 
@@ -218,8 +228,64 @@ function cloneRun(run: PipelineRunDoc): PipelineRunDoc {
   return {
     ...run,
     targets: run.targets.map((t) => ({ ...t, contactIds: [...t.contactIds], sequences: [...t.sequences] })),
+    metrics: cloneMetrics(run.metrics),
     cursor: null,
   };
+}
+
+function cloneMetrics(metrics: PipelineRunMetrics | undefined): PipelineRunMetrics | undefined {
+  if (!metrics) return undefined;
+  return {
+    ...metrics,
+    agentMs: { ...(metrics.agentMs ?? {}) },
+    agentCalls: { ...(metrics.agentCalls ?? {}) },
+  };
+}
+
+function metrics(r: PipelineRunDoc): PipelineRunMetrics {
+  if (!r.metrics) r.metrics = {};
+  return r.metrics;
+}
+
+function addMetricMs(r: PipelineRunDoc, key: 'targetingMs' | 'processingMs' | 'replacementMs', ms: number): void {
+  const m = metrics(r);
+  m[key] = Math.round((m[key] ?? 0) + ms);
+}
+
+function addAgentTiming(r: PipelineRunDoc, agentType: AgentRunDoc['agentType'], ms: number): void {
+  const m = metrics(r);
+  m.agentMs = { ...(m.agentMs ?? {}), [agentType]: Math.round(((m.agentMs ?? {})[agentType] ?? 0) + ms) };
+  m.agentCalls = { ...(m.agentCalls ?? {}), [agentType]: ((m.agentCalls ?? {})[agentType] ?? 0) + 1 };
+}
+
+async function measureMs<T>(r: PipelineRunDoc, key: 'targetingMs' | 'processingMs' | 'replacementMs', fn: () => Promise<T>): Promise<T> {
+  const start = Date.now();
+  try {
+    return await fn();
+  } finally {
+    addMetricMs(r, key, Date.now() - start);
+  }
+}
+
+async function measureAgent<T>(r: PipelineRunDoc, agentType: AgentRunDoc['agentType'], fn: () => Promise<T>): Promise<T> {
+  const start = Date.now();
+  try {
+    return await fn();
+  } finally {
+    addAgentTiming(r, agentType, Date.now() - start);
+  }
+}
+
+function markFirstDraft(r: PipelineRunDoc): void {
+  const m = metrics(r);
+  if (!m.firstDraftAt) m.firstDraftAt = new Date();
+}
+
+function markTotalMs(r: PipelineRunDoc): void {
+  if (!r.completedAt || !r.startedAt) return;
+  const startedAt = new Date(r.startedAt).getTime();
+  const completedAt = new Date(r.completedAt).getTime();
+  if (Number.isFinite(startedAt) && Number.isFinite(completedAt)) metrics(r).totalMs = Math.max(0, completedAt - startedAt);
 }
 
 /** Run one step, retrying a few times on a per-minute rate limit. Re-throws the
@@ -247,9 +313,9 @@ async function runStep<T>(ctx: ProcContext, fn: () => Promise<T>): Promise<T> {
 const halted = (ctx: ProcContext) => ctx.paused || ctx.canceled;
 
 /** Run the evidence sub-step, recording its terminal status on the target. */
-async function runEvidence(t: PipelineTargetState, ctx: ProcContext): Promise<void> {
+async function runEvidence(r: PipelineRunDoc, t: PipelineTargetState, ctx: ProcContext): Promise<void> {
   try {
-    await runStep(ctx, () => ctx.exec.evidence(t.targetId));
+    await measureAgent(r, 'evidence', () => runStep(ctx, () => ctx.exec.evidence(t.targetId)));
     step(t, 'evidence', 'done');
   } catch (e) {
     if (e instanceof PipelineDailyLimitError) {
@@ -268,7 +334,9 @@ async function runContacts(r: PipelineRunDoc, t: PipelineTargetState, ctx: ProcC
       functions: r.config.selectedFunctions ?? [],
       seniority: r.config.selectedSeniority ?? [],
     };
-    const contacts = await runStep(ctx, () => ctx.exec.contacts(t.targetId, filter, r.config.topContacts));
+    const contacts = await measureAgent(r, 'contacts', () =>
+      runStep(ctx, () => ctx.exec.contacts(t.targetId, filter, r.config.topContacts))
+    );
     step(t, 'contacts', 'done');
     selectContacts(t, contacts, r.config.topContacts);
   } catch (e) {
@@ -285,7 +353,12 @@ async function runContacts(r: PipelineRunDoc, t: PipelineTargetState, ctx: ProcC
  *  Resumes from whatever its persisted statuses already say is done; mutates `t`
  *  in place and persists after each transition. Sets ctx.paused on a daily-limit
  *  so the pool drains. */
-async function processTarget(r: PipelineRunDoc, t: PipelineTargetState, ctx: ProcContext): Promise<void> {
+async function processTarget(
+  r: PipelineRunDoc,
+  t: PipelineTargetState,
+  ctx: ProcContext,
+  onDropped?: () => Promise<void>
+): Promise<void> {
   // --- research: evidence + contacts run concurrently (independent work) ---
   if (!isResolved(t.evidence) || !isResolved(t.contacts)) {
     if (halted(ctx)) return;
@@ -294,7 +367,7 @@ async function processTarget(r: PipelineRunDoc, t: PipelineTargetState, ctx: Pro
     await ctx.persist(r);
 
     const subs: Array<Promise<void>> = [];
-    if (!isResolved(t.evidence)) subs.push(runEvidence(t, ctx));
+    if (!isResolved(t.evidence)) subs.push(runEvidence(r, t, ctx));
     if (!isResolved(t.contacts)) subs.push(runContacts(r, t, ctx));
     await Promise.all(subs);
     await ctx.persist(r);
@@ -309,6 +382,7 @@ async function processTarget(r: PipelineRunDoc, t: PipelineTargetState, ctx: Pro
       await dropTarget(t, ctx);
       r.note = progressNote(r);
       await ctx.persist(r);
+      await onDropped?.();
       return;
     }
     if (t.contacts === 'failed' || t.contactIds.length === 0) {
@@ -316,6 +390,7 @@ async function processTarget(r: PipelineRunDoc, t: PipelineTargetState, ctx: Pro
       await dropTarget(t, ctx);
       r.note = progressNote(r);
       await ctx.persist(r);
+      await onDropped?.();
       return;
     }
   }
@@ -331,8 +406,9 @@ async function processTarget(r: PipelineRunDoc, t: PipelineTargetState, ctx: Pro
       t.sequences[i] = 'running';
       await ctx.persist(r);
       try {
-        await runStep(ctx, () => ctx.exec.sequence(t.contactIds[i]));
+        await measureAgent(r, 'sequence', () => runStep(ctx, () => ctx.exec.sequence(t.contactIds[i])));
         t.sequences[i] = 'done';
+        markFirstDraft(r);
       } catch (e) {
         if (e instanceof PipelineDailyLimitError) {
           ctx.paused = true;
@@ -372,9 +448,92 @@ async function mapPool<T>(items: T[], concurrency: number, fn: (item: T) => Prom
   await Promise.all(Array.from({ length: n }, () => worker()));
 }
 
+interface ReplacementState {
+  added: number;
+  chain: Promise<void>;
+}
+
+function replacementState(): ReplacementState {
+  return { added: 0, chain: Promise.resolve() };
+}
+
+/** Targets that have not conclusively failed from missing research/contact data.
+ *  Queued replacements count as viable so concurrent failures don't overfill
+ *  the run while those replacements are still being processed. */
+function viableProspectCount(r: PipelineRunDoc): number {
+  return r.targets.filter((t) => !(t.sequence === 'failed' && (t.contacts === 'failed' || t.contactIds.length === 0))).length;
+}
+
+function replacementNeed(r: PipelineRunDoc): number {
+  return Math.max(0, r.config.topN - viableProspectCount(r));
+}
+
+async function appendReplacementTargets(
+  r: PipelineRunDoc,
+  ctx: ProcContext,
+  state: ReplacementState
+): Promise<PipelineTargetState[]> {
+  if (halted(ctx) || state.added >= MAX_REPLACEMENTS) return [];
+  const need = replacementNeed(r);
+  if (need <= 0) return [];
+
+  const have = new Set(r.targets.map((t) => t.targetId));
+  let candidates: Array<{ id: string; name: string; score: number | null }> = [];
+  await measureMs(r, 'replacementMs', async () => {
+    try {
+      candidates = await ctx.exec.reserve(r.missionId, [...have]);
+    } catch (err) {
+      console.warn('reserve_lookup_failed', r.missionId, err);
+    }
+
+    if (candidates.length === 0) {
+      // Reserve exhausted → discover a fresh batch (the agent already excludes
+      // companies already targeted in this mission), then keep going.
+      try {
+        const found = await measureAgent(r, 'targeting', () =>
+          runStep(ctx, () => ctx.exec.targeting(r.missionId, r.config.targetCount, r.config.selectedSectors))
+        );
+        candidates = found.filter((f) => !have.has(f.id));
+      } catch (e) {
+        if (e instanceof PipelineDailyLimitError) ctx.paused = true;
+        candidates = [];
+      }
+    }
+  });
+  if (halted(ctx) || candidates.length === 0) return [];
+
+  const room = MAX_REPLACEMENTS - state.added;
+  const picks = [...candidates]
+    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+    .slice(0, Math.min(need, room));
+  if (picks.length === 0) return [];
+
+  const fresh = seedTargets(picks, picks.length);
+  r.targets.push(...fresh);
+  state.added += fresh.length;
+  r.note = 'Finding replacements for companies with no reachable contact…';
+  await ctx.persist(r);
+  return fresh;
+}
+
+async function serializedReplacement(
+  r: PipelineRunDoc,
+  ctx: ProcContext,
+  state: ReplacementState,
+  onFresh: (targets: PipelineTargetState[]) => void
+): Promise<void> {
+  const run = async () => {
+    if (await observeCancel(ctx)) return;
+    const fresh = await appendReplacementTargets(r, ctx, state);
+    if (fresh.length > 0) onFresh(fresh);
+  };
+  state.chain = state.chain.then(run, run);
+  await state.chain;
+}
+
 /** Pull non-terminal targets through `processTarget` with bounded concurrency,
  *  starting workers a beat apart and stopping early on pause/cancel. */
-async function runTargetPool(r: PipelineRunDoc, ctx: ProcContext): Promise<void> {
+async function runTargetPool(r: PipelineRunDoc, ctx: ProcContext, replacements: ReplacementState): Promise<void> {
   const queue = r.targets.filter((t) => !targetTerminal(t));
   if (queue.length === 0) return;
   let next = 0;
@@ -388,10 +547,11 @@ async function runTargetPool(r: PipelineRunDoc, ctx: ProcContext): Promise<void>
       if (await observeCancel(ctx)) return;
       const i = next++;
       if (i >= queue.length) return;
-      await processTarget(r, queue[i], ctx);
+      await processTarget(r, queue[i], ctx, () => serializedReplacement(r, ctx, replacements, (fresh) => queue.push(...fresh)));
     }
   };
   await Promise.all(Array.from({ length: n }, (_, w) => worker(w)));
+  await replacements.chain;
 }
 
 async function observeCancel(ctx: ProcContext): Promise<boolean> {
@@ -410,57 +570,15 @@ async function dropTarget(t: PipelineTargetState, ctx: ProcContext): Promise<voi
   }
 }
 
-/** Companies that actually yielded a reachable contact - the real deliverables
- *  the replenish loop counts toward the requested topN. */
-function deliveredCount(r: PipelineRunDoc): number {
-  return r.targets.filter((t) => t.contacts === 'done' && t.contactIds.length > 0).length;
-}
-
-/** Backfill companies that yielded no contact: pull the next-best from the
- *  already-discovered reserve, then (once it's exhausted) re-discover a fresh
- *  batch, processing each new company until we have `topN` companies with
- *  contacts or hit MAX_REPLACEMENTS. Honors pause/cancel like the main pool. */
-async function replenishTargets(r: PipelineRunDoc, ctx: ProcContext): Promise<void> {
-  let added = 0;
-  while (!halted(ctx) && deliveredCount(r) < r.config.topN && added < MAX_REPLACEMENTS) {
+/** Final safety net for runs resumed from older state or for replacement misses
+ *  that happened after all original workers drained. The main pool now replaces
+ *  continuously as targets fail, so this usually exits immediately. */
+async function replenishTargets(r: PipelineRunDoc, ctx: ProcContext, replacements: ReplacementState): Promise<void> {
+  while (!halted(ctx) && replacementNeed(r) > 0 && replacements.added < MAX_REPLACEMENTS) {
     if (await observeCancel(ctx)) return;
-    const need = r.config.topN - deliveredCount(r);
-    const have = new Set(r.targets.map((t) => t.targetId));
-
-    let candidates: Array<{ id: string; name: string; score: number | null }> = [];
-    try {
-      candidates = await ctx.exec.reserve(r.missionId, [...have]);
-    } catch (err) {
-      console.warn('reserve_lookup_failed', r.missionId, err);
-    }
-
-    if (candidates.length === 0) {
-      // Reserve exhausted → discover a fresh batch (the agent already excludes
-      // companies already targeted in this mission), then keep going.
-      try {
-        const found = await runStep(ctx, () => ctx.exec.targeting(r.missionId, r.config.targetCount, r.config.selectedSectors));
-        candidates = found.filter((f) => !have.has(f.id));
-      } catch (e) {
-        if (e instanceof PipelineDailyLimitError) {
-          ctx.paused = true;
-          return;
-        }
-        return; // re-discovery failed → nothing more we can do this run
-      }
-    }
-    if (candidates.length === 0) return; // genuinely nothing left to try
-
-    const room = MAX_REPLACEMENTS - added;
-    const picks = [...candidates]
-      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
-      .slice(0, Math.min(need, room));
-    const fresh = seedTargets(picks, picks.length);
-    r.targets.push(...fresh);
-    added += fresh.length;
-    r.note = 'Finding replacements for companies with no reachable contact…';
-    await ctx.persist(r);
-
-    await runTargetPool(r, ctx); // process the newly queued backups
+    const fresh = await appendReplacementTargets(r, ctx, replacements);
+    if (fresh.length === 0) return;
+    await runTargetPool(r, ctx, replacements);
   }
 }
 
@@ -487,12 +605,17 @@ function seedTargets(found: Array<{ id: string; name: string; score: number | nu
 export async function runPipeline(run: PipelineRunDoc, ctx: ProcContext): Promise<PipelineRunDoc> {
   const r = cloneRun(run);
   if (HALTED.has(r.status)) return r;
+  const replacements = replacementState();
 
   // --- targeting ---
   if (r.phase === 'targeting') {
     r.status = 'running';
     try {
-      const found = await runStep(ctx, () => ctx.exec.targeting(r.missionId, r.config.targetCount, r.config.selectedSectors));
+      const found = await measureMs(r, 'targetingMs', () =>
+        measureAgent(r, 'targeting', () =>
+          runStep(ctx, () => ctx.exec.targeting(r.missionId, r.config.targetCount, r.config.selectedSectors))
+        )
+      );
       const targets = seedTargets(found, r.config.topN);
       if (targets.length === 0) {
         finishProcessing(r);
@@ -523,10 +646,10 @@ export async function runPipeline(run: PipelineRunDoc, ctx: ProcContext): Promis
   }
 
   // --- processing (parallel across targets) ---
-  await runTargetPool(r, ctx);
+  await measureMs(r, 'processingMs', () => runTargetPool(r, ctx, replacements));
   // Backfill any company that came up with no reachable contact so the user
   // still gets the count they asked for, drawn from backups (no empty cards).
-  await replenishTargets(r, ctx);
+  await replenishTargets(r, ctx, replacements);
 
   if (ctx.canceled) return r; // cancelPipeline already wrote status='canceled'
   if (ctx.paused) {
@@ -547,7 +670,7 @@ const PIPELINE_RUNS = 'pipeline_runs' as const;
 // Only target/note progress - never status, so a worker write can't clobber a
 // concurrent cancel.
 function progressFields(r: PipelineRunDoc) {
-  return { targets: r.targets, note: r.note, heartbeatAt: new Date() };
+  return { targets: r.targets, note: r.note, metrics: r.metrics, heartbeatAt: new Date() };
 }
 function statusFields(r: PipelineRunDoc) {
   return {
@@ -557,6 +680,7 @@ function statusFields(r: PipelineRunDoc) {
     cursor: r.cursor,
     note: r.note,
     error: r.error,
+    metrics: r.metrics,
     completedAt: r.completedAt,
     heartbeatAt: new Date(),
   };
@@ -575,7 +699,7 @@ async function loadRun(scope: UserScope, runId: string): Promise<PipelineRunDoc 
 async function pipelineConcurrency(scope: UserScope): Promise<number> {
   try {
     const limits = await getPlanLimits(scope);
-    const fromPlan = Math.floor((limits.agentRunsPerMinute ?? 0) / 4); // leave burst headroom
+    const fromPlan = Math.floor(((limits.agentRunsPerMinute ?? 0) - 1) / 3); // targeting + roughly 3 agent runs per company
     return Math.max(1, Math.min(MAX_PIPELINE_CONCURRENCY, fromPlan || DEFAULT_PIPELINE_CONCURRENCY));
   } catch {
     return DEFAULT_PIPELINE_CONCURRENCY;
@@ -611,7 +735,14 @@ async function driveLoop(scope: UserScope, runId: string, exec: PipelineExecutor
   };
 
   try {
-    await runPipeline(run, ctx);
+    const end = await runPipeline(run, ctx);
+    if (end.metrics) {
+      console.info('[pipeline] run metrics', {
+        runId,
+        status: end.status,
+        metrics: end.metrics,
+      });
+    }
   } catch (e) {
     await enqueue({
       status: 'error',
@@ -691,6 +822,7 @@ export async function startPipeline(args: StartPipelineArgs): Promise<PipelineRu
     note: 'Finding high-fit companies with a reason to reach out now…',
     error: null,
     heartbeatAt: now,
+    metrics: {},
     startedAt: now,
     completedAt: null,
   } as never);
