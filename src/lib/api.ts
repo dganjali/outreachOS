@@ -170,14 +170,23 @@ export const gmail = {
     authedFetch<{ url: string }>('/api/integrations/gmail/start', { origin: window.location.origin }),
   status: () => authedFetch<{ connected: boolean; integration: Integration | null }>('/api/integrations/gmail/status', null, 'GET'),
   disconnect: () => authedFetch<{ disconnected: boolean }>('/api/integrations/gmail/disconnect', {}),
-  send: (sequence_id: string, touch_index: number, mode: 'draft' | 'send', to_override?: string) =>
+  send: (
+    sequence_id: string,
+    touch_index: number,
+    mode: 'draft' | 'send',
+    to_override?: string,
+    // ISO 8601. When set, the touch is queued for the cron to send at that time
+    // instead of going out now (mode is treated as 'send' once it fires).
+    scheduled_send_at?: string,
+  ) =>
     authedFetch<{
       sent_message_id: string;
-      mode: 'draft' | 'send';
+      mode: 'draft' | 'send' | 'scheduled';
+      scheduled_send_at?: string | null;
       gmail_message_id: string;
       gmail_thread_id: string;
       gmail_draft_id?: string;
-    }>('/api/gmail/send', { sequence_id, touch_index, mode, to_override }),
+    }>('/api/gmail/send', { sequence_id, touch_index, mode, to_override, scheduled_send_at }),
   reply: (reply_id: string, subject: string, body: string) =>
     authedFetch<{ ok: boolean; gmail_message_id: string; gmail_thread_id: string }>('/api/gmail/reply', {
       reply_id,

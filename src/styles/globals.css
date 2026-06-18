@@ -128,11 +128,13 @@ body {
   /* Preflight is disabled for legacy coexistence, so restore the button reset:
      without it, bare <button>s show the UA `buttonface` grey fill + `buttonborder`
      bevel under dark color-scheme (the grey + weird outline on ghost buttons).
-     Placed in @layer base so explicit background/border utilities still win. */
-  button,
-  [type='button'],
-  [type='reset'],
-  [type='submit'] {
+     Wrapped in :where() so it has ZERO specificity: it still strips the UA grey
+     from bare <button>s, but any class-based button rule (e.g. .btn-send,
+     .btn-primary - specificity 0,1,0) now wins. Without :where() the reset's
+     [type='button'] selector (also 0,1,0) beat single-class button styles on
+     source order once the build flattens @layer wrappers, leaving primary/send
+     buttons transparent ("white-outed"). */
+  :where(button, [type='button'], [type='reset'], [type='submit']) {
     appearance: none;
     -webkit-appearance: none;
     background-color: transparent;

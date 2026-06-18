@@ -7,7 +7,8 @@ import type { Request, Response } from 'express';
 import { adminDb, forUser } from '../_lib/db';
 import { requireCronSecret } from '../_lib/auth';
 import { getActiveAccessToken, sendNow } from '../_lib/gmail';
-import { isSuppressed } from '../_lib/sequencing';
+import { isSuppressed, scheduleFollowups } from '../_lib/sequencing';
+import { recordOutcome } from '../_lib/outcomes';
 import type {
   SentMessageDoc,
   EmailSequenceDoc,
@@ -49,12 +50,14 @@ export default async function handler(req: Request, res: Response) {
     };
 
     try {
-      // User paused follow-ups?
+      // User paused follow-ups? The pause only governs the cold follow-up
+      // cadence - a scheduled *initial* (touchIndex 0) is an explicit user action
+      // and still goes out.
       if (!pauseCache.has(uid)) {
         const prof = await scope.collection<ProfileDoc>('profiles').findOne();
         pauseCache.set(uid, prof?.pauseFollowups === true);
       }
-      if (pauseCache.get(uid)) {
+      if (pauseCache.get(uid) && msg.touchIndex > 0) {
         skipped++;
         continue; // leave queued; resume when they unpause
       }
@@ -105,12 +108,28 @@ export default async function handler(req: Request, res: Response) {
         inReplyTo: prior?.gmailMessageId ? `<${prior.gmailMessageId}>` : undefined,
       });
 
+      const sentAt = new Date();
       await sentCol.updateById(msg._id, {
         status: 'sent',
-        sentAt: new Date(),
+        sentAt,
         gmailMessageId: result.messageId,
         gmailThreadId: result.threadId,
       });
+
+      // A scheduled *initial* touch needs the same follow-on bookkeeping the
+      // inline send path does: mark the sequence/contact, credit the outcome,
+      // and queue the follow-up cadence relative to when it actually went out.
+      if (msg.touchIndex === 0) {
+        await scope.collection<EmailSequenceDoc>('email_sequences').updateById(seq._id, {
+          status: 'sent',
+          sentAt,
+        });
+        await scope.collection<ContactDoc>('contacts').updateById(contact._id, { status: 'contacted' });
+        await recordOutcome(uid, contact._id, 'sent');
+        if (!pauseCache.get(uid)) {
+          await scheduleFollowups({ scope, seq, toEmail: msg.toEmail, sentAt });
+        }
+      }
       sent++;
     } catch (err) {
       failed++;

@@ -16,6 +16,7 @@ interface SendBody {
   touch_index?: number; // 0 = initial, 1+ = follow-ups
   mode?: 'draft' | 'send';
   to_override?: string;
+  scheduled_send_at?: string; // ISO 8601 - queue for the cron instead of sending now
 }
 
 export default async function handler(req: Request, res: Response) {
@@ -29,6 +30,17 @@ export default async function handler(req: Request, res: Response) {
   const touchIndex = body.touch_index ?? 0;
   const mode = body.mode ?? 'draft';
   if (!sequenceId) return res.status(400).json({ error: 'missing_sequence_id' });
+
+  // Scheduled send: queue the touch for the send-due-touches cron instead of
+  // sending inline. Only valid for an immediate-style request (not a draft) and
+  // must be a real future timestamp.
+  let scheduledSendAt: Date | null = null;
+  if (body.scheduled_send_at) {
+    const when = new Date(body.scheduled_send_at);
+    if (Number.isNaN(when.getTime())) return res.status(400).json({ error: 'invalid_scheduled_send_at' });
+    if (when.getTime() <= Date.now()) return res.status(400).json({ error: 'scheduled_send_at_in_past' });
+    scheduledSendAt = when;
+  }
 
   const seq = await scope
     .collection<EmailSequenceDoc & { profileRefs?: Record<string, Array<{ field: string; snippet: string }>> }>('email_sequences')
@@ -112,7 +124,7 @@ export default async function handler(req: Request, res: Response) {
     gmailMessageId: null,
     gmailThreadId: null,
     status: 'queued',
-    scheduledSendAt: null,
+    scheduledSendAt,
     sentAt: null,
     failedReason: null,
     profileVersionId: seq.profileVersionId ?? null,
@@ -128,6 +140,17 @@ export default async function handler(req: Request, res: Response) {
       .collection<SentMessageDoc>('sent_messages')
       .insertOne({ ...sentRowBase, _id: newId() } as InsertDoc<SentMessageDoc>);
     sentRowId = created._id;
+  }
+
+  // Queue-only path: the row is now persisted with status 'queued' and a future
+  // scheduledSendAt. The send-due-touches cron picks it up and does the actual
+  // send (plus follow-up scheduling for the initial touch). Don't hit Gmail now.
+  if (scheduledSendAt) {
+    return res.status(200).json({
+      sent_message_id: sentRowId,
+      mode: 'scheduled',
+      scheduled_send_at: scheduledSendAt.toISOString(),
+    });
   }
 
   try {

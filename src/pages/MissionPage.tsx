@@ -698,6 +698,55 @@ function SequenceCard({ sequence, contact }: { sequence: EmailSequence; contact:
     }
   }
 
+  async function doSchedule(touchIndex: number, whenISO: string) {
+    setSendErr(null);
+    setSending(`schedule:${touchIndex}`);
+    try {
+      const r = await gmail.send(sequence.id, touchIndex, 'send', overrideEmail || undefined, whenISO);
+      setSentMessages((s) => ({
+        ...s,
+        [touchIndex]: {
+          ...(s[touchIndex] as SentMessage | undefined),
+          id: r.sent_message_id,
+          touch_index: touchIndex,
+          status: 'queued',
+          scheduled_send_at: r.scheduled_send_at ?? whenISO,
+          sent_at: null,
+        } as SentMessage,
+      }));
+      setNeedsEmail(false);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Could not schedule';
+      setSendErr(msg);
+      if (msg.includes('no_recipient_email') || msg.includes('Provide to_override')) setNeedsEmail(true);
+    } finally {
+      setSending(null);
+    }
+  }
+
+  async function cancelSchedule(touchIndex: number) {
+    const row = sentMessages[touchIndex];
+    if (!row) return;
+    setSending(`cancel:${touchIndex}`);
+    try {
+      // Revert the queued row back to a plain draft so the cron skips it and the
+      // Send/Schedule controls reappear.
+      const { error } = await supabase
+        .from('sent_messages')
+        .update({ status: 'draft', scheduled_send_at: null })
+        .eq('id', row.id);
+      if (error) throw new Error(error.message);
+      setSentMessages((s) => ({
+        ...s,
+        [touchIndex]: { ...(s[touchIndex] as SentMessage), status: 'draft', scheduled_send_at: null },
+      }));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not cancel');
+    } finally {
+      setSending(null);
+    }
+  }
+
   return (
     <div className={`sequence-card${open ? ' open' : ''}`}>
       <button type="button" className="sequence-toggle" onClick={() => setOpen((o) => !o)}>
@@ -739,6 +788,8 @@ function SequenceCard({ sequence, contact }: { sequence: EmailSequence; contact:
             onCopy={(t) => copy('initial', t)}
             copied={copied === 'initial'}
             onSend={doSend}
+            onSchedule={doSchedule}
+            onCancelSchedule={cancelSchedule}
             onSave={saveTouch}
             disabled={!contact.email && !overrideEmail}
             disabledReason={
@@ -764,6 +815,8 @@ function SequenceCard({ sequence, contact }: { sequence: EmailSequence; contact:
                 onCopy={(t) => copy(`fu${i}`, t)}
                 copied={copied === `fu${i}`}
                 onSend={doSend}
+                onSchedule={doSchedule}
+                onCancelSchedule={cancelSchedule}
                 onSave={saveTouch}
                 disabled={!sentMessages[0]}
                 disabledReason={!sentMessages[0] ? 'Send the initial email first' : undefined}
@@ -774,6 +827,24 @@ function SequenceCard({ sequence, contact }: { sequence: EmailSequence; contact:
       )}
     </div>
   );
+}
+
+// datetime-local value (YYYY-MM-DDTHH:mm) for "an hour from now", in local time.
+function defaultScheduleLocal(): string {
+  const d = new Date(Date.now() + 60 * 60 * 1000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function formatScheduleStamp(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 }
 
 function suggestEmail(contact: Contact): string {
@@ -813,6 +884,8 @@ function Touch({
   onCopy,
   copied,
   onSend,
+  onSchedule,
+  onCancelSchedule,
   onSave,
   disabled,
   disabledReason,
@@ -829,15 +902,20 @@ function Touch({
   onCopy: (text: string) => void;
   copied: boolean;
   onSend: (touchIndex: number, mode: 'draft' | 'send') => Promise<void>;
+  onSchedule: (touchIndex: number, whenISO: string) => Promise<void>;
+  onCancelSchedule: (touchIndex: number) => Promise<void>;
   onSave: (touchIndex: number, subject: string, body: string) => Promise<void>;
   disabled?: boolean;
   disabledReason?: string;
 }) {
   const confirm = useConfirm();
   const isSent = sent?.status === 'sent';
+  const isScheduled = sent?.status === 'queued' && !!sent?.scheduled_send_at;
   const isDraft = sent?.status === 'draft';
   const busy = !!sending;
   const [editing, setEditing] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const [when, setWhen] = useState(() => defaultScheduleLocal());
   const [s, setS] = useState(subject);
   const [b, setB] = useState(body);
   const [saving, setSaving] = useState(false);
@@ -869,7 +947,8 @@ function Touch({
           {sublabel && <span className="email-card-sublabel">{sublabel}</span>}
         </span>
         {isSent && <span className="sent-badge">✓ sent</span>}
-        {isDraft && !isSent && <span className="sent-badge draft">draft saved</span>}
+        {isScheduled && <span className="sent-badge scheduled">🕑 scheduled · {formatScheduleStamp(sent!.scheduled_send_at!)}</span>}
+        {isDraft && !isSent && !isScheduled && <span className="sent-badge draft">draft saved</span>}
       </div>
 
       {editing ? (
@@ -924,8 +1003,11 @@ function Touch({
 
           <div className="email-body">{body}</div>
 
-          <div className="email-card-actions">
-            {!isSent && (
+          {isScheduled ? (
+            <div className="email-card-actions">
+              <span className="schedule-note">
+                Sends automatically {formatScheduleStamp(sent!.scheduled_send_at!)}
+              </span>
               <button
                 type="button"
                 className="btn-send"
@@ -942,29 +1024,106 @@ function Touch({
                     onSend(touchIndex, 'send');
                 }}
               >
-                {sending === `send:${touchIndex}` ? 'Sending…' : '✈ Send email'}
+                {sending === `send:${touchIndex}` ? 'Sending…' : '✈ Send now'}
               </button>
-            )}
-            {!isSent && (
-              <button type="button" className="link-button" onClick={() => setEditing(true)}>
-                Edit
-              </button>
-            )}
-            {!isSent && (
               <button
                 type="button"
                 className="link-button"
-                disabled={busy || disabled}
-                title={disabledReason}
-                onClick={() => onSend(touchIndex, 'draft')}
+                disabled={busy}
+                onClick={() => onCancelSchedule(touchIndex)}
               >
-                {sending === `draft:${touchIndex}` ? 'Saving…' : isDraft ? 'Update Gmail draft' : 'Save to Gmail drafts'}
+                {sending === `cancel:${touchIndex}` ? 'Canceling…' : 'Cancel schedule'}
               </button>
-            )}
-            <button type="button" className="link-button" onClick={() => onCopy(`Subject: ${subject}\n\n${body}`)}>
-              {copied ? 'Copied' : 'Copy'}
-            </button>
-          </div>
+            </div>
+          ) : (
+            <>
+              <div className="email-card-actions">
+                {!isSent && (
+                  <button
+                    type="button"
+                    className="btn-send"
+                    disabled={busy || disabled}
+                    title={disabledReason}
+                    onClick={async () => {
+                      if (
+                        await confirm({
+                          title: 'Send this email now?',
+                          description: `To ${recipientName}${recipientEmail ? ` <${recipientEmail}>` : ''}\nSubject: ${subject}`,
+                          confirmText: 'Send now',
+                        })
+                      )
+                        onSend(touchIndex, 'send');
+                    }}
+                  >
+                    {sending === `send:${touchIndex}` ? 'Sending…' : '✈ Send email'}
+                  </button>
+                )}
+                {!isSent && (
+                  <button
+                    type="button"
+                    className="link-button"
+                    disabled={busy || disabled}
+                    title={disabledReason}
+                    onClick={() => setPicking((p) => !p)}
+                  >
+                    🕑 Schedule
+                  </button>
+                )}
+                {!isSent && (
+                  <button type="button" className="link-button" onClick={() => setEditing(true)}>
+                    Edit
+                  </button>
+                )}
+                {!isSent && (
+                  <button
+                    type="button"
+                    className="link-button"
+                    disabled={busy || disabled}
+                    title={disabledReason}
+                    onClick={() => onSend(touchIndex, 'draft')}
+                  >
+                    {sending === `draft:${touchIndex}` ? 'Saving…' : isDraft ? 'Update Gmail draft' : 'Save to Gmail drafts'}
+                  </button>
+                )}
+                <button type="button" className="link-button" onClick={() => onCopy(`Subject: ${subject}\n\n${body}`)}>
+                  {copied ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+              {picking && !isSent && (
+                <div className="schedule-picker">
+                  <label className="email-field-label">Send at</label>
+                  <input
+                    type="datetime-local"
+                    className="reply-subject-input"
+                    value={when}
+                    min={defaultScheduleLocal()}
+                    onChange={(e) => setWhen(e.target.value)}
+                  />
+                  <div className="email-card-actions">
+                    <button
+                      type="button"
+                      className="btn-primary small"
+                      disabled={busy || disabled || !when}
+                      onClick={async () => {
+                        const iso = new Date(when).toISOString();
+                        if (new Date(iso).getTime() <= Date.now()) {
+                          toast.error('Pick a time in the future.');
+                          return;
+                        }
+                        await onSchedule(touchIndex, iso);
+                        setPicking(false);
+                      }}
+                    >
+                      {sending === `schedule:${touchIndex}` ? 'Scheduling…' : 'Schedule send'}
+                    </button>
+                    <button type="button" className="link-button" onClick={() => setPicking(false)}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
         </>
       )}
     </div>
