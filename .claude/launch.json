@@ -4,14 +4,32 @@
     {
       "name": "outreachos-web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "port": 5173
     },
     {
       "name": "outreachos-api",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "server:dev"],
+      "runtimeArgs": [
+        "run",
+        "server:dev"
+      ],
       "port": 8080
+    },
+    {
+      "name": "harness",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8799",
+        "--directory",
+        "/tmp"
+      ],
+      "port": 8799
     }
   ]
 }

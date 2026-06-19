@@ -115,3 +115,9 @@ export function resolvePlan(plan: PlanId | null | undefined, status: PlanStatus 
 export function planLimits(plan: PlanId | null | undefined, status?: PlanStatus | null): PlanLimits {
   return PLANS[resolvePlan(plan, status)].limits;
 }
+
+/** True when the caller's effective plan is any paid tier (gates Campaign
+ *  Autopilot and other paid-only features). */
+export function isPaidPlan(plan: PlanId | null | undefined, status?: PlanStatus | null): boolean {
+  return resolvePlan(plan, status) !== 'free';
+}

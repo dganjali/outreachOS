@@ -138,6 +138,8 @@ export interface EvidencePack {
 
 export type SequenceStatus = 'draft' | 'approved' | 'sent' | 'bounced' | 'replied' | 'archived';
 
+export type AutopilotState = 'ready' | 'review' | 'queued';
+
 export interface EmailSequence {
   id: string;
   contact_id: string;
@@ -150,8 +152,29 @@ export interface EmailSequence {
   body: string;
   followups: Array<{ wait_days: number; subject: string; body: string }>;
   status: SequenceStatus;
+  // Campaign Autopilot verdict (see CampaignPolicyDoc.autopilotState).
+  autopilot_state?: AutopilotState | null;
   scheduled_send_at: string | null;
   sent_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Campaign Autopilot policy (one per mission) - frontend (snake_case) mirror of
+// CampaignPolicyDoc. The db shim maps to/from camelCase automatically.
+export interface CampaignPolicy {
+  id: string;
+  mission_id: string;
+  enabled: boolean;
+  auto_send: boolean;
+  targets_per_cycle: number;
+  cycle_interval_hours: number;
+  last_sourced_at: string | null;
+  daily_send_cap: number;
+  send_window: { start_hour: number; end_hour: number };
+  timezone: string;
+  min_confidence: number;
+  counter: { date: string; sent: number } | null;
   created_at: string;
   updated_at: string;
 }

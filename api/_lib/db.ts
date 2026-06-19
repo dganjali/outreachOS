@@ -52,6 +52,7 @@ export const COL = {
   userIntegrations: 'user_integrations',
   suppressions: 'suppressions',
   pipelineRuns: 'pipeline_runs',
+  campaignPolicies: 'campaign_policies',
   // Personalization layer (the persona/taste model). See shared/schemas.ts.
   personas: 'personas',
   personaVersions: 'persona_versions',
@@ -86,6 +87,7 @@ const OWNERSHIP: Record<CollectionName, OwnershipMode> = {
   user_integrations: 'userId',
   suppressions: 'userId',
   pipeline_runs: 'userId',
+  campaign_policies: 'userId',
   personas: 'userId',
   persona_versions: 'userId',
   context_facts: 'userId',

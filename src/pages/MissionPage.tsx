@@ -7,6 +7,7 @@ import { useConfirm } from '../context/ConfirmContext';
 import { agents, gmail } from '../lib/api';
 import { asScore } from '../lib/score';
 import { CsvImport } from '../components/CsvImport';
+import { AutopilotPanel } from '../components/AutopilotPanel';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '../components/ui/accordion';
 import type {
   Mission,
@@ -371,6 +372,8 @@ export function MissionPage() {
           </button>
         </div>
       </header>
+
+      <AutopilotPanel missionId={mission.id} />
 
       <section className="mission-overview-card">
         <div className="mission-overview-row">
@@ -753,12 +756,35 @@ function SequenceCard({ sequence, contact }: { sequence: EmailSequence; contact:
         <span className="sequence-toggle-caret" aria-hidden>{open ? '▾' : '▸'}</span>
         <span className="sequence-toggle-label">Draft email{draft.followups.length > 0 ? ' sequence' : ''}</span>
         {sequence.primary_angle && <span className="angle-pill">{sequence.primary_angle}</span>}
+        {sequence.autopilot_state && (
+          <span className={`badge ${autopilotBadgeTone(sequence.autopilot_state)}`}>
+            {autopilotLabel(sequence.autopilot_state)}
+          </span>
+        )}
         {!open && draft.followups.length > 0 && (
           <span className="sequence-toggle-count">{draft.followups.length + 1} emails</span>
         )}
       </button>
       {open && (
         <div className="sequence-body">
+          {sequence.autopilot_state === 'ready' && (
+            <div className="autopilot-banner ok">
+              <span>Passed the Autopilot gate: verified address, high confidence.</span>
+              <button
+                type="button"
+                className="btn-send"
+                disabled={!!sending}
+                onClick={() => doSend(0, 'send')}
+              >
+                {sending === 'send:0' ? 'Sending…' : 'Approve & send'}
+              </button>
+            </div>
+          )}
+          {sequence.autopilot_state === 'review' && (
+            <div className="autopilot-banner warn">
+              Held by Autopilot for review: the address is not verified, or confidence is below your threshold.
+            </div>
+          )}
           {(needsEmail || !contact.email) && (
             <div className="email-override">
               <label>
@@ -827,6 +853,18 @@ function SequenceCard({ sequence, contact }: { sequence: EmailSequence; contact:
       )}
     </div>
   );
+}
+
+function autopilotLabel(state: NonNullable<EmailSequence['autopilot_state']>): string {
+  if (state === 'ready') return 'Autopilot · ready';
+  if (state === 'review') return 'Autopilot · review';
+  return 'Autopilot · queued';
+}
+
+function autopilotBadgeTone(state: NonNullable<EmailSequence['autopilot_state']>): string {
+  if (state === 'ready') return 'is-success';
+  if (state === 'review') return 'is-warn';
+  return 'is-info';
 }
 
 // datetime-local value (YYYY-MM-DDTHH:mm) for "an hour from now", in local time.
@@ -947,7 +985,7 @@ function Touch({
           {sublabel && <span className="email-card-sublabel">{sublabel}</span>}
         </span>
         {isSent && <span className="sent-badge">✓ sent</span>}
-        {isScheduled && <span className="sent-badge scheduled">🕑 scheduled · {formatScheduleStamp(sent!.scheduled_send_at!)}</span>}
+        {isScheduled && <span className="sent-badge scheduled">scheduled · {formatScheduleStamp(sent!.scheduled_send_at!)}</span>}
         {isDraft && !isSent && !isScheduled && <span className="sent-badge draft">draft saved</span>}
       </div>
 
@@ -1066,7 +1104,7 @@ function Touch({
                     title={disabledReason}
                     onClick={() => setPicking((p) => !p)}
                   >
-                    🕑 Schedule
+                    Schedule
                   </button>
                 )}
                 {!isSent && (

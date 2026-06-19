@@ -301,6 +301,11 @@ export interface EmailSequenceDoc extends BaseDoc {
   originalBody?: string | null;
   followups: Array<{ waitDays: number; subject: string; body: string }>;
   status: 'draft' | 'approved' | 'sent' | 'bounced' | 'replied' | 'archived';
+  // Campaign Autopilot verdict for this draft. unset/null ⇒ the gate hasn't seen
+  // it. 'review' = failed the gate (held for a human); 'ready' = passed but the
+  // policy isn't auto-sending (awaiting 1-click approval); 'queued' = passed and
+  // a scheduled send row has been created. Keeps the autopilot cron idempotent.
+  autopilotState?: 'ready' | 'review' | 'queued' | null;
   scheduledSendAt: Date | null;
   sentAt: Date | null;
   profileVersionId: string | null;
@@ -476,6 +481,30 @@ export interface PipelineRunDoc extends BaseDoc {
   completedAt: Date | null;
 }
 
+// Campaign Autopilot policy - one per mission. The "runs while I sleep" control
+// surface: the autopilot cron (api/cron/autopilot-tick.ts) sources new targets on
+// a cadence, applies the confidence gate to fresh drafts, and (when autoSend is on)
+// queues sends within the daily cap + send window. Paid-tier only.
+export interface CampaignPolicyDoc extends BaseDoc {
+  missionId: string;
+  enabled: boolean;
+  // false ⇒ gate stages passing drafts as 'ready' for 1-click approval rather
+  // than auto-queuing them. Default false (opt into full autonomy).
+  autoSend: boolean;
+  // --- sourcing cadence ---
+  targetsPerCycle: number; // new companies per sourcing run
+  cycleIntervalHours: number; // min hours between sourcing runs
+  lastSourcedAt: Date | null;
+  // --- sending guardrails ---
+  dailySendCap: number; // max auto-sends per day
+  sendWindow: { startHour: number; endHour: number }; // local hours, [start,end)
+  timezone: string; // IANA tz the send window is evaluated in
+  // --- confidence gate ---
+  minConfidence: number; // contact.confidence threshold, 0–1
+  // Daily auto-send counter; `date` is the UTC 'YYYY-MM-DD' it applies to.
+  counter: { date: string; sent: number } | null;
+}
+
 // ---------------------------------------------------------------------------
 // Index spec - read by scripts/init-mongo.ts. Plain JS so the script doesn't
 // need to import any types.
@@ -538,6 +567,12 @@ export const INDEX_SPEC: Record<string, Array<{ keys: Record<string, 1 | -1>; op
     { keys: { status: 1, heartbeatAt: 1 } },
     // TTL: drop finished run records after 30 days.
     { keys: { createdAt: 1 }, options: { expireAfterSeconds: 60 * 60 * 24 * 30 } },
+  ],
+  campaign_policies: [
+    // One policy per mission (and the lookup the UI/cron use).
+    { keys: { userId: 1, missionId: 1 }, options: { unique: true } },
+    // Cron sweep: all enabled policies, oldest-sourced first.
+    { keys: { enabled: 1, lastSourcedAt: 1 } },
   ],
   personas: [
     { keys: { userId: 1, createdAt: -1 } },

@@ -11,6 +11,8 @@ export type {
   EvidencePack,
   SequenceStatus,
   EmailSequence,
+  AutopilotState,
+  CampaignPolicy,
   SeniorityLevel,
   SizeTier,
   GeoScope,
