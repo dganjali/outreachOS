@@ -7,7 +7,8 @@ import type { Request, Response } from 'express';
 import { adminDb, forUser } from '../_lib/db';
 import { requireCronSecret } from '../_lib/auth';
 import { getActiveAccessToken, sendNow } from '../_lib/gmail';
-import { isSuppressed, scheduleFollowups } from '../_lib/sequencing';
+import { scheduleFollowups } from '../_lib/sequencing';
+import { evaluateSend } from '../_lib/deliverability';
 import { recordOutcome } from '../_lib/outcomes';
 import type {
   SentMessageDoc,
@@ -76,12 +77,6 @@ export default async function handler(req: Request, res: Response) {
         continue;
       }
 
-      // Suppressed?
-      if (await isSuppressed(scope, msg.toEmail)) {
-        await cancel('suppressed');
-        continue;
-      }
-
       // Gmail connected?
       if (!tokenCache.has(uid)) {
         const tok = await getActiveAccessToken(uid);
@@ -90,6 +85,30 @@ export default async function handler(req: Request, res: Response) {
       const tok = tokenCache.get(uid);
       if (!tok) {
         await cancel('gmail_not_connected');
+        continue;
+      }
+
+      // Deliverability gate at actual send time: suppression, content lint, LLM
+      // moderation (cached on the sequence), and warmup/volume caps. A content or
+      // policy failure stops this touch; hitting a cap just defers it to a later
+      // tick (the queued row is left in place).
+      const verdict = await evaluateSend(scope, {
+        toEmail: msg.toEmail,
+        subject: msg.subject,
+        body: msg.body,
+        moderationCache: seq.moderation ?? null,
+      });
+      if (verdict.moderationToPersist) {
+        await scope
+          .collection<EmailSequenceDoc>('email_sequences')
+          .updateById(seq._id, { moderation: verdict.moderationToPersist });
+      }
+      if (verdict.blocked) {
+        if (verdict.blockCode === 'account_daily_cap' || verdict.blockCode === 'domain_daily_cap') {
+          skipped++;
+          continue; // leave queued; resumes once the cap resets
+        }
+        await cancel(verdict.blockCode ?? 'blocked');
         continue;
       }
 

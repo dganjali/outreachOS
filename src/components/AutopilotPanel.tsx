@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
-import { useAuth } from '../context/AuthContext';
 import { billing } from '../lib/api';
 import type { CampaignPolicy } from '../types';
 import type { PlanId } from '../../shared/plans';
 
-// Mirrors POLICY_DEFAULTS in api/_lib/autopilot.ts. The cron also normalizes
-// missing fields, so these only shape the first-write + the settings form.
+// First-write shape. Everything except enabled/auto_send/daily_send_cap is a
+// sensible default the user never sees (the cron also normalizes missing fields,
+// see withPolicyDefaults in api/_lib/autopilot.ts).
 const DEFAULTS = {
   auto_send: false,
   targets_per_cycle: 5,
@@ -22,21 +23,18 @@ const DEFAULTS = {
 type Counts = { queued: number; ready: number; review: number };
 
 export function AutopilotPanel({ missionId }: { missionId: string }) {
-  const { user } = useAuth();
   const [plan, setPlan] = useState<PlanId | null>(null);
   const [policy, setPolicy] = useState<CampaignPolicy | null>(null);
   const [counts, setCounts] = useState<Counts>({ queued: 0, ready: 0, review: 0 });
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [open, setOpen] = useState(false);
+  const [capDraft, setCapDraft] = useState('10');
 
   const loadPolicy = useCallback(async () => {
-    const { data } = await supabase
-      .from('campaign_policies')
-      .select('*')
-      .eq('mission_id', missionId)
-      .maybeSingle();
-    setPolicy((data as CampaignPolicy | null) ?? null);
+    const { data } = await supabase.from('campaign_policies').select('*').eq('mission_id', missionId).maybeSingle();
+    const pol = (data as CampaignPolicy | null) ?? null;
+    setPolicy(pol);
+    if (pol) setCapDraft(String(pol.daily_send_cap));
   }, [missionId]);
 
   const loadCounts = useCallback(async () => {
@@ -70,23 +68,18 @@ export function AutopilotPanel({ missionId }: { missionId: string }) {
   const paid = plan !== null && plan !== 'free';
 
   async function toggleEnabled() {
-    if (!user?.id) return;
     setBusy(true);
     try {
       if (!policy) {
-        await supabase.from('campaign_policies').insert({
-          mission_id: missionId,
-          enabled: true,
-          ...DEFAULTS,
-        });
-        toast.success('Autopilot on. It will source, draft, and gate on its next cycle.');
+        await supabase.from('campaign_policies').insert({ mission_id: missionId, enabled: true, ...DEFAULTS });
+        toast.success('Autopilot on. It starts sourcing and drafting on its next cycle.');
       } else {
         const { error } = await supabase
           .from('campaign_policies')
           .update({ enabled: !policy.enabled })
           .eq('id', policy.id);
         if (error) throw new Error(error.message);
-        toast.success(policy.enabled ? 'Autopilot paused.' : 'Autopilot on.');
+        toast.success(policy.enabled ? 'Autopilot off.' : 'Autopilot on.');
       }
       await loadPolicy();
     } catch (err) {
@@ -113,17 +106,17 @@ export function AutopilotPanel({ missionId }: { missionId: string }) {
 
   if (loading) return null;
 
-  // Free tier: locked upsell.
+  // Free tier: a single quiet upsell, no controls.
   if (!paid) {
     return (
-      <div className="autopilot-panel locked">
+      <div className="autopilot-panel">
         <div className="autopilot-head">
           <span className="autopilot-title">Campaign Autopilot</span>
-          <span className="badge">Paid feature</span>
+          <span className="badge">Paid</span>
         </div>
         <p className="autopilot-blurb">
-          Let OutreachOS source new companies, research, draft, and send within your guardrails, holding
-          low-confidence drafts for your review. Available on paid plans.
+          Let OutreachOS find new companies for this mission, research them, and draft outreach on its own,
+          holding low-confidence drafts for your review. Available on paid plans.
         </p>
         <Link to="/settings" className="btn-primary small">Upgrade to enable</Link>
       </div>
@@ -134,138 +127,88 @@ export function AutopilotPanel({ missionId }: { missionId: string }) {
   const p = policy;
   const sentToday = p?.counter && p.counter.date === new Date().toISOString().slice(0, 10) ? p.counter.sent : 0;
 
+  const statusFrags: string[] = [];
+  if (p) {
+    if (counts.ready) statusFrags.push(`${counts.ready} to approve`);
+    if (counts.queued) statusFrags.push(`${counts.queued} scheduled`);
+    if (counts.review) statusFrags.push(`${counts.review} to review`);
+    if (sentToday) statusFrags.push(`${sentToday} sent today`);
+    if (p.last_sourced_at) statusFrags.push(`sourced ${relativeTime(p.last_sourced_at)}`);
+  }
+  const status = statusFrags.length ? statusFrags.join(' · ') : 'Working on the first batch…';
+
   return (
-    <div className={`autopilot-panel${enabled ? ' on' : ''}`}>
+    <div className="autopilot-panel">
       <div className="autopilot-head">
         <span className="autopilot-title">Campaign Autopilot</span>
-        <span className={`status-pill${enabled ? ' is-success' : ''}`}>{enabled ? 'On' : 'Off'}</span>
+        {enabled && <span className="status-pill is-success">On</span>}
         <div className="autopilot-head-actions">
-          {policy && (
-            <button type="button" className="link-button" onClick={() => setOpen((o) => !o)}>
-              {open ? 'Hide settings' : 'Settings'}
-            </button>
-          )}
-          <button type="button" className="btn-primary small" disabled={busy} onClick={toggleEnabled}>
-            {busy ? '…' : enabled ? 'Pause' : 'Turn on'}
+          <button type="button" className="btn-secondary small" disabled={busy} onClick={toggleEnabled}>
+            {busy ? '…' : enabled ? 'Turn off' : 'Turn on'}
           </button>
         </div>
       </div>
 
-      {enabled && p && (
-        <div className="autopilot-status">
-          {p.auto_send ? (
-            <span>Auto-sending up to <strong>{p.daily_send_cap}/day</strong> · <strong>{sentToday}</strong> sent today</span>
-          ) : (
-            <span>Staging for approval (auto-send off)</span>
-          )}
-          <span className="autopilot-dot">·</span>
-          <span><strong>{counts.queued}</strong> queued</span>
-          <span className="autopilot-dot">·</span>
-          <span><strong>{counts.ready}</strong> ready</span>
-          <span className="autopilot-dot">·</span>
-          <span><strong>{counts.review}</strong> to review</span>
-          {p.last_sourced_at && (
-            <>
-              <span className="autopilot-dot">·</span>
-              <span>sourced {relativeTime(p.last_sourced_at)}</span>
-            </>
-          )}
-        </div>
+      {!enabled && (
+        <p className="autopilot-blurb">
+          Finds new companies that fit this mission, researches them, and drafts outreach on its own. Turn it
+          on and choose how hands-off you want to be.
+        </p>
       )}
 
-      {open && p && (
-        <div className="autopilot-settings">
-          <label className="autopilot-row toggle">
-            <input
-              type="checkbox"
-              checked={p.auto_send}
-              disabled={busy}
-              onChange={(e) => saveField({ auto_send: e.target.checked })}
-            />
-            <span>
-              <strong>Auto-send.</strong> When on, gate-passing drafts send automatically. When off, they wait
-              as "Ready" for your one-click approval.
-            </span>
-          </label>
+      {enabled && p && (
+        <>
+          <p className="autopilot-status">{status}</p>
 
-          <div className="autopilot-grid">
-            <label className="autopilot-field">
-              <span>Daily send cap</span>
+          <div className="pw">
+            <div className="pw-field-label">When a draft is ready</div>
+            <div className="pw-cards">
+              <button
+                type="button"
+                className={`pw-card ${!p.auto_send ? 'is-on' : ''}`}
+                disabled={busy}
+                onClick={() => saveField({ auto_send: false })}
+                aria-pressed={!p.auto_send}
+              >
+                {!p.auto_send && <span className="pw-card-check"><Check size={12} /></span>}
+                <span className="pw-card-title">Review first</span>
+                <span className="pw-card-hint">Autopilot drafts and waits. You approve every send.</span>
+              </button>
+              <button
+                type="button"
+                className={`pw-card ${p.auto_send ? 'is-on' : ''}`}
+                disabled={busy}
+                onClick={() => saveField({ auto_send: true })}
+                aria-pressed={p.auto_send}
+              >
+                {p.auto_send && <span className="pw-card-check"><Check size={12} /></span>}
+                <span className="pw-card-title">Send automatically</span>
+                <span className="pw-card-hint">Sends verified, high-confidence contacts. Holds the rest for review.</span>
+              </button>
+            </div>
+          </div>
+
+          {p.auto_send && (
+            <label className="autopilot-limit">
+              <span>Send at most</span>
               <input
                 type="number"
                 min={1}
                 max={100}
-                value={p.daily_send_cap}
+                value={capDraft}
                 disabled={busy}
-                onChange={(e) => saveField({ daily_send_cap: clampNum(e.target.value, 1, 100, 10) })}
+                onChange={(e) => setCapDraft(e.target.value)}
+                onBlur={() => saveField({ daily_send_cap: clampNum(capDraft, 1, 100, 10) })}
               />
+              <span>emails per day</span>
             </label>
-            <label className="autopilot-field">
-              <span>New companies / cycle</span>
-              <input
-                type="number"
-                min={1}
-                max={25}
-                value={p.targets_per_cycle}
-                disabled={busy}
-                onChange={(e) => saveField({ targets_per_cycle: clampNum(e.target.value, 1, 25, 5) })}
-              />
-            </label>
-            <label className="autopilot-field">
-              <span>Min confidence</span>
-              <input
-                type="number"
-                min={0}
-                max={1}
-                step={0.05}
-                value={p.min_confidence}
-                disabled={busy}
-                onChange={(e) => saveField({ min_confidence: clampNum(e.target.value, 0, 1, 0.6) })}
-              />
-            </label>
-            <label className="autopilot-field">
-              <span>Source every (hrs)</span>
-              <input
-                type="number"
-                min={1}
-                max={336}
-                value={p.cycle_interval_hours}
-                disabled={busy}
-                onChange={(e) => saveField({ cycle_interval_hours: clampNum(e.target.value, 1, 336, 24) })}
-              />
-            </label>
-            <label className="autopilot-field">
-              <span>Send window start</span>
-              <input
-                type="number"
-                min={0}
-                max={23}
-                value={p.send_window.start_hour}
-                disabled={busy}
-                onChange={(e) =>
-                  saveField({ send_window: { ...p.send_window, start_hour: clampNum(e.target.value, 0, 23, 9) } })
-                }
-              />
-            </label>
-            <label className="autopilot-field">
-              <span>Send window end</span>
-              <input
-                type="number"
-                min={1}
-                max={24}
-                value={p.send_window.end_hour}
-                disabled={busy}
-                onChange={(e) =>
-                  saveField({ send_window: { ...p.send_window, end_hour: clampNum(e.target.value, 1, 24, 17) } })
-                }
-              />
-            </label>
-          </div>
-          <p className="autopilot-tz">
-            Gate: a draft auto-sends only when the address is <strong>verified</strong> and contact confidence ≥
-            the threshold. Send window is in <strong>{p.timezone}</strong>.
+          )}
+
+          <p className="autopilot-note">
+            Autopilot only sends to verified addresses, during business hours, and finds a few new companies a
+            day. Low-confidence drafts always wait for your review.
           </p>
-        </div>
+        </>
       )}
     </div>
   );
@@ -274,7 +217,7 @@ export function AutopilotPanel({ missionId }: { missionId: string }) {
 function clampNum(v: string, lo: number, hi: number, fallback: number): number {
   const n = Number(v);
   if (!Number.isFinite(n)) return fallback;
-  return Math.max(lo, Math.min(hi, n));
+  return Math.max(lo, Math.min(hi, Math.round(n)));
 }
 
 function relativeTime(iso: string): string {

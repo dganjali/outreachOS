@@ -692,6 +692,9 @@ function SequenceCard({ sequence, contact }: { sequence: EmailSequence; contact:
         } as SentMessage,
       }));
       setNeedsEmail(false);
+      if (mode === 'send' && r.warnings && r.warnings.length > 0) {
+        toast.warning(`Sent, with deliverability notes: ${r.warnings.join(' · ')}`);
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Send failed';
       setSendErr(msg);

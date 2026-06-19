@@ -306,6 +306,9 @@ export interface EmailSequenceDoc extends BaseDoc {
   // policy isn't auto-sending (awaiting 1-click approval); 'queued' = passed and
   // a scheduled send row has been created. Keeps the autopilot cron idempotent.
   autopilotState?: 'ready' | 'review' | 'queued' | null;
+  // Cached LLM content-moderation verdict (api/_lib/content-moderation.ts),
+  // keyed by contentHash so we only re-judge when subject/body changes.
+  moderation?: { allowed: boolean; category: string | null; contentHash: string; checkedAt: Date } | null;
   scheduledSendAt: Date | null;
   sentAt: Date | null;
   profileVersionId: string | null;
@@ -401,6 +404,15 @@ export interface UserIntegrationDoc extends BaseDoc {
   scopes: string;
   status: 'active' | 'revoked' | 'error';
   lastError: string | null;
+  // Sender-domain authentication health, checked at connect (api/_lib/dns-auth.ts).
+  // 'gmail' ⇒ a @gmail.com address (Google-authenticated, nothing to configure).
+  deliverability?: {
+    domainAuth: 'gmail' | 'ok' | 'partial' | 'missing';
+    spf: boolean;
+    dkim: boolean;
+    dmarc: boolean;
+    checkedAt: Date;
+  } | null;
 }
 
 // ---------------------------------------------------------------------------

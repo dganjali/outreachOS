@@ -1,6 +1,9 @@
 import type { Request, Response } from 'express';
 import { exchangeCode, fetchGoogleUserEmail, GMAIL_SCOPES, upsertGmailIntegration } from '../../_lib/gmail';
 import { decrypt } from '../../_lib/crypto';
+import { forUser } from '../../_lib/db';
+import { checkDomainAuth } from '../../_lib/dns-auth';
+import type { UserIntegrationDoc } from '../../../shared/schemas';
 
 export default async function handler(req: Request, res: Response) {
   if (req.method !== 'GET') {
@@ -47,6 +50,18 @@ export default async function handler(req: Request, res: Response) {
       expiresInSec: tokens.expires_in,
       scopes: tokens.scope,
     });
+
+    // Best-effort sender-domain authentication health (non-blocking).
+    try {
+      const health = await checkDomainAuth(email ?? '');
+      const us = forUser(state.uid);
+      const integ = await us.collection<UserIntegrationDoc>('user_integrations').findOne({ provider: 'gmail' });
+      if (integ) {
+        await us.collection<UserIntegrationDoc>('user_integrations').updateById(integ._id, { deliverability: health });
+      }
+    } catch {
+      /* DNS health is advisory; never block the connect on it. */
+    }
 
     return redirectBack(res, 'connected=gmail');
   } catch (err) {

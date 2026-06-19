@@ -767,6 +767,30 @@ export function ensureDriving(user: AuthedUser, runId: string, exec?: PipelineEx
     .finally(() => active.delete(runId));
 }
 
+/**
+ * Await-able resume for the server-side sweeper (api/cron/resume-runs.ts). Drives
+ * the run to its next halt WITHIN the caller's request so Cloud Run keeps CPU
+ * allocated for the work (a fire-and-forget background promise gets throttled
+ * once the response is sent). Idempotent via the in-process `active` guard;
+ * every step persists, so if the request is cut short the next sweep resumes
+ * from exactly where it stopped. This is what makes a run finish after the
+ * user's tab closes - nothing else re-drives a stalled run unattended.
+ */
+export async function driveStaleRun(user: AuthedUser, runId: string): Promise<boolean> {
+  if (active.has(runId)) return false;
+  active.add(runId);
+  const scope = forUser(user.id);
+  try {
+    await driveLoop(scope, runId, realExecutors(user));
+    return true;
+  } catch (err) {
+    console.error('[pipeline] resume drive failed', runId, err);
+    return false;
+  } finally {
+    active.delete(runId);
+  }
+}
+
 export interface StartPipelineArgs {
   user: AuthedUser;
   missionId: string;
