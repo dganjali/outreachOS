@@ -34,6 +34,13 @@ steps:
       - --allow-unauthenticated
       - --memory=1Gi
       - --cpu=1
+      # Keep CPU allocated after the HTTP response returns so the detached
+      # pipeline driver (api/_lib/pipeline.ts: ensureDriving/driveLoop) keeps
+      # advancing between the client's status polls instead of being throttled
+      # to ~zero. min-instances stays at its default 0 (scale-to-zero, so no
+      # always-on cost); an occasional poll keeps the instance alive while a run
+      # is in flight.
+      - --no-cpu-throttling
       - --timeout=3600
       - --concurrency=40
       # Pull all secrets from Secret Manager. Each secret name should match
