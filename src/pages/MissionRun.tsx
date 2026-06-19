@@ -206,11 +206,18 @@ export function MissionRun() {
   // Poll the server run while it's live. The server is the source of truth and
   // self-heals a stalled driver on each poll, so this is all the client needs.
   // Keyed on id+status only, so steady-state polling keeps one stable timer.
+  //
+  // The poll clock lives in a Web Worker, not a main-thread setInterval: a
+  // hidden tab throttles main-thread timers to ~1/min, which would starve both
+  // this UI and the Cloud Run driver the poll keeps warm (the driver only gets
+  // CPU while a request is in flight). Worker timers aren't throttled, so the
+  // run keeps advancing while the tab is backgrounded - as long as it stays open.
   const liveStatus = run?.status === 'pending' || run?.status === 'running';
   useEffect(() => {
     if (!liveStatus) return;
     let cancelled = false;
-    const h = setInterval(async () => {
+
+    const poll = async () => {
       const rid = runIdRef.current;
       if (!rid) return;
       try {
@@ -219,10 +226,26 @@ export function MissionRun() {
       } catch {
         /* transient - keep polling */
       }
-    }, POLL_MS);
+    };
+
+    const worker = new Worker(new URL('../workers/poll-timer.ts', import.meta.url), { type: 'module' });
+    worker.onmessage = () => void poll();
+    worker.postMessage({ type: 'start', intervalMs: POLL_MS });
+
+    // Snap to the latest state the instant the tab is refocused, rather than
+    // waiting for the next tick.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void poll();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+
     return () => {
       cancelled = true;
-      clearInterval(h);
+      worker.postMessage({ type: 'stop' });
+      worker.terminate();
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
     };
   }, [liveStatus]);
 
@@ -418,8 +441,8 @@ export function MissionRun() {
           )}
 
           <p className="run-ready-fineprint">
-            Runs on the server - you can close this tab and come back; progress is saved as it goes.
-            Uses up to ~{1 + companies * (2 + contacts)} of your daily agent runs.
+            Keep this tab open while it runs - you can switch to other tabs. Progress is saved as it
+            goes. Uses up to ~{1 + companies * (2 + contacts)} of your daily agent runs.
           </p>
           {missionLoadError && (
             <p className="run-banner error" role="alert">
