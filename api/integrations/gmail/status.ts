@@ -24,6 +24,7 @@ export default async function handler(req: Request, res: Response) {
       status: row.status,
       last_error: row.lastError,
       updated_at: row.updatedAt,
+      deliverability: row.deliverability ?? null,
     },
   });
 }

@@ -18,18 +18,6 @@
         "server:dev"
       ],
       "port": 8080
-    },
-    {
-      "name": "harness",
-      "runtimeExecutable": "python3",
-      "runtimeArgs": [
-        "-m",
-        "http.server",
-        "8799",
-        "--directory",
-        "/tmp"
-      ],
-      "port": 8799
     }
   ]
 }

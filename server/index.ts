@@ -32,6 +32,7 @@ import cronPollGmail from '../api/cron/poll-gmail';
 import cronSendDueTouches from '../api/cron/send-due-touches';
 import cronWeeklyDigest from '../api/cron/weekly-digest';
 import cronAutopilotTick from '../api/cron/autopilot-tick';
+import cronResumeRuns from '../api/cron/resume-runs';
 import dataRouter from '../api/data/router';
 import { localPutHandler, localGetHandler } from '../api/_lib/storage';
 
@@ -144,6 +145,7 @@ app.post('/api/cron/poll-gmail', wrap(cronPollGmail));
 app.post('/api/cron/send-due-touches', wrap(cronSendDueTouches));
 app.post('/api/cron/weekly-digest', wrap(cronWeeklyDigest));
 app.post('/api/cron/autopilot-tick', wrap(cronAutopilotTick));
+app.post('/api/cron/resume-runs', wrap(cronResumeRuns));
 
 // Local-filesystem storage driver (dev, when no real GCS bucket). Token-authed
 // via the HMAC query param baked into the signed URL - no Firebase bearer - so

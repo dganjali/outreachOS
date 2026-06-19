@@ -186,6 +186,7 @@ export const gmail = {
       gmail_message_id: string;
       gmail_thread_id: string;
       gmail_draft_id?: string;
+      warnings?: string[];
     }>('/api/gmail/send', { sequence_id, touch_index, mode, to_override, scheduled_send_at }),
   reply: (reply_id: string, subject: string, body: string) =>
     authedFetch<{ ok: boolean; gmail_message_id: string; gmail_thread_id: string }>('/api/gmail/reply', {

@@ -14,7 +14,7 @@
 import type { Request, Response } from 'express';
 import { adminDb, forUser, newId, type InsertDoc } from '../_lib/db';
 import { requireCronSecret } from '../_lib/auth';
-import { isSuppressed } from '../_lib/sequencing';
+import { evaluateSend } from '../_lib/deliverability';
 import { startPipeline, resumeIfStale, DEFAULT_TARGET_COUNT } from '../_lib/pipeline';
 import {
   gateDecision,
@@ -101,7 +101,32 @@ export default async function handler(req: Request, res: Response) {
         const contact = await scope.collection<ContactDoc>('contacts').findById(seq.contactId);
         if (!contact) continue;
         out.gated++;
-        if (gateDecision(contact, policy) === 'review') {
+        const toEmail = contact.email?.trim();
+        // Autopilot eligibility (verified email + confidence). Fail → human review.
+        if (!toEmail || gateDecision(contact, policy) === 'review') {
+          await setState(scope, seq._id, 'review');
+          out.reviewed++;
+          continue;
+        }
+        // Deliverability content gate: spam lint + abuse moderation + suppression.
+        // Autopilot only auto-sends CLEAN drafts; anything flagged goes to review.
+        // A cap block isn't a content problem - it just means "send later", so it
+        // doesn't downgrade the draft.
+        const verdict = await evaluateSend(scope, {
+          toEmail,
+          subject: seq.subject,
+          body: seq.body,
+          moderationCache: seq.moderation ?? null,
+          now,
+        });
+        if (verdict.moderationToPersist) {
+          await scope
+            .collection<EmailSequenceDoc>('email_sequences')
+            .updateById(seq._id, { moderation: verdict.moderationToPersist });
+        }
+        const contentBlocked =
+          verdict.blocked && verdict.blockCode !== 'account_daily_cap' && verdict.blockCode !== 'domain_daily_cap';
+        if (contentBlocked || verdict.warnings.length > 0) {
           await setState(scope, seq._id, 'review');
           out.reviewed++;
           continue;
@@ -126,12 +151,7 @@ export default async function handler(req: Request, res: Response) {
             out.reviewed++;
             continue;
           }
-          // Never (re)queue a suppressed address or one already sent/queued.
-          if (await isSuppressed(scope, toEmail)) {
-            await setState(scope, seq._id, 'review');
-            out.reviewed++;
-            continue;
-          }
+          // Skip one already sent/queued (idempotent).
           const existing = await scope
             .collection<SentMessageDoc>('sent_messages')
             .findOne({ sequenceId: seq._id, touchIndex: 0 });

@@ -3,6 +3,7 @@ import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { forUser, newId, type InsertDoc } from '../_lib/db';
 import { getActiveAccessToken, sendNow, isValidEmailAddress } from '../_lib/gmail';
 import { scheduleFollowups, isSuppressed } from '../_lib/sequencing';
+import { evaluateSend } from '../_lib/deliverability';
 import { recordOutcome } from '../_lib/outcomes';
 import type {
   ContactDoc,
@@ -90,6 +91,28 @@ export default async function handler(req: Request, res: Response) {
   if (!tok) return res.status(412).json({ error: 'gmail_not_connected', message: 'Connect Gmail in Settings first.' });
 
   const profile = await scope.collection<ProfileDoc>('profiles').findOne();
+
+  // Deliverability gate for real, immediate sends (scheduled sends are gated by
+  // the send-due-touches cron at actual send time). Blocks spam/abuse/over-cap;
+  // soft warnings ride back on the success response for the UI to show.
+  let sendWarnings: string[] = [];
+  if (mode === 'send' && !scheduledSendAt) {
+    const verdict = await evaluateSend(scope, {
+      toEmail,
+      subject,
+      body: bodyText,
+      moderationCache: seq.moderation ?? null,
+    });
+    if (verdict.moderationToPersist) {
+      await scope
+        .collection<EmailSequenceDoc>('email_sequences')
+        .updateById(sequenceId, { moderation: verdict.moderationToPersist });
+    }
+    if (verdict.blocked) {
+      return res.status(422).json({ error: verdict.blockCode ?? 'blocked', message: verdict.blockReason });
+    }
+    sendWarnings = verdict.warnings;
+  }
 
   // Idempotency on (sequence_id, touch_index)
   const existing = await scope
@@ -208,6 +231,7 @@ export default async function handler(req: Request, res: Response) {
       gmail_message_id: result.messageId,
       gmail_thread_id: result.threadId,
       gmail_draft_id: undefined,
+      warnings: sendWarnings,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'send_failed';

@@ -244,6 +244,18 @@ export function SettingsPage() {
                 {integration?.last_error && (
                   <div className="mt-1 text-xs text-destructive">Last error: {integration.last_error}</div>
                 )}
+                {integration?.deliverability && (
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    Sending health:{' '}
+                    {integration.deliverability.domainAuth === 'gmail'
+                      ? 'Gmail address, authenticated by Google.'
+                      : integration.deliverability.domainAuth === 'ok'
+                        ? 'Domain authenticated (SPF + DMARC found).'
+                        : integration.deliverability.domainAuth === 'partial'
+                          ? 'Partly set up. Add the missing SPF/DMARC records for best deliverability.'
+                          : 'No SPF/DMARC found. Set them up so your mail is not marked spam.'}
+                  </div>
+                )}
               </div>
             </div>
             {integration ? (

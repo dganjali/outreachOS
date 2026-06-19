@@ -138,6 +138,13 @@ export interface Integration {
   status: 'active' | 'revoked' | 'error';
   last_error: string | null;
   updated_at: string;
+  deliverability?: {
+    domainAuth: 'gmail' | 'ok' | 'partial' | 'missing';
+    spf: boolean;
+    dkim: boolean;
+    dmarc: boolean;
+    checkedAt: string;
+  } | null;
 }
 
 export interface ProfileRef {

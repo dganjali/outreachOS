@@ -1916,46 +1916,33 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
 /* Sequence card - the contact's draft. A forest-green left rule ties it visually
  * to its contact and signals "this is the actionable draft", not more metadata. */
 /* ---- Campaign Autopilot ----
-   Linear/Notion register: flat bg-elev surface, hairline borders, graphite ink.
-   Status tone comes from the shared .badge/.status-pill vocabulary; the green
-   accent is reserved for the one Send action (the Approve & send button). */
+   Matches the mission surfaces: flat --surface card, hairline border, graphite
+   ink. Two controls only (On/Off + a Review/Auto choice via the native .pw-card
+   pattern); the green accent is reserved for the one Send action. */
 .autopilot-panel {
-  margin: var(--space-3) 0;
-  padding: var(--space-3) var(--space-4);
-  background: var(--bg-elev);
+  padding: var(--space-4) var(--space-5);
+  margin-bottom: var(--space-5);
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
 }
 .autopilot-head { display: flex; align-items: center; gap: var(--space-2); }
 .autopilot-title { font-weight: 600; font-size: var(--text-base); letter-spacing: -0.006em; }
 .autopilot-head-actions { margin-left: auto; display: flex; align-items: center; gap: var(--space-3); }
-.autopilot-blurb { margin: var(--space-2) 0 var(--space-3); color: var(--fg-muted); font-size: var(--text-sm); max-width: 60ch; }
+.autopilot-blurb { margin: var(--space-2) 0 var(--space-3); color: var(--fg-muted); font-size: var(--text-sm); max-width: 62ch; }
 .autopilot-status {
-  margin-top: var(--space-2); display: flex; flex-wrap: wrap; gap: 0.35rem;
-  align-items: center; font-size: var(--text-sm); color: var(--fg-muted);
+  margin: var(--space-2) 0 var(--space-4); font-size: var(--text-sm); color: var(--fg-muted);
 }
-.autopilot-status strong { color: var(--fg); font-weight: 600; }
-.autopilot-dot { color: var(--fg-faint); }
-.autopilot-settings { margin-top: var(--space-3); border-top: 1px solid var(--border-soft); padding-top: var(--space-3); }
-/* The toggle is a <label>, so reset the global uppercase/tiny label styling. */
-.autopilot-row.toggle {
-  display: flex; gap: 0.5rem; align-items: flex-start;
-  font-size: var(--text-sm); font-weight: 400; color: var(--fg-muted);
-  text-transform: none; letter-spacing: normal;
+.autopilot-panel .pw-field-label { margin-bottom: var(--space-2); }
+.autopilot-limit {
+  display: flex; align-items: center; gap: 0.5rem; margin-top: var(--space-3);
+  font-size: var(--text-sm); color: var(--fg-muted); text-transform: none; font-weight: 400; letter-spacing: normal;
 }
-.autopilot-row.toggle strong { color: var(--fg); font-weight: 600; }
-.autopilot-row.toggle input { margin-top: 0.15rem; }
-.autopilot-grid {
-  margin-top: var(--space-3);
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-3);
-}
-.autopilot-field { display: flex; flex-direction: column; gap: 0.25rem; font-size: var(--text-xs); color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.04em; }
-.autopilot-field input {
-  padding: 0.4rem 0.55rem; font-size: var(--text-sm); text-transform: none; letter-spacing: normal;
+.autopilot-limit input {
+  width: 4.5rem; padding: 0.35rem 0.5rem; font-size: var(--text-sm);
   background: var(--bg-elev); color: var(--fg); border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
 }
-.autopilot-tz { margin-top: var(--space-3); font-size: var(--text-xs); color: var(--fg-subtle); max-width: 60ch; }
-.autopilot-tz strong { color: var(--fg-muted); }
+.autopilot-note { margin-top: var(--space-4); font-size: var(--text-xs); color: var(--fg-subtle); line-height: 1.5; max-width: 62ch; }
 
 /* Per-draft verdict banner inside a sequence card. Restrained: flat surface,
    hairline status-line border, status-tinted ink (mirrors .run-banner.warn).

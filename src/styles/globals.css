@@ -119,6 +119,30 @@ body {
   --accent-line: oklch(0.330 0.050 156);
   --accent-fg: oklch(0.985 0.004 255);
   --primary-hover: oklch(0.90 0.01 255);
+
+  /* Status color family for dark mode. The legacy CSS uses these as DIRECT
+     colors (`color: var(--success)`, `background: var(--success-soft)`), never
+     as hsl(var(--success)) - so the shadcn HSL-triplet override above leaves the
+     base invalid and the `-soft`/`-line` members at their light :root values
+     (~0.955 L = near-white). That made every status chip (verified, sent, the
+     Autopilot "On" pill, is-success/warn/info badges) a near-white pill with
+     invisible text. Redefine the whole family on the dark ground: bright text,
+     dark-tinted soft fill, mid border - mirroring the --accent-* dark pattern.
+     Base tokens are used only as text (verified by grep), so they go bright. */
+  --success:      oklch(0.74 0.115 152);
+  --success-soft: oklch(0.262 0.040 152);
+  --success-line: oklch(0.360 0.055 152);
+  --warn:         oklch(0.80 0.120 80);
+  --warning:      oklch(0.80 0.120 80);
+  --warn-soft:    oklch(0.270 0.050 70);
+  --warn-line:    oklch(0.380 0.060 70);
+  --danger:       oklch(0.72 0.150 25);
+  --error:        oklch(0.72 0.150 25);
+  --danger-soft:  oklch(0.275 0.070 25);
+  --danger-line:  oklch(0.380 0.090 25);
+  --info:         oklch(0.76 0.055 240);
+  --info-soft:    oklch(0.270 0.028 240);
+  --info-line:    oklch(0.360 0.038 240);
 }
 
 @layer base {
