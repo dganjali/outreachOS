@@ -95,6 +95,17 @@ function RouteTitle() {
   return null;
 }
 
+// Reset scroll to the top on every navigation. Without this, moving from a long
+// scrolled page (e.g. a mission with many targets) to another keeps the old
+// scroll offset, landing the user mid-page on the new screen.
+function ScrollToTop() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [pathname]);
+  return null;
+}
+
 function App() {
   return (
     <ErrorBoundary>
@@ -103,6 +114,7 @@ function App() {
           <ToastProvider>
             <ConfirmProvider>
               <RouteTitle />
+              <ScrollToTop />
               <Toaster theme="dark" position="bottom-right" richColors closeButton />
               <Suspense fallback={<RouteFallback />}>
                 <Routes>

@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Download, Archive, RotateCcw, Target, Trash2 } from 'lucide-react';
+import { Plus, Download, Archive, RotateCcw, Target, Trash2, Search, X, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
@@ -10,8 +10,24 @@ import type { Mission } from '../types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { cn } from '@/lib/utils';
+import { cn, timeAgo } from '@/lib/utils';
+
+// Status filter buckets shown as chips. 'active' folds in the 'running' status.
+const STATUS_FILTERS = [
+  { id: 'all', label: 'All' },
+  { id: 'active', label: 'Active' },
+  { id: 'draft', label: 'Draft' },
+  { id: 'completed', label: 'Done' },
+] as const;
+type StatusFilter = (typeof STATUS_FILTERS)[number]['id'];
+
+function matchesStatus(status: string, filter: StatusFilter): boolean {
+  if (filter === 'all') return true;
+  if (filter === 'active') return status === 'active' || status === 'running';
+  return status === filter;
+}
 
 const STATUS_TONE: Record<string, string> = {
   active: 'border-primary/30 bg-primary/10 text-primary',
@@ -56,6 +72,38 @@ export function Missions() {
   const [error, setError] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  // GitHub-style "/" to focus search, "Esc" to clear it - but never hijack the
+  // key while the user is already typing in a field.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const el = e.target as HTMLElement | null;
+      const typing = el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+      if (e.key === '/' && !typing) {
+        e.preventDefault();
+        searchRef.current?.focus();
+      } else if (e.key === 'Escape' && el === searchRef.current) {
+        setSearch('');
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const visibleMissions = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return missions.filter(
+      (m) =>
+        matchesStatus(m.status, statusFilter) &&
+        (q === '' ||
+          m.name.toLowerCase().includes(q) ||
+          (m.goal ?? '').toLowerCase().includes(q) ||
+          (MODE_LABEL[m.mode] ?? m.mode).toLowerCase().includes(q)),
+    );
+  }, [missions, search, statusFilter]);
 
   async function handleExport() {
     setExporting(true);
@@ -116,6 +164,15 @@ export function Missions() {
     load(user.id, showArchived);
   }, [user?.id, showArchived]);
 
+  // Optimistically drop the card from the list, then run the mutation. On
+  // failure we restore the snapshot and surface a toast - no full-page refetch
+  // flash on the happy path.
+  function optimisticRemove(id: string): MissionWithCounts[] {
+    const snapshot = missions;
+    setMissions((prev) => prev.filter((m) => m.id !== id));
+    return snapshot;
+  }
+
   async function archive(e: React.MouseEvent, mission: MissionWithCounts) {
     e.preventDefault();
     e.stopPropagation();
@@ -127,25 +184,27 @@ export function Missions() {
       }))
     )
       return;
+    const snapshot = optimisticRemove(mission.id);
     const { error: err } = await supabase.from('missions').update({ archived_at: new Date().toISOString() }).eq('id', mission.id);
     if (err) {
+      setMissions(snapshot);
       toast.error(`Could not archive: ${err.message}`);
       return;
     }
     toast.success(`Archived "${mission.name}"`);
-    if (user?.id) load(user.id, showArchived);
   }
 
   async function restore(e: React.MouseEvent, mission: MissionWithCounts) {
     e.preventDefault();
     e.stopPropagation();
+    const snapshot = optimisticRemove(mission.id);
     const { error: err } = await supabase.from('missions').update({ archived_at: null }).eq('id', mission.id);
     if (err) {
+      setMissions(snapshot);
       toast.error(`Could not restore: ${err.message}`);
       return;
     }
     toast.success(`Restored "${mission.name}"`);
-    if (user?.id) load(user.id, showArchived);
   }
 
   async function remove(e: React.MouseEvent, mission: MissionWithCounts) {
@@ -160,13 +219,14 @@ export function Missions() {
       }))
     )
       return;
+    const snapshot = optimisticRemove(mission.id);
     const { error: delErr } = await supabase.from('missions').delete().eq('id', mission.id);
     if (delErr) {
+      setMissions(snapshot);
       toast.error(`Could not delete: ${delErr.message}`);
       return;
     }
     toast.success(`Deleted "${mission.name}" and all its data`);
-    if (user?.id) load(user.id, showArchived);
   }
 
   return (
@@ -188,6 +248,55 @@ export function Missions() {
           </Button>
         </div>
       </header>
+
+      {!loading && !error && missions.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative min-w-[14rem] flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              ref={searchRef}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search missions…  (press / )"
+              aria-label="Search missions"
+              className="h-9 pl-9 pr-8"
+            />
+            {search && (
+              <button
+                type="button"
+                aria-label="Clear search"
+                onClick={() => {
+                  setSearch('');
+                  searchRef.current?.focus();
+                }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-1 rounded-lg border border-border bg-card/50 p-0.5">
+            {STATUS_FILTERS.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => setStatusFilter(f.id)}
+                className={cn(
+                  'rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
+                  statusFilter === f.id
+                    ? 'bg-secondary text-foreground'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+            {visibleMissions.length} of {missions.length}
+          </span>
+        </div>
+      )}
 
       {error ? (
         <div
@@ -225,9 +334,31 @@ export function Missions() {
             </Link>
           </Button>
         </Card>
+      ) : visibleMissions.length === 0 ? (
+        <Card className="flex flex-col items-center gap-3 border-dashed border-border bg-card/50 px-6 py-16 text-center">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-secondary text-muted-foreground">
+            <Search className="h-6 w-6" />
+          </div>
+          <h3 className="text-lg font-semibold text-foreground">No matches</h3>
+          <p className="max-w-md text-sm leading-relaxed text-muted-foreground">
+            No missions match {search ? <>“{search}”</> : 'this filter'}. Try a different search or
+            status.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-1"
+            onClick={() => {
+              setSearch('');
+              setStatusFilter('all');
+            }}
+          >
+            Clear filters
+          </Button>
+        </Card>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {missions.map((m) => (
+          {visibleMissions.map((m) => (
             <Link
               key={m.id}
               to={`/missions/${m.id}`}
@@ -243,6 +374,15 @@ export function Missions() {
               <div className="mt-auto flex flex-wrap items-center gap-x-4 gap-y-2 pt-2 text-xs text-muted-foreground">
                 <span className="tabular-nums">{m.target_count} targets</span>
                 <span className="tabular-nums">{m.draft_count} drafts</span>
+                {m.created_at && (
+                  <span
+                    className="inline-flex items-center gap-1 tabular-nums"
+                    title={new Date(m.created_at).toLocaleString()}
+                  >
+                    <Clock className="h-3 w-3" />
+                    {timeAgo(m.created_at)}
+                  </span>
+                )}
                 <span
                   className={cn(
                     'rounded-full border px-2 py-0.5 text-[11px] font-medium capitalize',
