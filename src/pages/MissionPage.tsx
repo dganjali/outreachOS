@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { Send } from 'lucide-react';
+import { Send, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
@@ -630,6 +630,19 @@ export function MissionPage() {
                           </div>
                         );
                       })}
+                    </div>
+                  )}
+
+                  {contacts.length === 0 && (
+                    <div className="contact-empty">
+                      <span className="contact-empty-dot" aria-hidden>
+                        <Users size={14} />
+                      </span>
+                      <span>
+                        {pack
+                          ? 'No contacts yet. Hit “Find contacts” to surface the decision-makers, then draft an email to each.'
+                          : 'No contacts yet. Build an evidence pack first, then find contacts to draft personalized emails to.'}
+                      </span>
                     </div>
                   )}
                   </AccordionContent>

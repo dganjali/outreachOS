@@ -747,8 +747,14 @@ export function Dashboard() {
           <section className="flex flex-col gap-3">
             <SectionHeader title="Recent activity" />
             {runs.length === 0 ? (
-              <div className="panel px-3.5 py-6 text-center text-sm text-muted-foreground">
-                Nothing yet. Run a mission to see activity here.
+              <div className="panel flex flex-col items-center gap-2 px-3.5 py-8 text-center">
+                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-secondary/60 text-muted-foreground ring-1 ring-inset ring-border/70">
+                  <Zap className="h-4 w-4" strokeWidth={2} />
+                </span>
+                <p className="text-sm font-medium text-foreground/90">No activity yet</p>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Agent runs — targeting, research, drafting — show up here as they happen.
+                </p>
               </div>
             ) : (
               <div className="panel divide-y divide-border/60 overflow-hidden">
