@@ -14,6 +14,10 @@ import {
   Sunrise,
   Sun,
   Moon,
+  Search,
+  Sparkles,
+  Mail,
+  Send,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { supabase } from '../supabaseClient';
@@ -53,6 +57,15 @@ const RUN_LABEL: Record<string, string> = {
 
 // Fields that make a profile "sharp enough" for good drafts.
 const PROFILE_FIELDS = ['name', 'role', 'bio', 'proof_points', 'achievements', 'metrics', 'linkedin_url', 'writing_tone'] as const;
+
+// The agent pipeline, shown on the first-run launchpad so a new user sees what
+// a mission actually does before starting one.
+const FLOW = [
+  { Icon: Search, title: 'Find targets', body: 'High-fit companies with a real reason to reach out now.' },
+  { Icon: Users, title: 'Find people', body: 'The decision-makers to email, with verified addresses.' },
+  { Icon: FileText, title: 'Research & draft', body: 'Sourced evidence turned into a personalized sequence.' },
+  { Icon: Send, title: 'Review & send', body: 'You approve; send from your own Gmail in a click.' },
+] as const;
 
 function countByMission(rows: Array<Record<string, unknown>>): Map<string, number> {
   const map = new Map<string, number>();
@@ -302,56 +315,203 @@ export function Dashboard() {
 
   // ---- First-run launchpad ----
   if (!loading && missions.length === 0) {
+    const setupItems = [
+      {
+        done: percent >= 80,
+        icon: Sparkles,
+        label: 'Sharpen your profile',
+        desc: 'The agent writes in your voice — give it more to work with.',
+        to: '/me',
+        cta: percent >= 80 ? 'Looking good' : `${percent}% done`,
+      },
+      {
+        done: gmailConnected === true,
+        icon: Mail,
+        label: 'Connect Gmail',
+        desc: 'Send approved drafts straight from your own inbox.',
+        to: '/settings',
+        cta: gmailConnected === true ? 'Connected' : 'Connect',
+      },
+      {
+        done: false,
+        icon: Target,
+        label: 'Launch your first mission',
+        desc: 'Tell us who to reach — the agents take it from there.',
+        to: '/missions/new',
+        cta: 'Start',
+      },
+    ];
+    const doneCount = setupItems.filter((s) => s.done).length;
+
     return (
-      <div className="mx-auto flex max-w-4xl flex-col gap-6 py-4 animate-fade-in">
+      <div className="flex flex-col gap-7 animate-fade-in">
+        <header className="relative flex flex-col gap-1.5">
+          {!reduceMotion && (
+            <div
+              aria-hidden
+              className="pointer-events-none absolute -left-12 -top-16 -z-10 h-44 w-2/3 rounded-full opacity-40 blur-[90px]"
+              style={{
+                background: `radial-gradient(closest-side, hsl(${greet.accent} / 0.4), transparent)`,
+                animation: 'mh-breathe 9s ease-in-out infinite',
+                transition: 'background 1.5s ease',
+              }}
+            />
+          )}
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+            <span>{dateLabel}</span>
+            <span className="text-muted-foreground/40">·</span>
+            <span className="relative inline-flex h-1.5 w-1.5 items-center" aria-hidden title="Live">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/70" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
+            </span>
+            <span className="tabular-nums text-foreground/70">{timeLabel}</span>
+          </span>
+          <h1 className="flex items-center gap-2.5 text-[1.6rem] font-semibold leading-tight tracking-tight text-foreground">
+            <GreetIcon
+              className="h-[1.15rem] w-[1.15rem] shrink-0 transition-colors duration-700"
+              style={{ color: `hsl(${greet.accent})` }}
+              strokeWidth={2}
+              aria-hidden
+            />
+            <span>{firstName ? `${greet.label}, ${firstName}` : greet.label}</span>
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Your pipeline is empty — let's get the first emails moving.
+          </p>
+        </header>
+
+        {/* Hero */}
         <div className="relative">
-          {/* accent glow */}
           <div
             aria-hidden
-            className="pointer-events-none absolute -top-10 left-1/4 h-48 w-2/3 -translate-x-1/2 rounded-full bg-primary/20 blur-[100px]"
+            className="pointer-events-none absolute -top-10 left-1/3 h-48 w-2/3 -translate-x-1/2 rounded-full bg-primary/20 blur-[100px]"
           />
-          <div className="panel relative overflow-hidden p-8 md:p-12">
-            <span className="inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
-              {firstName ? `${greet.label}, ${firstName}` : 'Welcome to OutreachOS'}
-            </span>
-            <h1 className="mt-5 max-w-xl font-display text-4xl font-bold tracking-tight text-wash md:text-5xl">
-              Let's land your first reply.
-            </h1>
-            <p className="mt-4 max-w-lg text-base leading-relaxed text-muted-foreground">
-              Tell us who you want to reach. The agent finds the companies, the right people, the
-              angle, and writes the emails. You review and send.
-            </p>
-            <div className="mt-7 flex flex-wrap items-center gap-3">
-              <Button asChild size="lg" className="btn-glow gap-2 border-0 font-semibold text-primary-foreground">
-                <Link to="/missions/new">
-                  <Plus className="h-4 w-4" /> Start your first mission
-                </Link>
-              </Button>
-              {gmailConnected === false && (
+          <div className="panel relative overflow-hidden p-8 md:p-11">
+            {/* decorative pipeline glyphs, desktop only */}
+            <div aria-hidden className="pointer-events-none absolute right-6 top-1/2 hidden -translate-y-1/2 items-center gap-3 opacity-[0.12] lg:flex">
+              {[Search, Users, FileText, Send].map((Icon, i) => (
+                <Icon key={i} className="h-12 w-12 text-primary" strokeWidth={1.5} />
+              ))}
+            </div>
+            <div className="relative max-w-xl">
+              <span className="inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
+                {firstName ? `${greet.label}, ${firstName}` : 'Welcome to OutreachOS'}
+              </span>
+              <h2 className="mt-5 font-display text-4xl font-bold tracking-tight text-wash md:text-5xl">
+                Let's land your first reply.
+              </h2>
+              <p className="mt-4 max-w-lg text-base leading-relaxed text-muted-foreground">
+                Tell us who you want to reach. The agent finds the companies, the right people, the
+                angle, and writes the emails. You review and send.
+              </p>
+              <div className="mt-7 flex flex-wrap items-center gap-3">
+                <Button asChild size="lg" className="btn-glow gap-2 border-0 font-semibold text-primary-foreground">
+                  <Link to="/missions/new">
+                    <Plus className="h-4 w-4" /> Start your first mission
+                  </Link>
+                </Button>
                 <Link
-                  to="/settings"
+                  to="/me"
                   className="inline-flex items-center gap-2 rounded-lg border border-border bg-secondary/40 px-3.5 py-2 text-sm text-muted-foreground transition-colors hover:border-border/80 hover:text-foreground"
                 >
-                  <span className="h-1.5 w-1.5 rounded-full bg-primary" aria-hidden />
-                  Connect Gmail
+                  <Sparkles className="h-3.5 w-3.5 text-primary" aria-hidden />
+                  Profile <span className="text-foreground/70">{percent}%</span>
                 </Link>
-              )}
-              <Link
-                to="/me"
-                className="inline-flex items-center gap-2 rounded-lg border border-border bg-secondary/40 px-3.5 py-2 text-sm text-muted-foreground transition-colors hover:border-border/80 hover:text-foreground"
-              >
-                <span className="h-1.5 w-1.5 rounded-full bg-primary" aria-hidden />
-                Profile <span className="text-foreground/70">{percent}%</span>
-              </Link>
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-3">
-          <LaunchStep n={1} title="Find targets" body="High-fit companies with a real reason to reach out now." />
-          <LaunchStep n={2} title="Research & contacts" body="Sourced evidence + the decision-makers to email." />
-          <LaunchStep n={3} title="Drafts ready" body="A personalized sequence per contact, ready to send." />
+        {/* How it works + Get set up */}
+        <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
+          <section className="flex flex-col gap-3">
+            <SectionHeader title="How it works" />
+            <div className="panel p-5 sm:p-6">
+              <div className="grid gap-5 sm:grid-cols-4 sm:gap-3">
+                {FLOW.map((step, i) => (
+                  <div key={step.title} className="relative flex flex-col gap-2.5">
+                    {i < FLOW.length - 1 && (
+                      <ArrowRight
+                        aria-hidden
+                        className="absolute -right-2 top-3 hidden h-4 w-4 text-muted-foreground/30 sm:block"
+                      />
+                    )}
+                    <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary ring-1 ring-inset ring-primary/20">
+                      <step.Icon className="h-5 w-5" strokeWidth={2} />
+                    </span>
+                    <div>
+                      <div className="text-sm font-semibold text-foreground">{step.title}</div>
+                      <div className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{step.body}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          <aside className="flex flex-col gap-3">
+            <SectionHeader
+              title="Get set up"
+              action={
+                <span className="text-xs font-medium tabular-nums text-muted-foreground">
+                  {doneCount}/{setupItems.length}
+                </span>
+              }
+            />
+            <div className="panel divide-y divide-border/70 overflow-hidden">
+              {setupItems.map((item) => {
+                const Icon = item.done ? CheckCircle2 : item.icon;
+                return (
+                  <Link
+                    key={item.label}
+                    to={item.to}
+                    className="group flex items-center gap-3 p-3.5 transition-colors hover:bg-secondary/40"
+                  >
+                    <span
+                      className={cn(
+                        'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset transition-colors',
+                        item.done
+                          ? 'bg-primary/10 text-primary ring-primary/20'
+                          : 'bg-secondary/50 text-muted-foreground ring-border/70 group-hover:text-foreground'
+                      )}
+                    >
+                      <Icon className="h-4 w-4" strokeWidth={2} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className={cn(
+                            'truncate text-sm font-semibold',
+                            item.done ? 'text-muted-foreground line-through' : 'text-foreground'
+                          )}
+                        >
+                          {item.label}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 truncate text-xs text-muted-foreground">{item.desc}</p>
+                    </div>
+                    <span
+                      className={cn(
+                        'inline-flex shrink-0 items-center gap-1 text-xs font-medium',
+                        item.done ? 'text-muted-foreground' : 'text-muted-foreground group-hover:text-primary'
+                      )}
+                    >
+                      {item.cta}
+                      {!item.done && (
+                        <ArrowUpRight className="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+                      )}
+                    </span>
+                  </Link>
+                );
+              })}
+            </div>
+            {gmailConnected === null && (
+              <p className="px-1 text-[11px] text-muted-foreground/70">
+                Tip: a sharper profile and a connected inbox make your first drafts noticeably better.
+              </p>
+            )}
+          </aside>
         </div>
       </div>
     );
@@ -697,20 +857,6 @@ function StatCell({
         {value === null ? '-' : <Counter value={value} animate={!!animate} unit={unit} />}
         {suffix && <span className="text-sm font-normal text-muted-foreground">{suffix}</span>}
       </span>
-    </div>
-  );
-}
-
-function LaunchStep({ n, title, body }: { n: number; title: string; body: string }) {
-  return (
-    <div className="panel flex gap-3 p-4 transition-transform duration-200 hover:-translate-y-0.5">
-      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-sm font-semibold text-primary ring-1 ring-inset ring-primary/20">
-        {n}
-      </div>
-      <div>
-        <div className="text-sm font-semibold text-foreground">{title}</div>
-        <div className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{body}</div>
-      </div>
     </div>
   );
 }
