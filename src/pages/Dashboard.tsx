@@ -11,7 +11,11 @@ import {
   CheckCircle2,
   TrendingUp,
   Zap,
+  Sunrise,
+  Sun,
+  Moon,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { gmail } from '../lib/api';
@@ -68,6 +72,74 @@ function profileCompleteness(profile: Record<string, unknown> | null | undefined
   return Math.round((filled / PROFILE_FIELDS.length) * 100);
 }
 
+// ---- Live / time-aware helpers ----
+
+// A clock that re-renders the dashboard on an interval so relative timestamps,
+// the header time, and the time-of-day greeting stay honest without a reload.
+function useNow(intervalMs = 30_000): Date {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return now;
+}
+
+function usePrefersReducedMotion(): boolean {
+  const [reduce, setReduce] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    if (!mq) return;
+    const update = () => setReduce(mq.matches);
+    update();
+    mq.addEventListener?.('change', update);
+    return () => mq.removeEventListener?.('change', update);
+  }, []);
+  return reduce;
+}
+
+// Eased count-up. Animates 0 → target whenever target changes (e.g. when the
+// dashboard data finishes loading). No-ops to the final value when disabled.
+function useCountUp(target: number, enabled: boolean, durationMs = 850): number {
+  const [val, setVal] = useState(enabled ? 0 : target);
+  useEffect(() => {
+    if (!enabled) {
+      setVal(target);
+      return;
+    }
+    let raf = 0;
+    const start = performance.now();
+    const step = (t: number) => {
+      const p = Math.min((t - start) / durationMs, 1);
+      const eased = 1 - Math.pow(1 - p, 3); // easeOutCubic
+      setVal(Math.round(target * eased));
+      if (p < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [target, enabled, durationMs]);
+  return val;
+}
+
+function Counter({ value, animate, unit }: { value: number; animate: boolean; unit?: string }) {
+  const n = useCountUp(value, animate);
+  return (
+    <>
+      {n}
+      {unit}
+    </>
+  );
+}
+
+// Time-of-day greeting: label + matching icon + an HSL accent that tints the
+// header glow and the icon. Shifts as the day passes (re-derived from useNow).
+function greetingFor(d: Date): { label: string; Icon: LucideIcon; accent: string } {
+  const h = d.getHours();
+  if (h < 12) return { label: 'Good morning', Icon: Sunrise, accent: '35 92% 60%' };
+  if (h < 18) return { label: 'Good afternoon', Icon: Sun, accent: '45 90% 58%' };
+  return { label: 'Good evening', Icon: Moon, accent: '232 58% 70%' };
+}
+
 export function Dashboard() {
   const { user, profile } = useAuth();
   const [missions, setMissions] = useState<MissionWithStats[]>([]);
@@ -84,6 +156,7 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [barsIn, setBarsIn] = useState(false);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refetchRuns = useCallback(async () => {
@@ -202,10 +275,30 @@ export function Dashboard() {
     };
   }, [runs, refetchRuns]);
 
+  // Once data has loaded, flip the flag that animates the mission progress bars
+  // from 0 → their real fill (a quick rAF so the transition has a frame to run).
+  useEffect(() => {
+    if (loading) {
+      setBarsIn(false);
+      return;
+    }
+    const id = requestAnimationFrame(() => setBarsIn(true));
+    return () => cancelAnimationFrame(id);
+  }, [loading]);
+
+  const now = useNow();
+  const reduceMotion = usePrefersReducedMotion();
+  // Gate count-ups on "loaded + motion allowed" so numbers animate in once the
+  // real data arrives, and snap straight to final for reduced-motion users.
+  const animateNums = !reduceMotion && !loading;
+  const greet = greetingFor(now);
+  const GreetIcon = greet.Icon;
+
   const responseRate = stats.contacted > 0 ? Math.round((stats.replied / stats.contacted) * 100) : null;
   const firstName = profile?.name ? profile.name.split(' ')[0] : null;
   const percent = profileCompleteness(profile as unknown as Record<string, unknown>);
-  const dateLabel = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+  const dateLabel = now.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+  const timeLabel = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
   // ---- First-run launchpad ----
   if (!loading && missions.length === 0) {
@@ -220,7 +313,7 @@ export function Dashboard() {
           <div className="panel relative overflow-hidden p-8 md:p-12">
             <span className="inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
-              {firstName ? `Welcome, ${firstName}` : 'Welcome to OutreachOS'}
+              {firstName ? `${greet.label}, ${firstName}` : 'Welcome to OutreachOS'}
             </span>
             <h1 className="mt-5 max-w-xl font-display text-4xl font-bold tracking-tight text-wash md:text-5xl">
               Let's land your first reply.
@@ -292,11 +385,41 @@ export function Dashboard() {
 
   return (
     <div className="flex flex-col gap-7 animate-fade-in">
-      <header className="flex flex-col gap-1.5">
-        <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">{dateLabel}</span>
+      <header className="relative flex flex-col gap-1.5">
+        {/* Ambient glow whose hue tracks the time of day; gently breathes. */}
+        {!reduceMotion && (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -left-12 -top-16 -z-10 h-44 w-2/3 rounded-full opacity-40 blur-[90px]"
+            style={{
+              background: `radial-gradient(closest-side, hsl(${greet.accent} / 0.4), transparent)`,
+              animation: 'mh-breathe 9s ease-in-out infinite',
+              transition: 'background 1.5s ease',
+            }}
+          />
+        )}
+        <span className="inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+          <span>{dateLabel}</span>
+          <span className="text-muted-foreground/40">·</span>
+          <span
+            className="relative inline-flex h-1.5 w-1.5 items-center"
+            aria-hidden
+            title="Live"
+          >
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/70" />
+            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
+          </span>
+          <span className="tabular-nums text-foreground/70">{timeLabel}</span>
+        </span>
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-          <h1 className="text-[1.6rem] font-semibold leading-tight tracking-tight text-foreground">
-            {firstName ? `Welcome back, ${firstName}` : 'Dashboard'}
+          <h1 className="flex items-center gap-2.5 text-[1.6rem] font-semibold leading-tight tracking-tight text-foreground">
+            <GreetIcon
+              className="h-[1.15rem] w-[1.15rem] shrink-0 transition-colors duration-700"
+              style={{ color: `hsl(${greet.accent})` }}
+              strokeWidth={2}
+              aria-hidden
+            />
+            <span>{firstName ? `${greet.label}, ${firstName}` : greet.label}</span>
           </h1>
         </div>
         <p className="text-sm text-muted-foreground">
@@ -345,14 +468,15 @@ export function Dashboard() {
           a clean "caught up" panel with a primary CTA otherwise. */}
       {focusItems.length > 0 ? (
         <section className="grid gap-3 sm:grid-cols-2" aria-label="Needs your attention">
-          {focusItems.map((f) => (
+          {focusItems.map((f, i) => (
             <Link
               key={f.key}
               to={f.to}
-              className="panel group flex items-center gap-4 p-4 transition-colors hover:border-primary/45"
+              style={{ animationDelay: `${i * 80}ms` }}
+              className="panel group flex items-center gap-4 p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/45 motion-safe:animate-fade-in"
             >
-              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-xl font-bold tabular-nums text-primary ring-1 ring-inset ring-primary/20">
-                {f.count}
+              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-xl font-bold tabular-nums text-primary ring-1 ring-inset ring-primary/20 transition-transform duration-200 group-hover:scale-105">
+                <Counter value={f.count} animate={animateNums} />
               </span>
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="text-sm font-semibold text-foreground">{f.noun}</span>
@@ -360,7 +484,7 @@ export function Dashboard() {
               </span>
               <span className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-muted-foreground transition-colors group-hover:text-primary">
                 <span className="hidden sm:inline">{f.cta}</span>
-                <ArrowUpRight className="h-4 w-4" />
+                <ArrowUpRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
               </span>
             </Link>
           ))}
@@ -406,7 +530,7 @@ export function Dashboard() {
             </div>
           ) : (
             <div className="panel divide-y divide-border/70 overflow-hidden">
-              {missions.map((m) => {
+              {missions.map((m, i) => {
                 const pct = m.target_count > 0 ? Math.round((m.draft_count / m.target_count) * 100) : 0;
                 const started = m.target_count > 0;
                 // Floor a non-zero bar to 3% so it's visible, but keep 0% truly empty
@@ -434,8 +558,11 @@ export function Dashboard() {
                       <div className="flex items-center gap-2.5">
                         <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-secondary" aria-hidden>
                           <div
-                            className="h-full rounded-full bg-primary transition-all"
-                            style={{ width: `${fillPct}%` }}
+                            className="h-full rounded-full bg-primary transition-[width] duration-700 ease-out"
+                            style={{
+                              width: `${reduceMotion || barsIn ? fillPct : 0}%`,
+                              transitionDelay: `${i * 80}ms`,
+                            }}
                           />
                         </div>
                         <span className="w-16 shrink-0 text-right text-[11px] font-medium tabular-nums text-muted-foreground">
@@ -448,7 +575,7 @@ export function Dashboard() {
                         <MissionStat icon={FileText} value={m.draft_count} label="drafts" />
                       </div>
                     </div>
-                    <ChevronRight className="hidden h-4 w-4 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-foreground sm:block" />
+                    <ChevronRight className="hidden h-4 w-4 shrink-0 text-muted-foreground/40 transition-all duration-200 group-hover:translate-x-0.5 group-hover:text-foreground sm:block" />
                   </Link>
                 );
               })}
@@ -466,7 +593,7 @@ export function Dashboard() {
             ) : (
               <div className="panel divide-y divide-border/60 overflow-hidden">
                 {runs.map((r) => (
-                  <div key={r.id} className="flex items-center gap-2.5 px-3.5 py-2.5">
+                  <div key={r.id} className="flex items-center gap-2.5 px-3.5 py-2.5 transition-colors hover:bg-secondary/30">
                     <StatusDot status={r.status} />
                     <span className="min-w-0 flex-1 truncate text-[13px] text-foreground/90">
                       {RUN_LABEL[r.agent_type] ?? r.agent_type}
@@ -487,14 +614,15 @@ export function Dashboard() {
           <section className="flex flex-col gap-3">
             <SectionHeader title="This week" />
             <dl className="panel grid grid-cols-3 divide-x divide-border/60 overflow-hidden">
-              <StatCell icon={Users} label="Contacted" value={String(stats.contacted)} />
-              <StatCell icon={TrendingUp} label="Reply rate" value={responseRate === null ? '-' : `${responseRate}%`} />
+              <StatCell icon={Users} label="Contacted" value={stats.contacted} animate={animateNums} />
+              <StatCell icon={TrendingUp} label="Reply rate" value={responseRate} unit="%" animate={animateNums} />
               <StatCell
                 icon={Zap}
                 label="Runs today"
-                value={`${stats.runsToday}`}
+                value={stats.runsToday}
                 suffix="/50"
                 warn={stats.runsToday >= 40}
+                animate={animateNums}
               />
             </dl>
           </section>
@@ -547,22 +675,26 @@ function StatCell({
   icon: Icon,
   label,
   value,
+  unit,
   suffix,
   warn,
+  animate,
 }: {
   icon: ComponentType<{ className?: string }>;
   label: string;
-  value: string;
+  value: number | null;
+  unit?: string;
   suffix?: string;
   warn?: boolean;
+  animate?: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-2 px-3 py-3.5">
+    <div className="group flex flex-col gap-2 px-3 py-3.5 transition-colors hover:bg-secondary/30">
       <span className="flex items-center gap-1.5 whitespace-nowrap text-[11px] font-medium uppercase text-muted-foreground">
-        <Icon className="h-3 w-3 shrink-0" /> {label}
+        <Icon className="h-3 w-3 shrink-0 transition-transform duration-200 group-hover:scale-110" /> {label}
       </span>
       <span className={cn('text-2xl font-semibold leading-none tabular-nums', warn ? 'text-warning' : 'text-foreground')}>
-        {value}
+        {value === null ? '-' : <Counter value={value} animate={!!animate} unit={unit} />}
         {suffix && <span className="text-sm font-normal text-muted-foreground">{suffix}</span>}
       </span>
     </div>
