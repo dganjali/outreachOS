@@ -50,8 +50,18 @@ export interface ContactSuggestion {
 // candidates (the per-target cost ceiling - finder/verifier calls cost credits).
 const DEFAULT_DELIVERABLE = 1;
 const MAX_CONTACTS_PER_TARGET = 5;
-const RESOLVE_ATTEMPT_CAP = 8;
-const CANDIDATE_POOL_CAP = 10;
+// Per-target email-resolution attempt ceiling. emailfinder MISSES are free
+// (charged only on a hit) and the verifier only runs on a hit, so a higher cap
+// buys more coverage at near-zero cost - it just lets the resolver walk deeper
+// into the ranked pool when the top candidates don't resolve.
+const RESOLVE_ATTEMPT_CAP = 15;
+// Max candidates kept after ranking. Raised in step with the attempt cap so the
+// larger discovered pool isn't truncated before the resolver ever sees it.
+const CANDIDATE_POOL_CAP = 20;
+// Concurrency for the resolve walk. Deliberately NOT raised with the cap: this
+// is the only knob that spends paid verifier calls speculatively (on the
+// "keep 1" hot path it resolves up to LOOKAHEAD at once), so keeping it small
+// bounds wasted spend while the higher cap above adds only free finder misses.
 const RESOLVE_LOOKAHEAD = 3;
 
 export default async function handler(req: Request, res: Response) {
@@ -114,11 +124,33 @@ export default async function handler(req: Request, res: Response) {
 
     const ranked = rankCandidates(suggestions, { icp, sizeTier, target, mission, profile });
 
-    let rows = ranked.rows;
-    rows = await resolvePoolWithBudget(rows, domain, target._id, wanted);
+    const resolved = await resolvePoolWithBudget(ranked.rows, domain, target._id, wanted);
+    const rows = resolved.rows;
 
     if (rows.length === 0) {
-      await failRun(scope, run._id, 'no_contacts_found');
+      // Categorize WHERE the company was lost so a "No contacts" drop is
+      // self-explanatory in agent_runs - the dominant stage drives the next
+      // round of tuning (more discovery vs. better domains vs. finder coverage).
+      const dropStage = !domain
+        ? 'no_domain'
+        : suggestions.length === 0
+          ? 'no_candidates'
+          : ranked.rows.length === 0
+            ? 'no_candidates_kept'
+            : 'no_email_resolved';
+      await failRun(scope, run._id, 'no_contacts_found', {
+        dropStage,
+        source: discoverySource,
+        domainResolved: !!domain,
+        sizeTier: sizeTier ?? 'unknown',
+        candidates: suggestions.length,
+        kept: ranked.rows.length,
+        droppedAboveCap: ranked.droppedAboveCap,
+        droppedDisqualified: ranked.droppedDisqualified,
+        usedAboveCapFallback: ranked.usedFallback,
+        attempts: resolved.attempts,
+        resolverCounts: resolved.resolverCounts,
+      });
       return res.status(502).json({ error: 'no_contacts_found' });
     }
 
@@ -137,6 +169,8 @@ export default async function handler(req: Request, res: Response) {
       droppedAboveCap: ranked.droppedAboveCap,
       droppedDisqualified: ranked.droppedDisqualified,
       usedAboveCapFallback: ranked.usedFallback,
+      attempts: resolved.attempts,
+      resolverCounts: resolved.resolverCounts,
     });
     return res.status(200).json({
       run_id: run._id,
@@ -282,7 +316,7 @@ async function runWebSearchOnly(args: DiscoveryArgs): Promise<ContactSuggestion[
       ? `Company domain for email patterns: ${target.domain}`
       : 'WARNING: no domain on file - use web_search to find the official company website first.',
     '',
-    'Find 3-6 people matching the ICP function at THIS company (not the sender). Favor the program owners (managers/directors) over execs. Use web_search on company site, LinkedIn public pages, press, blog. Output JSON only.',
+    'Find 6-10 people matching the ICP function at THIS company (not the sender). Favor the program owners (managers/directors) over execs. Use web_search on company site, LinkedIn public pages, press, blog. Output JSON only.',
   ]
     .filter(Boolean)
     .join('\n');
@@ -310,7 +344,7 @@ async function runSerperDiscovery(args: DiscoveryArgs): Promise<ContactSuggestio
 
   let results;
   try {
-    results = await searchPeoplePool(spec, 8);
+    results = await searchPeoplePool(spec, 10);
   } catch (err) {
     console.error('serper_search_failed', err);
     return runWebSearchOnly(args);
@@ -333,7 +367,7 @@ async function runSerperDiscovery(args: DiscoveryArgs): Promise<ContactSuggestio
       2
     ),
     '',
-    'From these results, extract every plausible on-function person (4-8 is fine). Capture each title verbatim plus location/headline when shown. Output JSON only.',
+    'From these results, extract every plausible on-function person that appears (up to ~15 - more candidates give the resolver more chances to land a verified email). Capture each title verbatim plus location/headline when shown. Output JSON only.',
   ]
     .filter(Boolean)
     .join('\n');
@@ -475,6 +509,22 @@ const DEFAULT_RESOLVE_DEPS: ResolvePoolDeps = {
   resolve: (name, domain, existing, scraped) => resolveEmail(name, domain, existing, scraped),
 };
 
+// Which cascade rung produced each attempt's result. Tallied across the walk so
+// a drop is debuggable: all-`none` means the finder/scrape found nobody, while a
+// pool that ran out before `want` (attempts == pool size < cap) means discovery
+// was too thin. Surfaced via run telemetry (see the contacts handler).
+type ResolverName = ResolvedEmail['resolver'];
+
+export interface ResolvePoolResult {
+  rows: ContactRow[];
+  attempts: number;
+  resolverCounts: Record<ResolverName, number>;
+}
+
+function emptyResolverCounts(): Record<ResolverName, number> {
+  return { preexisting: 0, email_finder: 0, scrape: 0, verifier: 0, none: 0 };
+}
+
 // Walk the ranked candidate pool resolving a trustworthy email for each via the
 // cascade (emailfinder.dev → verifier gate → real scraped email → none). Keeps a
 // row only when it yields a deliverable email ('verified'/'likely'); a 'none'
@@ -487,12 +537,13 @@ export async function resolvePoolWithBudget(
   targetId: string,
   count: number = DEFAULT_DELIVERABLE,
   deps: ResolvePoolDeps = DEFAULT_RESOLVE_DEPS
-): Promise<ContactRow[]> {
+): Promise<ResolvePoolResult> {
   const want = Math.max(1, count);
-  if (rows.length === 0) return rows;
+  const resolverCounts = emptyResolverCounts();
+  if (rows.length === 0) return { rows, attempts: 0, resolverCounts };
   // No domain → can't resolve emails, so we can't ship a deliverable contact.
   // Return empty so the caller drops/replaces this company (no email guesses).
-  if (!domain) return [];
+  if (!domain) return { rows: [], attempts: 0, resolverCounts };
 
   let scraped: ScrapeResult;
   try {
@@ -532,6 +583,7 @@ export async function resolvePoolWithBudget(
     // Keep deliverable rows in their ranked (batch) order; never exceed the cap.
     batch.forEach((row, j) => {
       const res = resolved[j];
+      resolverCounts[res.resolver] += 1; // telemetry: where each attempt landed
       if (res.email && kept.length < want) {
         kept.push({
           ...row,
@@ -544,9 +596,10 @@ export async function resolvePoolWithBudget(
     });
   }
 
-  // Nothing came back deliverable → return empty so the caller drops/replaces
-  // this company. We never ship display-only rows with no verified email.
-  return kept;
+  // `kept` empty → caller drops/replaces this company (we never ship display-only
+  // rows with no verified email). `attempts`/`resolverCounts` ride along so the
+  // run telemetry can show WHY it came back empty.
+  return { rows: kept, attempts, resolverCounts };
 }
 
 function clamp01(n: number) {

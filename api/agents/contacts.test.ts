@@ -53,19 +53,23 @@ describe('resolvePoolWithBudget', () => {
     const pool = ['A', 'B', 'C', 'D', 'E', 'F'].map(row);
     const { deps, calls } = depsFor(new Set(['A', 'B', 'C', 'D', 'E', 'F']));
     const out = await resolvePoolWithBudget(pool, 'acme.co', 't1', 3, deps);
-    assert.equal(out.length, 3);
+    assert.equal(out.rows.length, 3);
     assert.equal(calls(), 3, 'should not resolve beyond the 3 it needs');
-    assert.deepEqual(out.map((r) => r.name), ['A', 'B', 'C']);
-    assert.ok(out.every((r) => r.email && r.emailResolver === 'verifier'));
+    assert.deepEqual(out.rows.map((r) => r.name), ['A', 'B', 'C']);
+    assert.ok(out.rows.every((r) => r.email && r.emailResolver === 'verifier'));
+    // Telemetry rides along: three verifier hits, no misses.
+    assert.equal(out.attempts, 3);
+    assert.equal(out.resolverCounts.verifier, 3);
+    assert.equal(out.resolverCounts.none, 0);
   });
 
   it('keeps exactly the requested count (1) while resolving a small speed batch', async () => {
     const pool = ['A', 'B', 'C', 'D'].map(row);
     const { deps, calls } = depsFor(new Set(['A', 'B', 'C', 'D']));
     const out = await resolvePoolWithBudget(pool, 'acme.co', 't1', 1, deps);
-    assert.equal(out.length, 1, 'no extra contacts beyond what was asked for');
+    assert.equal(out.rows.length, 1, 'no extra contacts beyond what was asked for');
     assert.equal(calls(), 3, 'looks ahead so one slow/missing candidate does not stall the company');
-    assert.deepEqual(out.map((r) => r.name), ['A']);
+    assert.deepEqual(out.rows.map((r) => r.name), ['A']);
   });
 
   it('drops non-deliverable candidates and keeps pulling the next one', async () => {
@@ -73,28 +77,33 @@ describe('resolvePoolWithBudget', () => {
     const pool = ['A', 'B', 'C', 'D', 'E', 'F'].map(row);
     const { deps } = depsFor(new Set(['D', 'E', 'F']));
     const out = await resolvePoolWithBudget(pool, 'acme.co', 't1', 3, deps);
-    assert.deepEqual(out.map((r) => r.name), ['D', 'E', 'F']);
+    assert.deepEqual(out.rows.map((r) => r.name), ['D', 'E', 'F']);
   });
 
-  it('never attempts more than RESOLVE_ATTEMPT_CAP (8) candidates', async () => {
-    const pool = Array.from({ length: 10 }, (_, i) => row(`P${i}`));
+  it('never attempts more than RESOLVE_ATTEMPT_CAP (15) candidates', async () => {
+    const pool = Array.from({ length: 20 }, (_, i) => row(`P${i}`));
     const { deps, calls } = depsFor(new Set()); // nobody resolves
-    await resolvePoolWithBudget(pool, 'acme.co', 't1', 3, deps);
-    assert.equal(calls(), 8, 'attempt cap bounds finder/verifier spend');
+    const out = await resolvePoolWithBudget(pool, 'acme.co', 't1', 3, deps);
+    assert.equal(calls(), 15, 'attempt cap bounds finder/verifier spend');
+    assert.equal(out.attempts, 15);
   });
 
   it('returns empty when nothing is deliverable (company gets dropped/replaced)', async () => {
     const pool = ['A', 'B', 'C', 'D', 'E'].map(row);
     const { deps } = depsFor(new Set());
     const out = await resolvePoolWithBudget(pool, 'acme.co', 't1', 3, deps);
-    assert.equal(out.length, 0, 'never ships display-only rows with no verified email');
+    assert.equal(out.rows.length, 0, 'never ships display-only rows with no verified email');
+    // Diagnosis: walked the whole (sub-cap) pool, every attempt a finder miss.
+    assert.equal(out.attempts, 5);
+    assert.equal(out.resolverCounts.none, 5);
   });
 
   it('returns empty when there is no domain (no resolution possible)', async () => {
     const pool = ['A', 'B', 'C', 'D'].map(row);
     const { deps, calls } = depsFor(new Set(['A', 'B', 'C', 'D']));
     const out = await resolvePoolWithBudget(pool, null, 't1', 3, deps);
-    assert.equal(out.length, 0);
+    assert.equal(out.rows.length, 0);
+    assert.equal(out.attempts, 0);
     assert.equal(calls(), 0, 'no domain → no resolver calls');
   });
 
@@ -117,7 +126,7 @@ describe('resolvePoolWithBudget', () => {
       },
     };
     const out = await resolvePoolWithBudget(['A', 'B', 'C'].map(row), 'acme.co', 't1', 3, deps);
-    assert.equal(out.length, 3);
+    assert.equal(out.rows.length, 3);
     assert.equal(maxInFlight, 3, 'the three needed candidates resolve in parallel');
   });
 });

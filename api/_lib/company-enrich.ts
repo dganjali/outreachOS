@@ -89,7 +89,11 @@ export function guessDomainCandidates(name: string): string[] {
   const stems = [joined];
   if (words.length > 1 && words[0] && words[0] !== joined) stems.push(words[0]);
 
-  const tlds = ['com', 'ai', 'io'];
+  // Probed in order, first live host wins (isDomainLive-gated, never blind). .com
+  // first (most companies), then startup TLDs, then .co and .org - the latter
+  // catches nonprofits/foundations common as sponsorship/BD targets that a
+  // .com/.ai/.io-only guess would drop with a hard no_domain.
+  const tlds = ['com', 'ai', 'io', 'co', 'org'];
   const out: string[] = [];
   const seen = new Set<string>();
   for (const stem of stems) {
