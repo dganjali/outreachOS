@@ -7,6 +7,18 @@
 #   _AR_REPO       - Artifact Registry repo for images (default: outreachos)
 
 steps:
+  # 0. Gate the deploy on a green typecheck + test suite. A red build here stops
+  #    the pipeline before the image is ever built, so broken code can't ship.
+  - name: node:22
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -e
+        npm ci
+        npm run server:typecheck
+        npm test
+
   # 1. Build the image.
   - name: gcr.io/cloud-builders/docker
     args:

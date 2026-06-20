@@ -80,3 +80,31 @@ export const env = {
   // with the /api/** -> Cloud Run rewrite, same as the Stripe webhook).
   APP_URL: () => optional('APP_URL', 'https://outreach-os.ca'),
 };
+
+// Every var read through required() above. Kept as an explicit list so boot-time
+// validation can surface ALL missing vars at once instead of failing lazily on
+// the first request that happens to touch one.
+export const REQUIRED_ENV = [
+  'MONGODB_URI',
+  'FIREBASE_PROJECT_ID',
+  'GCP_PROJECT_ID',
+  'GCS_BUCKET',
+  'CLOUD_TASKS_TARGET_URL',
+  'CLOUD_TASKS_SERVICE_ACCOUNT',
+  'ENCRYPTION_KEY',
+  'GOOGLE_CLIENT_ID',
+  'GOOGLE_CLIENT_SECRET',
+] as const;
+
+/**
+ * Fail fast at startup if a required env var is missing. Without this the
+ * service boots "healthy" (the getters are lazy) and only 500s when the first
+ * request reaches code that reads the unset var - a misconfigured deploy looks
+ * fine until a user hits it. Call once before app.listen().
+ */
+export function assertRequiredEnv(): void {
+  const missing = REQUIRED_ENV.filter((name) => !process.env[name]);
+  if (missing.length > 0) {
+    throw new Error(`Missing required env var(s): ${missing.join(', ')}`);
+  }
+}

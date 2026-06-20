@@ -41,6 +41,17 @@ import billingCheckout from '../api/billing/checkout';
 import billingPortal from '../api/billing/portal';
 import billingWebhook from '../api/billing/webhook';
 import billingMe from '../api/billing/me';
+import { assertRequiredEnv } from '../api/_lib/env';
+
+// Fail fast on a misconfigured deploy: surface every missing required secret at
+// boot with a clear message, instead of booting "healthy" and 500ing on the
+// first request that touches an unset var.
+try {
+  assertRequiredEnv();
+} catch (err) {
+  console.error(`[boot] ${err instanceof Error ? err.message : String(err)}`);
+  process.exit(1);
+}
 
 const app = express();
 

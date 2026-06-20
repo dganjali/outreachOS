@@ -8,7 +8,7 @@ End-to-end agent pipeline per mission:
 
 1. **Targeting Agent** - pulls high-fit organizations via web_search, ranked by recent "why now" signals.
 2. **Contact Graph Agent** - 2–4 decision-makers per target. Discovery via **Serper** (LinkedIn-scoped search, with `SERPER_API_KEY`) or web_search fallback. Emails are resolved (not guessed) via **emailfinder.dev** SMTP verification (with `EMAILFINDER_API_KEY`) or a real address scraped from the company site; unresolved contacts keep a display-only likely-email pattern, never a shipped guess.
-3. **Evidence Agent** - 4–6 sourced bullets per target. Embedded with Voyage AI for downstream vector retrieval.
+3. **Evidence Agent** - 4–6 sourced bullets per target. Embedded with Gemini for downstream vector retrieval.
 4. **Sequence Agent** - mode-aware initial email + 2 follow-ups, anchored in evidence. Retrieves your own past sequences-that-got-replies via Atlas Vector Search and feeds them in as exemplars.
 5. **Profile Enrichment Agent** - reads sender LinkedIn URL → auto-fills bio, proof points, metrics, tone.
 
@@ -18,15 +18,15 @@ Modes: `sponsorship`, `bd`, `internship`, `recruiting`, `sales`.
 
 | Layer | Choice |
 |---|---|
-| Frontend | React 18 + TS + Vite, hosted on Vercel |
+| Frontend | React 18 + TS + Vite, served via **Firebase Hosting** (with an `/api/**` rewrite to Cloud Run) |
 | Backend | Node + Express, packaged in a Docker container, deployed to **Cloud Run** |
 | Auth | **Firebase Auth** (Identity Platform) - Google sign-in + email/password |
 | Database | **MongoDB Atlas** on GCP (same region as Cloud Run) |
-| Vector retrieval | **Atlas Vector Search** with **Voyage AI** embeddings (voyage-3, 1024d) |
+| Vector retrieval | **Atlas Vector Search** with **Gemini** embeddings (gemini-embedding-001, 1024d) |
 | Object storage | **Google Cloud Storage** (resumes, portfolio PDFs) |
 | Job queue | **Cloud Tasks** + Cloud Scheduler |
 | Secrets | **Google Secret Manager** |
-| LLM | Anthropic Claude (Sonnet 4.5) with `web_search_20250305` |
+| LLM | **Google Gemini 2.5** on Vertex AI (Flash for research/extraction, Pro for drafting) |
 | Email | Gmail OAuth (per-user) |
 
 ## Quick start

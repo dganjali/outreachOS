@@ -68,10 +68,21 @@ router.post('/_storage/remove', async (req, res) => {
   if (!list.every((p) => ownsStoragePath(uid, p))) {
     return res.status(403).json({ error: 'forbidden' });
   }
-  for (const p of list) {
-    try { await deleteObject(p); } catch { /* best-effort */ }
-  }
-  return res.json({ ok: true });
+  // Report how many objects actually deleted vs failed so the client can warn
+  // instead of assuming success (the UI previously always saw {ok:true}).
+  let removed = 0;
+  let failed = 0;
+  await Promise.all(
+    list.map(async (p) => {
+      try {
+        await deleteObject(p);
+        removed += 1;
+      } catch {
+        failed += 1;
+      }
+    }),
+  );
+  return res.json({ ok: failed === 0, removed, failed });
 });
 
 // ---- mission delete with cascade ----
@@ -98,10 +109,15 @@ router.delete('/missions/:id', async (req, res) => {
   const mission = await scope.collection(COL.missions).findById(missionId);
   if (!mission) return res.status(404).json({ error: 'not_found' });
 
+  // The child collections are independent - delete them concurrently rather
+  // than awaiting each in series (7 round-trips -> 1 round-trip of latency).
+  const counts = await Promise.all(
+    MISSION_CHILDREN.map((child) => scope.collection(child).deleteMany({ missionId } as any)),
+  );
   const deleted: Record<string, number> = {};
-  for (const child of MISSION_CHILDREN) {
-    deleted[child] = await scope.collection(child).deleteMany({ missionId } as any);
-  }
+  MISSION_CHILDREN.forEach((child, i) => {
+    deleted[child] = counts[i];
+  });
   await scope.collection(COL.missions).deleteById(missionId);
 
   res.json({ ok: true, deleted });
@@ -113,10 +129,12 @@ router.post('/:collection/query', async (req, res) => {
   if (!ALLOWED.has(collection)) return res.status(404).json({ error: 'unknown_collection' });
 
   const uid = uidOf(req);
-  const { filter = {}, sort, limit } = (req.body ?? {}) as {
+  const { filter = {}, sort, limit, projection, count } = (req.body ?? {}) as {
     filter?: Record<string, unknown>;
     sort?: Record<string, 1 | -1>;
     limit?: number;
+    projection?: Record<string, 0 | 1>;
+    count?: boolean;
   };
 
   let safeFilter: Record<string, unknown>;
@@ -128,22 +146,47 @@ router.post('/:collection/query', async (req, res) => {
   }
 
   const scope = forUser(uid);
-  const docs = await scope.collection(collection as CollectionName).find(safeFilter);
-  let result = docs;
-  if (sort) {
-    const [k, dir] = Object.entries(sort)[0] ?? [];
-    if (k) {
-      result = [...result].sort((a, b) => {
-        const av = (a as any)[k];
-        const bv = (b as any)[k];
-        if (av === bv) return 0;
-        return ((av > bv ? 1 : -1) * (dir as 1 | -1)) as number;
-      });
-    }
+  const col = scope.collection(collection as CollectionName);
+
+  // Pure count (Dashboard cards): run countDocuments() server-side instead of
+  // shipping every matching doc to the client just to take .length.
+  if (count === true) {
+    const n = await col.countDocuments(safeFilter as any);
+    return res.json({ data: [], count: n });
   }
-  if (typeof limit === 'number' && limit > 0) result = result.slice(0, limit);
-  res.json({ data: result });
+
+  // Push sort / limit / projection down to Mongo (was sorted+sliced in app
+  // memory after fetching the whole collection).
+  const docs = await col.find(safeFilter as any, {
+    sort: safeSort(sort),
+    limit: typeof limit === 'number' && limit > 0 ? limit : undefined,
+    projection: safeProjection(projection),
+  });
+  res.json({ data: docs, count: docs.length });
 });
+
+// Sort/projection keys come from the client. They're field names, never
+// operators - reject any `$`-prefixed key and coerce values to the small set
+// Mongo accepts so a malformed spec can't reach the driver.
+function safeSort(sort?: Record<string, unknown>): Record<string, 1 | -1> | undefined {
+  if (!sort || typeof sort !== 'object') return undefined;
+  const out: Record<string, 1 | -1> = {};
+  for (const [k, v] of Object.entries(sort)) {
+    if (k.startsWith('$')) continue;
+    out[k] = v === -1 || v === '-1' ? -1 : 1;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+function safeProjection(projection?: Record<string, unknown>): Record<string, 0 | 1> | undefined {
+  if (!projection || typeof projection !== 'object') return undefined;
+  const out: Record<string, 0 | 1> = {};
+  for (const [k, v] of Object.entries(projection)) {
+    if (k.startsWith('$')) continue;
+    out[k] = v ? 1 : 0;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
 
 router.get('/:collection/:id', async (req, res) => {
   const collection = req.params.collection;

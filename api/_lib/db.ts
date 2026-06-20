@@ -104,9 +104,15 @@ const OWNERSHIP: Record<CollectionName, OwnershipMode> = {
  */
 export type InsertDoc<T> = Omit<T, 'userId' | 'createdAt' | 'updatedAt'>;
 
+export interface FindOptions {
+  sort?: Record<string, 1 | -1>;
+  limit?: number;
+  projection?: Record<string, 0 | 1>;
+}
+
 export interface ScopedCollection<T extends Document = Document> {
   raw: Collection<T>;
-  find(filter?: Filter<T>): Promise<WithId<T>[]>;
+  find(filter?: Filter<T>, opts?: FindOptions): Promise<WithId<T>[]>;
   findOne(filter?: Filter<T>): Promise<WithId<T> | null>;
   findById(id: string): Promise<WithId<T> | null>;
   insertOne(doc: InsertDoc<T>): Promise<WithId<T>>;
@@ -164,9 +170,13 @@ function buildScoped<T extends Document>(uid: string, name: CollectionName): Sco
       return cached!;
     },
 
-    async find(filter = {}) {
+    async find(filter = {}, opts: FindOptions = {}) {
       const c = await col();
-      return c.find(ownFilter(filter)).toArray();
+      let cursor = c.find(ownFilter(filter));
+      if (opts.sort) cursor = cursor.sort(opts.sort);
+      if (opts.projection) cursor = cursor.project(opts.projection) as typeof cursor;
+      if (typeof opts.limit === 'number' && opts.limit > 0) cursor = cursor.limit(opts.limit);
+      return cursor.toArray();
     },
     async findOne(filter = {}) {
       const c = await col();

@@ -17,68 +17,7 @@ import {
   signOut as fbSignOut,
 } from 'firebase/auth';
 import { auth, currentIdToken } from '../firebaseClient';
-
-// Loosely-typed row. Pages cast to their concrete type (`as Mission[]`).
-// Use `unknown` so the cast doesn't trigger TS2352 (insufficient overlap).
-type Json = any;
-
-// ---------------------------------------------------------------------------
-// case conversion helpers
-// ---------------------------------------------------------------------------
-function camel(s: string): string {
-  // Frontend `id` is Mongo `_id`. Map explicitly so .eq('id', x), filters,
-  // and selected columns all hit the right field. Idempotent - `_id` stays `_id`.
-  if (s === 'id' || s === '_id') return '_id';
-  return s.replace(/_([a-z0-9])/g, (_m, c: string) => c.toUpperCase());
-}
-function snake(s: string): string {
-  // Inverse of the above - Mongo `_id` surfaces as `id` to the frontend so
-  // existing pages can read `row.id` like they did under Supabase. Idempotent.
-  if (s === '_id' || s === 'id') return 'id';
-  return s.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
-}
-function deepKeyMap(v: unknown, fn: (k: string) => string): unknown {
-  if (Array.isArray(v)) return v.map((x) => deepKeyMap(x, fn));
-  if (v && typeof v === 'object' && !(v instanceof Date)) {
-    const out: Record<string, unknown> = {};
-    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
-      // Preserve mongo operators ($in, $gte, etc.)
-      const newKey = k.startsWith('$') ? k : fn(k);
-      out[newKey] = deepKeyMap(val, fn);
-    }
-    return out;
-  }
-  return v;
-}
-const toBackend = (v: unknown) => deepKeyMap(v, camel);
-const toFrontend = (v: unknown) => deepKeyMap(v, snake);
-
-// ---------------------------------------------------------------------------
-// HTTP
-// ---------------------------------------------------------------------------
-
-// Parse a fetch response defensively. Infra layers (Cloud Run, load balancers)
-// return plain-text bodies like "Service Unavailable" on 5xx, which would make
-// res.json()/JSON.parse throw a cryptic "Unexpected token" error. Always read
-// text first, surface a clean message on non-2xx, and only parse JSON on success.
-async function readJson<T>(res: Response, fallbackErr: string): Promise<T> {
-  const txt = await res.text();
-  if (!res.ok) {
-    let detail: string | undefined;
-    try {
-      const j = txt ? (JSON.parse(txt) as { error?: string; detail?: string }) : undefined;
-      detail = j?.detail || j?.error;
-    } catch {
-      // Non-JSON body (e.g. a gateway "Service Unavailable") - fall through.
-    }
-    throw new Error(detail || `${fallbackErr} (HTTP ${res.status})`);
-  }
-  try {
-    return (txt ? JSON.parse(txt) : {}) as T;
-  } catch {
-    throw new Error(`${fallbackErr} (bad response)`);
-  }
-}
+import { camelKey as camel, toBackend, toFrontend, readJson, type Json } from './caseMap';
 
 async function call<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
   const token = await currentIdToken();
@@ -159,18 +98,28 @@ class Query<T = Json> {
 
   private async exec(): Promise<{ data: T[] | null; error: { message: string } | null; count?: number }> {
     try {
-      const arr = await call<T[]>(`/${collectionName(this.collection)}/query`, {
+      // count:'exact' + head:true is a pure count - ask the server to run a
+      // Mongo countDocuments() and skip shipping the documents entirely
+      // (previously the shim downloaded every matching row and took .length).
+      const countOnly = this.opts.head === true && this.opts.count === 'exact';
+      const token = await currentIdToken();
+      if (!token) throw new Error('Not signed in');
+      const res = await fetch(`/api/data/${collectionName(this.collection)}/query`, {
         method: 'POST',
-        body: {
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           filter: toBackend(this.filter),
           sort: this.sortKey ? { [this.sortKey.key]: this.sortKey.dir } : undefined,
           limit: this.take ?? undefined,
-        },
+          count: countOnly || undefined,
+        }),
       });
-      if (this.opts.head && this.opts.count === 'exact') {
-        return { data: null, count: arr.length, error: null };
+      const j = await readJson<{ data?: unknown; count?: number }>(res, 'Request failed');
+      if (countOnly) {
+        return { data: null, count: typeof j.count === 'number' ? j.count : 0, error: null };
       }
-      return { data: arr, count: arr.length, error: null };
+      const arr = toFrontend(j.data) as T[];
+      return { data: arr, count: typeof j.count === 'number' ? j.count : arr.length, error: null };
     } catch (err) {
       return { data: null, error: { message: err instanceof Error ? err.message : 'unknown_error' } };
     }
@@ -394,11 +343,17 @@ const storageShim = {
         try {
           const token = await currentIdToken();
           if (!token) throw new Error('Not signed in');
-          await fetch('/api/data/_storage/remove', {
+          const res = await fetch('/api/data/_storage/remove', {
             method: 'POST',
             headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ paths }),
           });
+          // Surface a failed delete (403 forbidden, 5xx, partial failure)
+          // instead of silently reporting success - callers update UI on it.
+          const j = await readJson<{ ok?: boolean; removed?: number; failed?: number }>(res, 'Remove failed');
+          if (j.failed && j.failed > 0) {
+            return { error: { message: `Failed to remove ${j.failed} file(s)` } };
+          }
           return { error: null };
         } catch (err) {
           return { error: { message: err instanceof Error ? err.message : 'remove_failed' } };
