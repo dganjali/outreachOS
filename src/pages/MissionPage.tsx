@@ -404,8 +404,31 @@ export function MissionPage() {
             <div className="empty-illo-graphic" aria-hidden>🎯</div>
             <h3>No targets yet</h3>
             <p>
-              Click <strong>Run pipeline</strong> to find targets, build evidence packs, find contacts, and draft initial emails, live, in one go. Or use <strong>Find targets</strong> if you want to drive each step manually.
+              Run the full pipeline to find companies, build evidence, surface the right
+              contacts, and draft initial emails — live, in one go. Or drive each step yourself.
             </p>
+            <div className="empty-steps" aria-hidden>
+              <span><b>1</b> Find targets</span>
+              <span><b>2</b> Research &amp; contacts</span>
+              <span><b>3</b> Drafts ready</span>
+            </div>
+            <div className="empty-illo-actions">
+              <button
+                type="button"
+                className="btn-primary go"
+                onClick={() => navigate(`/missions/${mission.id}/run`)}
+              >
+                Run pipeline
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={busy === 'targeting'}
+                onClick={findTargets}
+              >
+                {busy === 'targeting' ? 'Researching…' : 'Find targets manually'}
+              </button>
+            </div>
           </div>
         ) : (
           <Accordion

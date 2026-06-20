@@ -4306,6 +4306,41 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
   color: var(--text-muted);
   line-height: 1.5;
 }
+.empty-steps {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem 0.9rem;
+  margin-top: 1.1rem;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+.empty-steps span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.empty-steps b {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+.empty-illo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 1.35rem;
+}
 
 /* Toasts */
 .toast-stack {
