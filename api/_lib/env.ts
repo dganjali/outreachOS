@@ -81,16 +81,20 @@ export const env = {
   APP_URL: () => optional('APP_URL', 'https://outreach-os.ca'),
 };
 
-// Every var read through required() above. Kept as an explicit list so boot-time
-// validation can surface ALL missing vars at once instead of failing lazily on
-// the first request that happens to touch one.
+// Vars that every deploy must provide for the service to handle any request.
+// Validated eagerly at boot so a misconfigured deploy fails fast with all of
+// them listed at once.
+//
+// NOTE: CLOUD_TASKS_TARGET_URL / CLOUD_TASKS_SERVICE_ACCOUNT are declared with
+// required() above but are deliberately NOT in this boot set: their only
+// consumer is the unwired Cloud Tasks enqueue path (dead code), they are not
+// supplied by cloudbuild.yaml, and the service runs fine without them. They
+// still throw lazily if that path is ever wired up without them.
 export const REQUIRED_ENV = [
   'MONGODB_URI',
   'FIREBASE_PROJECT_ID',
   'GCP_PROJECT_ID',
   'GCS_BUCKET',
-  'CLOUD_TASKS_TARGET_URL',
-  'CLOUD_TASKS_SERVICE_ACCOUNT',
   'ENCRYPTION_KEY',
   'GOOGLE_CLIENT_ID',
   'GOOGLE_CLIENT_SECRET',
