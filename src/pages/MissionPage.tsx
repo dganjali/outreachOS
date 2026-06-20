@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
+import { Send } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
@@ -349,9 +350,13 @@ export function MissionPage() {
               onClick={sendAllInitial}
               title="Send the initial email to every contact that has a draft and a recipient address"
             >
-              {sendingAll
-                ? `Sending ${sendableInitials.length}…`
-                : `✈ Send all (${sendableInitials.length})`}
+              {sendingAll ? (
+                `Sending ${sendableInitials.length}…`
+              ) : (
+                <>
+                  <Send size={15} aria-hidden /> Send all ({sendableInitials.length})
+                </>
+              )}
             </button>
           )}
           <button
@@ -1065,7 +1070,13 @@ function Touch({
                     onSend(touchIndex, 'send');
                 }}
               >
-                {sending === `send:${touchIndex}` ? 'Sending…' : '✈ Send now'}
+                {sending === `send:${touchIndex}` ? (
+                  'Sending…'
+                ) : (
+                  <>
+                    <Send size={14} aria-hidden /> Send now
+                  </>
+                )}
               </button>
               <button
                 type="button"
@@ -1096,7 +1107,13 @@ function Touch({
                         onSend(touchIndex, 'send');
                     }}
                   >
-                    {sending === `send:${touchIndex}` ? 'Sending…' : '✈ Send email'}
+                    {sending === `send:${touchIndex}` ? (
+                      'Sending…'
+                    ) : (
+                      <>
+                        <Send size={14} aria-hidden /> Send email
+                      </>
+                    )}
                   </button>
                 )}
                 {!isSent && (
