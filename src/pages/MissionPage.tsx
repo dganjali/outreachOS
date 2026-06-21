@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { Send, Users } from 'lucide-react';
+import { Send, Users, Target as TargetIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
@@ -401,7 +401,7 @@ export function MissionPage() {
         <h2 style={{ marginBottom: '0.75rem' }}>Targets</h2>
         {visibleTargets.length === 0 ? (
           <div className="empty-illo">
-            <div className="empty-illo-graphic" aria-hidden>🎯</div>
+            <div className="empty-illo-graphic" aria-hidden style={{ color: 'var(--accent)' }}><TargetIcon size={24} strokeWidth={2} /></div>
             <h3>No targets yet</h3>
             <p>
               Run the full pipeline to find companies, build evidence, surface the right
