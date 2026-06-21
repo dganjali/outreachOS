@@ -144,10 +144,19 @@ export async function completeRun(scope: UserScope, id: string, output: Record<s
   });
 }
 
-export async function failRun(scope: UserScope, id: string, error: string) {
+export async function failRun(
+  scope: UserScope,
+  id: string,
+  error: string,
+  output?: Record<string, unknown>,
+) {
+  // `output` carries the same kind of decision-log telemetry as completeRun, so
+  // a FAILED run is just as debuggable as a successful one (e.g. which stage of
+  // contact discovery lost the company). Optional + back-compatible.
   await scope.collection<AgentRunDoc>('agent_runs').updateById(id, {
     status: 'failed',
     error,
+    output: output ?? null,
     completedAt: new Date(),
   });
 }
