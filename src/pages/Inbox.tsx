@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { RefreshCw, Inbox as InboxIcon, Loader2, CheckCircle2, Target } from 'lucide-react';
+import { RefreshCw, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
@@ -243,9 +243,6 @@ export function Inbox() {
         filter === 'unhandled' ? (
           // Caught up: there may still be handled replies under "all".
           <div className="panel flex flex-col items-center gap-3 px-6 py-16 text-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary ring-1 ring-inset ring-primary/20">
-              <CheckCircle2 className="h-6 w-6" strokeWidth={2} />
-            </div>
             <h3 className="text-lg font-semibold text-foreground">Inbox zero</h3>
             <p className="max-w-md text-sm leading-relaxed text-muted-foreground">
               No replies need your attention right now. New replies show up here automatically once
@@ -255,27 +252,22 @@ export function Inbox() {
               <Button variant="outline" size="sm" onClick={() => setFilter('all')}>
                 View handled replies
               </Button>
-              <Button variant="ghost" size="sm" className="gap-1.5" onClick={() => load()}>
-                <RefreshCw className="h-3.5 w-3.5" /> Refresh
+              <Button variant="ghost" size="sm" onClick={() => load()}>
+                Refresh
               </Button>
             </div>
           </div>
         ) : (
           // Truly empty: never recorded a reply.
           <div className="panel flex flex-col items-center gap-3 px-6 py-16 text-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary ring-1 ring-inset ring-primary/20">
-              <InboxIcon className="h-6 w-6" strokeWidth={2} />
-            </div>
             <h3 className="text-lg font-semibold text-foreground">No replies yet</h3>
             <p className="max-w-md text-sm leading-relaxed text-muted-foreground">
               Replies land in your Gmail inbox — OutreachOS sends from your account and never reads
               your mail. When someone writes back, it&rsquo;s recorded here, auto-classified, with a
               suggested response ready to edit and send.
             </p>
-            <Button asChild size="sm" className="btn-glow mt-1 gap-1.5 border-0 font-semibold text-primary-foreground">
-              <Link to="/missions">
-                <Target className="h-4 w-4" /> Go to missions
-              </Link>
+            <Button asChild size="sm" className="btn-glow mt-1 border-0 font-semibold text-primary-foreground">
+              <Link to="/missions">Go to missions</Link>
             </Button>
           </div>
         )

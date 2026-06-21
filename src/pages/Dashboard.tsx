@@ -14,10 +14,6 @@ import {
   Sunrise,
   Sun,
   Moon,
-  Search,
-  Sparkles,
-  Mail,
-  Send,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { supabase } from '../supabaseClient';
@@ -61,10 +57,10 @@ const PROFILE_FIELDS = ['name', 'role', 'bio', 'proof_points', 'achievements', '
 // The agent pipeline, shown on the first-run launchpad so a new user sees what
 // a mission actually does before starting one.
 const FLOW = [
-  { Icon: Search, title: 'Find targets', body: 'High-fit companies with a real reason to reach out now.' },
-  { Icon: Users, title: 'Find people', body: 'The decision-makers to email, with verified addresses.' },
-  { Icon: FileText, title: 'Research & draft', body: 'Sourced evidence turned into a personalized sequence.' },
-  { Icon: Send, title: 'Review & send', body: 'You approve; send from your own Gmail in a click.' },
+  { title: 'Find targets', body: 'High-fit companies with a real reason to reach out now.' },
+  { title: 'Find people', body: 'The decision-makers to email, with verified addresses.' },
+  { title: 'Research & draft', body: 'Sourced evidence turned into a personalized sequence.' },
+  { title: 'Review & send', body: 'You approve; send from your own Gmail in a click.' },
 ] as const;
 
 function countByMission(rows: Array<Record<string, unknown>>): Map<string, number> {
@@ -305,7 +301,6 @@ export function Dashboard() {
   // real data arrives, and snap straight to final for reduced-motion users.
   const animateNums = !reduceMotion && !loading;
   const greet = greetingFor(now);
-  const GreetIcon = greet.Icon;
 
   const responseRate = stats.contacted > 0 ? Math.round((stats.replied / stats.contacted) * 100) : null;
   const firstName = profile?.name ? profile.name.split(' ')[0] : null;
@@ -318,7 +313,6 @@ export function Dashboard() {
     const setupItems = [
       {
         done: percent >= 80,
-        icon: Sparkles,
         label: 'Sharpen your profile',
         desc: 'The agent writes in your voice — give it more to work with.',
         to: '/me',
@@ -326,7 +320,6 @@ export function Dashboard() {
       },
       {
         done: gmailConnected === true,
-        icon: Mail,
         label: 'Connect Gmail',
         desc: 'Send approved drafts straight from your own inbox.',
         to: '/settings',
@@ -334,7 +327,6 @@ export function Dashboard() {
       },
       {
         done: false,
-        icon: Target,
         label: 'Launch your first mission',
         desc: 'Tell us who to reach — the agents take it from there.',
         to: '/missions/new',
@@ -366,14 +358,8 @@ export function Dashboard() {
             </span>
             <span className="tabular-nums text-foreground/70">{timeLabel}</span>
           </span>
-          <h1 className="flex items-center gap-2.5 text-[1.6rem] font-semibold leading-tight tracking-tight text-foreground">
-            <GreetIcon
-              className="h-[1.15rem] w-[1.15rem] shrink-0 transition-colors duration-700"
-              style={{ color: `hsl(${greet.accent})` }}
-              strokeWidth={2}
-              aria-hidden
-            />
-            <span>{firstName ? `${greet.label}, ${firstName}` : greet.label}</span>
+          <h1 className="text-[1.6rem] font-semibold leading-tight tracking-tight text-foreground">
+            {firstName ? `${greet.label}, ${firstName}` : greet.label}
           </h1>
           <p className="text-sm text-muted-foreground">
             Your pipeline is empty — let's get the first emails moving.
@@ -387,12 +373,6 @@ export function Dashboard() {
             className="pointer-events-none absolute -top-10 left-1/3 h-48 w-2/3 -translate-x-1/2 rounded-full bg-primary/20 blur-[100px]"
           />
           <div className="panel relative overflow-hidden p-8 md:p-11">
-            {/* decorative pipeline glyphs, desktop only */}
-            <div aria-hidden className="pointer-events-none absolute right-6 top-1/2 hidden -translate-y-1/2 items-center gap-3 opacity-[0.12] lg:flex">
-              {[Search, Users, FileText, Send].map((Icon, i) => (
-                <Icon key={i} className="h-12 w-12 text-primary" strokeWidth={1.5} />
-              ))}
-            </div>
             <div className="relative max-w-xl">
               <span className="inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
@@ -407,15 +387,12 @@ export function Dashboard() {
               </p>
               <div className="mt-7 flex flex-wrap items-center gap-3">
                 <Button asChild size="lg" className="btn-glow gap-2 border-0 font-semibold text-primary-foreground">
-                  <Link to="/missions/new">
-                    <Plus className="h-4 w-4" /> Start your first mission
-                  </Link>
+                  <Link to="/missions/new">Start your first mission</Link>
                 </Button>
                 <Link
                   to="/me"
                   className="inline-flex items-center gap-2 rounded-lg border border-border bg-secondary/40 px-3.5 py-2 text-sm text-muted-foreground transition-colors hover:border-border/80 hover:text-foreground"
                 >
-                  <Sparkles className="h-3.5 w-3.5 text-primary" aria-hidden />
                   Profile <span className="text-foreground/70">{percent}%</span>
                 </Link>
               </div>
@@ -431,14 +408,8 @@ export function Dashboard() {
               <div className="grid gap-5 sm:grid-cols-4 sm:gap-3">
                 {FLOW.map((step, i) => (
                   <div key={step.title} className="relative flex flex-col gap-2.5">
-                    {i < FLOW.length - 1 && (
-                      <ArrowRight
-                        aria-hidden
-                        className="absolute -right-2 top-3 hidden h-4 w-4 text-muted-foreground/30 sm:block"
-                      />
-                    )}
-                    <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary ring-1 ring-inset ring-primary/20">
-                      <step.Icon className="h-5 w-5" strokeWidth={2} />
+                    <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-sm font-semibold tabular-nums text-primary ring-1 ring-inset ring-primary/20">
+                      {i + 1}
                     </span>
                     <div>
                       <div className="text-sm font-semibold text-foreground">{step.title}</div>
@@ -460,51 +431,43 @@ export function Dashboard() {
               }
             />
             <div className="panel divide-y divide-border/70 overflow-hidden">
-              {setupItems.map((item) => {
-                const Icon = item.done ? CheckCircle2 : item.icon;
-                return (
-                  <Link
-                    key={item.label}
-                    to={item.to}
-                    className="group flex items-center gap-3 p-3.5 transition-colors hover:bg-secondary/40"
+              {setupItems.map((item, i) => (
+                <Link
+                  key={item.label}
+                  to={item.to}
+                  className="group flex items-center gap-3 p-3.5 transition-colors hover:bg-secondary/40"
+                >
+                  <span
+                    className={cn(
+                      'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sm font-semibold tabular-nums ring-1 ring-inset transition-colors',
+                      item.done
+                        ? 'bg-primary/15 text-primary ring-primary/30'
+                        : 'bg-secondary/50 text-muted-foreground ring-border/70 group-hover:text-foreground'
+                    )}
                   >
+                    {i + 1}
+                  </span>
+                  <div className="min-w-0 flex-1">
                     <span
                       className={cn(
-                        'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset transition-colors',
-                        item.done
-                          ? 'bg-primary/10 text-primary ring-primary/20'
-                          : 'bg-secondary/50 text-muted-foreground ring-border/70 group-hover:text-foreground'
+                        'block truncate text-sm font-semibold',
+                        item.done ? 'text-muted-foreground line-through' : 'text-foreground'
                       )}
                     >
-                      <Icon className="h-4 w-4" strokeWidth={2} />
+                      {item.label}
                     </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
-                        <span
-                          className={cn(
-                            'truncate text-sm font-semibold',
-                            item.done ? 'text-muted-foreground line-through' : 'text-foreground'
-                          )}
-                        >
-                          {item.label}
-                        </span>
-                      </div>
-                      <p className="mt-0.5 truncate text-xs text-muted-foreground">{item.desc}</p>
-                    </div>
-                    <span
-                      className={cn(
-                        'inline-flex shrink-0 items-center gap-1 text-xs font-medium',
-                        item.done ? 'text-muted-foreground' : 'text-muted-foreground group-hover:text-primary'
-                      )}
-                    >
-                      {item.cta}
-                      {!item.done && (
-                        <ArrowUpRight className="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
-                      )}
-                    </span>
-                  </Link>
-                );
-              })}
+                    <p className="mt-0.5 truncate text-xs text-muted-foreground">{item.desc}</p>
+                  </div>
+                  <span
+                    className={cn(
+                      'shrink-0 text-xs font-medium',
+                      item.done ? 'text-muted-foreground' : 'text-muted-foreground group-hover:text-primary'
+                    )}
+                  >
+                    {item.cta}
+                  </span>
+                </Link>
+              ))}
             </div>
             {gmailConnected === null && (
               <p className="px-1 text-[11px] text-muted-foreground/70">
@@ -572,14 +535,8 @@ export function Dashboard() {
           <span className="tabular-nums text-foreground/70">{timeLabel}</span>
         </span>
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-          <h1 className="flex items-center gap-2.5 text-[1.6rem] font-semibold leading-tight tracking-tight text-foreground">
-            <GreetIcon
-              className="h-[1.15rem] w-[1.15rem] shrink-0 transition-colors duration-700"
-              style={{ color: `hsl(${greet.accent})` }}
-              strokeWidth={2}
-              aria-hidden
-            />
-            <span>{firstName ? `${greet.label}, ${firstName}` : greet.label}</span>
+          <h1 className="text-[1.6rem] font-semibold leading-tight tracking-tight text-foreground">
+            {firstName ? `${greet.label}, ${firstName}` : greet.label}
           </h1>
         </div>
         <p className="text-sm text-muted-foreground">
@@ -747,10 +704,7 @@ export function Dashboard() {
           <section className="flex flex-col gap-3">
             <SectionHeader title="Recent activity" />
             {runs.length === 0 ? (
-              <div className="panel flex flex-col items-center gap-2 px-3.5 py-8 text-center">
-                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-secondary/60 text-muted-foreground ring-1 ring-inset ring-border/70">
-                  <Zap className="h-4 w-4" strokeWidth={2} />
-                </span>
+              <div className="panel flex flex-col items-center gap-1.5 px-3.5 py-8 text-center">
                 <p className="text-sm font-medium text-foreground/90">No activity yet</p>
                 <p className="text-xs leading-relaxed text-muted-foreground">
                   Agent runs — targeting, research, drafting — show up here as they happen.
