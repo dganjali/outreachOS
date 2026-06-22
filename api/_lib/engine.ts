@@ -73,9 +73,17 @@ export interface CritiqueOutput {
 
 export interface AssembledContext {
   mode: string;
-  recipient: { name: string; role: string; company: string };
-  /** The sender's identity - used to guarantee a real sign-off on every email. */
-  sender?: { name: string | null; role?: string | null; organization?: string | null };
+  /**
+   * The recipient. `headline`/`location` come from their LinkedIn/public profile
+   * and are background for relevance + tone only - NOT citable facts (the writer
+   * may still assert only `allowedFacts`).
+   */
+  recipient: { name: string; role: string; company: string; headline?: string | null; location?: string | null };
+  /**
+   * The sender's identity - used to guarantee a real sign-off on every email.
+   * `headline` is their LinkedIn one-liner (background positioning, not a claim).
+   */
+  sender?: { name: string | null; role?: string | null; organization?: string | null; headline?: string | null };
   missionGoal: string;
   audience: string;
   whyNow?: string;
@@ -242,14 +250,24 @@ export function buildDraftUserPrompt(ctx: AssembledContext): string {
   );
 
   const senderName = ctx.sender?.name?.trim();
+  const senderHeadline = ctx.sender?.headline?.trim();
   const senderLine = senderName
-    ? `SENDER (sign off as this person)\nName: ${senderName}${ctx.sender?.role ? `\nRole: ${ctx.sender.role}` : ''}${ctx.sender?.organization ? `\nOrganization: ${ctx.sender.organization}` : ''}`
+    ? `SENDER (sign off as this person)\nName: ${senderName}${ctx.sender?.role ? `\nRole: ${ctx.sender.role}` : ''}${ctx.sender?.organization ? `\nOrganization: ${ctx.sender.organization}` : ''}${senderHeadline ? `\nLinkedIn headline: ${senderHeadline}` : ''}`
     : 'SENDER: name unknown - end with a closing line ("Best,") and leave the name line blank (do NOT write a placeholder).';
+
+  // Recipient background (headline/location) helps the writer tailor relevance
+  // and tone, but it is NOT in ALLOWED FACTS, so flag it as non-citable.
+  const recipHeadline = ctx.recipient.headline?.trim();
+  const recipLocation = ctx.recipient.location?.trim();
+  const recipBackground =
+    recipHeadline || recipLocation
+      ? `\nBackground (for relevance + tone only, NOT a citable fact):${recipHeadline ? `\n- LinkedIn headline: ${recipHeadline}` : ''}${recipLocation ? `\n- Location: ${recipLocation}` : ''}`
+      : '';
 
   return [
     `MODE: ${ctx.mode}`,
     '',
-    `RECIPIENT\nName: ${ctx.recipient.name}\nRole: ${ctx.recipient.role}\nCompany: ${ctx.recipient.company}`,
+    `RECIPIENT\nName: ${ctx.recipient.name}\nRole: ${ctx.recipient.role}\nCompany: ${ctx.recipient.company}${recipBackground}`,
     '',
     senderLine,
     '',

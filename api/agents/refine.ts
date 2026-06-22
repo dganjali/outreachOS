@@ -18,11 +18,18 @@ import { emptyStyleProfile, type PersonaDoc, type StyleProfile } from '../../sha
 interface RefineOut {
   subject: string;
   body: string;
+  // One short sentence on what changed and why - doubles as inline feedback in
+  // the email editor. Optional so older callers/parses still satisfy the schema.
+  note?: string;
 }
 
 const SCHEMA = {
   type: 'object',
-  properties: { subject: { type: 'string' }, body: { type: 'string' } },
+  properties: {
+    subject: { type: 'string' },
+    body: { type: 'string' },
+    note: { type: 'string' },
+  },
   required: ['subject', 'body'],
 } as const;
 
@@ -61,8 +68,8 @@ export default async function handler(req: Request, res: Response) {
 
   const system =
     mode === 'span'
-      ? `You edit one cold outreach email. Rewrite ONLY the highlighted span to satisfy the instruction; reproduce the rest of the body EXACTLY as given (no other changes). Preserve the sender's voice. Output the FULL updated subject + body as JSON.`
-      : `You rewrite one cold outreach email to satisfy the instruction while preserving the sender's voice and any factual claims. Keep it tight and grounded - do not invent facts. Output the updated subject + body as JSON.`;
+      ? `You edit one cold outreach email. Rewrite ONLY the highlighted span to satisfy the instruction; reproduce the rest of the body EXACTLY as given (no other changes). Preserve the sender's voice. Also write a "note": ONE short sentence (max ~15 words), addressed to the sender, on what you changed and why. Output the FULL updated subject + body plus the note as JSON.`
+      : `You rewrite one cold outreach email to satisfy the instruction while preserving the sender's voice and any factual claims. Keep it tight and grounded - do not invent facts. Also write a "note": ONE short sentence (max ~15 words), addressed to the sender, on what you changed and why. Output the updated subject + body plus the note as JSON.`;
 
   const userPrompt = [
     `SENDER STYLE:\n${styleBlock(sp)}`,
@@ -97,6 +104,7 @@ export default async function handler(req: Request, res: Response) {
       instruction,
       subject: r.data.subject ?? subject ?? '',
       body: r.data.body,
+      note: r.data.note?.trim() || null,
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'unknown_error';

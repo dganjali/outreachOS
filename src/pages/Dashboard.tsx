@@ -51,6 +51,39 @@ const RUN_LABEL: Record<string, string> = {
   parse_resume: 'Parsed a résumé',
 };
 
+// A "no contacts found" run isn't a crash - the search ran fine, it just couldn't
+// confirm a reachable person for that company. Plain-English the stage it stopped
+// at so the row reads as an outcome, not an error.
+const DROP_STAGE_LABEL: Record<string, string> = {
+  no_domain: "Couldn't find the company's email domain to search.",
+  no_candidates: 'No matching people surfaced in the search.',
+  no_candidates_kept: 'Found people, but none fit the target role.',
+  no_email_resolved: 'Found the right people, but no reachable address.',
+};
+
+type RunTone = 'running' | 'failed' | 'empty' | 'done';
+
+// Decide how an agent run reads in the feed. The key move: a `no_contacts_found`
+// failure is surfaced as a calm "no contacts" outcome (amber), not an alarming
+// red "failed" - it's the expected result when a company has no reachable person.
+function describeRun(r: AgentRun): { label: string; tone: RunTone; tag?: string; title?: string } {
+  const base = RUN_LABEL[r.agent_type] ?? r.agent_type;
+  if (r.status === 'running') return { label: base, tone: 'running' };
+  if (r.status === 'failed') {
+    if (r.error === 'no_contacts_found') {
+      const stage = typeof r.output?.drop_stage === 'string' ? r.output.drop_stage : undefined;
+      return {
+        label: 'No contacts found',
+        tone: 'empty',
+        tag: 'no contacts',
+        title: (stage && DROP_STAGE_LABEL[stage]) || 'The search found no reachable contact for this company.',
+      };
+    }
+    return { label: base, tone: 'failed', tag: 'failed', title: r.error ?? undefined };
+  }
+  return { label: base, tone: 'done' };
+}
+
 // Fields that make a profile "sharp enough" for good drafts.
 const PROFILE_FIELDS = ['name', 'role', 'bio', 'proof_points', 'achievements', 'metrics', 'linkedin_url', 'writing_tone'] as const;
 
@@ -712,21 +745,29 @@ export function Dashboard() {
               </div>
             ) : (
               <div className="panel divide-y divide-border/60 overflow-hidden">
-                {runs.map((r) => (
-                  <div key={r.id} className="flex items-center gap-2.5 px-3.5 py-2.5 transition-colors hover:bg-secondary/30">
-                    <StatusDot status={r.status} />
-                    <span className="min-w-0 flex-1 truncate text-[13px] text-foreground/90">
-                      {RUN_LABEL[r.agent_type] ?? r.agent_type}
-                    </span>
-                    {r.status === 'running' && (
-                      <span className="shrink-0 text-[11px] font-medium text-primary">running…</span>
-                    )}
-                    {r.status === 'failed' && (
-                      <span className="shrink-0 text-[11px] font-medium text-destructive">failed</span>
-                    )}
-                    <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{timeAgo(r.started_at)}</span>
-                  </div>
-                ))}
+                {runs.map((r) => {
+                  const v = describeRun(r);
+                  return (
+                    <div
+                      key={r.id}
+                      title={v.title}
+                      className="flex items-center gap-2.5 px-3.5 py-2.5 transition-colors hover:bg-secondary/30"
+                    >
+                      <StatusDot tone={v.tone} />
+                      <span className="min-w-0 flex-1 truncate text-[13px] text-foreground/90">{v.label}</span>
+                      {v.tone === 'running' && (
+                        <span className="shrink-0 text-[11px] font-medium text-primary">running…</span>
+                      )}
+                      {v.tone === 'failed' && (
+                        <span className="shrink-0 text-[11px] font-medium text-destructive">{v.tag}</span>
+                      )}
+                      {v.tone === 'empty' && (
+                        <span className="shrink-0 text-[11px] font-medium text-warning">{v.tag}</span>
+                      )}
+                      <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{timeAgo(r.started_at)}</span>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </section>
@@ -774,8 +815,8 @@ function MissionStat({ icon: Icon, value, label }: { icon: ComponentType<{ class
   );
 }
 
-function StatusDot({ status }: { status: string }) {
-  if (status === 'running') {
+function StatusDot({ tone }: { tone: RunTone }) {
+  if (tone === 'running') {
     return (
       <span className="relative flex h-2 w-2 shrink-0" aria-hidden>
         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-60" />
@@ -783,12 +824,9 @@ function StatusDot({ status }: { status: string }) {
       </span>
     );
   }
-  return (
-    <span
-      aria-hidden
-      className={cn('h-2 w-2 shrink-0 rounded-full', status === 'failed' ? 'bg-destructive' : 'bg-muted-foreground/40')}
-    />
-  );
+  const color =
+    tone === 'failed' ? 'bg-destructive' : tone === 'empty' ? 'bg-warning' : 'bg-muted-foreground/40';
+  return <span aria-hidden className={cn('h-2 w-2 shrink-0 rounded-full', color)} />;
 }
 
 function StatCell({

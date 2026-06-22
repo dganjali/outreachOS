@@ -125,7 +125,14 @@ export default async function handler(req: Request, res: Response) {
     const ranked = rankCandidates(suggestions, { icp, sizeTier, target, mission, profile });
 
     const resolved = await resolvePoolWithBudget(ranked.rows, domain, target._id, wanted);
-    const rows = resolved.rows;
+
+    // Start with the deliverable (verified/likely email) rows, then - if we still
+    // haven't reached `wanted` - top up with the best email-less people discovery
+    // surfaced. A company where we found the right person but couldn't VERIFY an
+    // address is far more useful shown (with their LinkedIn / likely pattern) than
+    // dropped: the user can still reach them. Only a company where discovery found
+    // nobody at all comes back empty.
+    const rows = fillWithDisplayOnly(resolved.rows, ranked.rows, wanted);
 
     if (rows.length === 0) {
       // Categorize WHERE the company was lost so a "No contacts" drop is
@@ -158,8 +165,13 @@ export default async function handler(req: Request, res: Response) {
       .collection<ContactDoc>('contacts')
       .insertMany(rows.map((r) => ({ ...r, _id: newId() })) as InsertDoc<ContactDoc>[]);
 
+    const withEmail = rows.filter((r) => !!r.email).length;
     await completeRun(scope, run._id, {
       count: inserted.length,
+      // Split the deliverable rows from the display-only (no verified email) ones
+      // so the decision log shows when a company was surfaced on people alone.
+      withEmail,
+      displayOnly: inserted.length - withEmail,
       source: discoverySource,
       // Decision-log summary (CONTACT_ENGINE.md §9) - observability for why the
       // pool looked the way it did, without per-contact schema churn.
@@ -491,6 +503,37 @@ export function rankCandidates(
   }));
 
   return { rows, droppedAboveCap, droppedDisqualified, usedFallback };
+}
+
+/**
+ * Combine the resolved (deliverable-email) rows with the best remaining ranked
+ * people so a company that yielded real candidates is never returned empty just
+ * because no address could be VERIFIED. Verified/likely-email rows always rank
+ * first (they came from `resolved`); display-only rows - LinkedIn link / likely
+ * pattern, `emailStatus: 'none'` - backfill in rank order up to `wanted`.
+ * Dedupes on linkedinUrl|name so a resolved row and its source candidate can't
+ * both appear.
+ */
+export function fillWithDisplayOnly(
+  resolved: ContactRow[],
+  ranked: ContactRow[],
+  wanted: number
+): ContactRow[] {
+  const out = [...resolved];
+  if (out.length >= wanted) return out;
+  const seen = new Set(out.map(contactKey));
+  for (const row of ranked) {
+    if (out.length >= wanted) break;
+    const key = contactKey(row);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(row);
+  }
+  return out;
+}
+
+function contactKey(r: ContactRow): string {
+  return `${(r.linkedinUrl ?? '').trim().toLowerCase()}|${r.name.trim().toLowerCase()}`;
 }
 
 // ---------------------------------------------------------------------------

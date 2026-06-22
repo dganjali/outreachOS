@@ -212,6 +212,75 @@ function quoteIfNeeded(s: string): string {
   return /[",<>@]/.test(s) ? `"${s.replace(/"/g, '\\"')}"` : s;
 }
 
+// Strip anything that could break out of a header or the filename="" param
+// (CR/LF/quotes/backslashes), collapse to a safe set, and bound the length.
+function sanitizeFilename(name: string): string {
+  const cleaned = (name || 'attachment')
+    .replace(/[\r\n"\\]+/g, '')
+    .replace(/[^\w.\- ]+/g, '_')
+    .trim()
+    .slice(0, 120);
+  return cleaned || 'attachment';
+}
+
+// Build a multipart/mixed message: the text body as the first part, then each
+// attachment base64-encoded (lines wrapped at 76 chars per RFC 2045). Only used
+// when there's at least one attachment; the no-attachment path is untouched.
+// Exported for unit testing (header-injection + structure).
+export function buildMimeMultipart(args: {
+  fromEmail: string;
+  fromName?: string;
+  toEmail: string;
+  subject: string;
+  body: string;
+  inReplyTo?: string;
+  references?: string;
+  attachments?: MailAttachment[];
+}): string {
+  const fromEmail = sanitizeHeader(args.fromEmail);
+  const toEmail = sanitizeHeader(args.toEmail);
+  const fromName = args.fromName ? sanitizeHeader(args.fromName) : undefined;
+  const fromHeader = fromName ? `${quoteIfNeeded(fromName)} <${fromEmail}>` : fromEmail;
+  const boundary = `=_oos_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
+
+  const lines: string[] = [
+    `From: ${fromHeader}`,
+    `To: ${toEmail}`,
+    `Subject: ${encodeRfc2047(sanitizeHeader(args.subject))}`,
+    'MIME-Version: 1.0',
+  ];
+  if (args.inReplyTo) lines.push(`In-Reply-To: ${sanitizeHeader(args.inReplyTo)}`);
+  if (args.references) lines.push(`References: ${sanitizeHeader(args.references)}`);
+  lines.push(`Content-Type: multipart/mixed; boundary="${boundary}"`, '');
+
+  // Body part.
+  lines.push(
+    `--${boundary}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    'Content-Transfer-Encoding: 7bit',
+    '',
+    args.body.replace(/\r?\n/g, '\r\n'),
+  );
+
+  // Attachment parts.
+  for (const att of args.attachments ?? []) {
+    const name = sanitizeFilename(att.filename);
+    const mime = sanitizeHeader(att.mimeType || 'application/octet-stream');
+    const b64 = att.content.toString('base64').replace(/(.{76})/g, '$1\r\n');
+    lines.push(
+      `--${boundary}`,
+      `Content-Type: ${mime}; name="${name}"`,
+      'Content-Transfer-Encoding: base64',
+      `Content-Disposition: attachment; filename="${name}"`,
+      '',
+      b64,
+    );
+  }
+
+  lines.push(`--${boundary}--`, '');
+  return lines.join('\r\n');
+}
+
 function encodeRfc2047(s: string): string {
   // eslint-disable-next-line no-control-regex
   if (/^[\x00-\x7F]*$/.test(s)) return s;
@@ -220,6 +289,12 @@ function encodeRfc2047(s: string): string {
 
 function base64Url(s: string): string {
   return Buffer.from(s, 'utf8').toString('base64url');
+}
+
+export interface MailAttachment {
+  filename: string;
+  mimeType: string;
+  content: Buffer;
 }
 
 interface SendArgs {
@@ -231,10 +306,13 @@ interface SendArgs {
   body: string;
   threadId?: string;
   inReplyTo?: string;
+  attachments?: MailAttachment[];
 }
 
 export async function sendNow(args: SendArgs): Promise<{ messageId: string; threadId: string }> {
-  const raw = base64Url(buildRfc2822(args));
+  // Plain text/plain when there's nothing to attach (unchanged path); switch to
+  // multipart/mixed only when an attachment is present.
+  const raw = base64Url(args.attachments?.length ? buildMimeMultipart(args) : buildRfc2822(args));
   const r = await fetch(`${GMAIL_API}/users/me/messages/send`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${args.accessToken}`, 'Content-Type': 'application/json' },

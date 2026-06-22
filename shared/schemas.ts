@@ -338,6 +338,10 @@ export interface SentMessageDoc extends BaseDoc {
   failedReason: string | null;
   profileVersionId: string | null;
   profileRefs: Array<{ field: string; snippet: string }>;
+  // Whether to attach the sender's résumé when this touch is actually sent.
+  // Set for queued/scheduled sends so the cron knows to re-attach at send time
+  // (the bytes aren't persisted on the row - only the intent). Optional/legacy.
+  attachResume?: boolean;
 }
 
 export interface ReplyDoc extends BaseDoc {

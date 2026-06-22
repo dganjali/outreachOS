@@ -171,6 +171,7 @@ export interface SentMessage {
   failed_reason: string | null;
   profile_version_id: string | null;
   profile_refs: ProfileRef[];
+  attach_resume?: boolean;
   created_at: string;
 }
 

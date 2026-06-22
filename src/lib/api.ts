@@ -80,7 +80,7 @@ export const agents = {
       { persona_id }
     ),
   refine: (input: { persona_id?: string; subject?: string; body: string; instruction: string; span?: string }) =>
-    authedFetch<{ run_id: string; mode: 'span' | 'structural'; instruction: string; subject: string; body: string }>(
+    authedFetch<{ run_id: string; mode: 'span' | 'structural'; instruction: string; subject: string; body: string; note: string | null }>(
       '/api/agents/refine',
       input
     ),
@@ -151,6 +151,8 @@ export const gmail = {
     // ISO 8601. When set, the touch is queued for the cron to send at that time
     // instead of going out now (mode is treated as 'send' once it fires).
     scheduled_send_at?: string,
+    // Attach the sender's résumé to this touch.
+    attach_resume?: boolean,
   ) =>
     authedFetch<{
       sent_message_id: string;
@@ -160,7 +162,7 @@ export const gmail = {
       gmail_thread_id: string;
       gmail_draft_id?: string;
       warnings?: string[];
-    }>('/api/gmail/send', { sequence_id, touch_index, mode, to_override, scheduled_send_at }),
+    }>('/api/gmail/send', { sequence_id, touch_index, mode, to_override, scheduled_send_at, attach_resume }),
   reply: (reply_id: string, subject: string, body: string) =>
     authedFetch<{ ok: boolean; gmail_message_id: string; gmail_thread_id: string }>('/api/gmail/reply', {
       reply_id,

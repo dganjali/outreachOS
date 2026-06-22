@@ -102,8 +102,21 @@ export async function assembleDraftContext(
 
   const ctx: AssembledContext = {
     mode: mission.mode ?? 'sales',
-    recipient: { name: contact.name, role: contact.role, company: target.companyName },
-    sender: { name: profile?.name ?? null, role: profile?.role ?? null, organization: profile?.organization ?? null },
+    recipient: {
+      name: contact.name,
+      role: contact.role,
+      company: target.companyName,
+      // Their LinkedIn self-description + where they sit - lets the writer tailor
+      // relevance/tone instead of personalizing on name+role+company alone.
+      headline: contact.headline ?? null,
+      location: contact.location ?? null,
+    },
+    sender: {
+      name: profile?.name ?? null,
+      role: profile?.role ?? null,
+      organization: profile?.organization ?? null,
+      headline: senderHeadline(profile),
+    },
     missionGoal: mission.goal,
     audience: mission.targetDescription,
     whyNow: target.whyNow ?? undefined,
@@ -161,6 +174,16 @@ async function fetchProfile(scope: Scope, cache?: DraftContextCache): Promise<Pr
   if (!cache) return scope.collection<ProfileDoc>('profiles').findOne();
   if (!cache.profile) cache.profile = scope.collection<ProfileDoc>('profiles').findOne();
   return cache.profile;
+}
+
+/**
+ * The sender's LinkedIn headline (one-line positioning), set by the enrich-profile
+ * agent into `profile.linkedinData.headline`. `linkedinData` is loosely typed
+ * (Record<string, unknown>), so read it defensively. Returns null when absent.
+ */
+function senderHeadline(profile: ProfileDoc | null): string | null {
+  const raw = (profile?.linkedinData as { headline?: unknown } | null | undefined)?.headline;
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : null;
 }
 
 async function fetchContextAllowedFacts(

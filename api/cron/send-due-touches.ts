@@ -7,6 +7,7 @@ import type { Request, Response } from 'express';
 import { adminDb, forUser } from '../_lib/db';
 import { requireCronSecret } from '../_lib/auth';
 import { getActiveAccessToken, sendNow } from '../_lib/gmail';
+import { getResumeAttachment } from '../_lib/attachments';
 import { scheduleFollowups } from '../_lib/sequencing';
 import { evaluateSend } from '../_lib/deliverability';
 import { recordOutcome } from '../_lib/outcomes';
@@ -116,6 +117,20 @@ export default async function handler(req: Request, res: Response) {
       const prior = await sentCol.findOne({ sequenceId: msg.sequenceId, touchIndex: msg.touchIndex - 1, status: 'sent' });
       const prof = await scope.collection<ProfileDoc>('profiles').findOne();
 
+      // Re-attach the résumé if this touch was queued with that intent. The bytes
+      // aren't persisted on the row, so we re-load the current résumé at send
+      // time; a missing/unreadable file just sends without the attachment rather
+      // than failing the whole touch.
+      let attachments;
+      if (msg.attachResume) {
+        try {
+          const resume = await getResumeAttachment(scope);
+          if (resume) attachments = [resume];
+        } catch {
+          // best-effort: send without the attachment
+        }
+      }
+
       const result = await sendNow({
         accessToken: tok.accessToken,
         fromEmail: tok.email ?? '',
@@ -125,6 +140,7 @@ export default async function handler(req: Request, res: Response) {
         body: msg.body,
         threadId: prior?.gmailThreadId ?? undefined,
         inReplyTo: prior?.gmailMessageId ? `<${prior.gmailMessageId}>` : undefined,
+        attachments,
       });
 
       const sentAt = new Date();

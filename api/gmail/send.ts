@@ -1,7 +1,8 @@
 import type { Request, Response } from 'express';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { forUser, newId, type InsertDoc } from '../_lib/db';
-import { getActiveAccessToken, sendNow, isValidEmailAddress } from '../_lib/gmail';
+import { getActiveAccessToken, sendNow, isValidEmailAddress, type MailAttachment } from '../_lib/gmail';
+import { getResumeAttachment, hasResume } from '../_lib/attachments';
 import { scheduleFollowups, isSuppressed } from '../_lib/sequencing';
 import { evaluateSend } from '../_lib/deliverability';
 import { recordOutcome } from '../_lib/outcomes';
@@ -18,6 +19,7 @@ interface SendBody {
   mode?: 'draft' | 'send';
   to_override?: string;
   scheduled_send_at?: string; // ISO 8601 - queue for the cron instead of sending now
+  attach_resume?: boolean; // attach the sender's résumé to this touch
 }
 
 export default async function handler(req: Request, res: Response) {
@@ -30,6 +32,7 @@ export default async function handler(req: Request, res: Response) {
   const sequenceId = body.sequence_id;
   const touchIndex = body.touch_index ?? 0;
   const mode = body.mode ?? 'draft';
+  const attachResume = body.attach_resume === true;
   if (!sequenceId) return res.status(400).json({ error: 'missing_sequence_id' });
 
   // Scheduled send: queue the touch for the send-due-touches cron instead of
@@ -92,6 +95,26 @@ export default async function handler(req: Request, res: Response) {
 
   const profile = await scope.collection<ProfileDoc>('profiles').findOne();
 
+  // Résumé attachment. Validate up-front (immediate AND scheduled) so the user
+  // learns now if they asked to attach but have none on file. The bytes are only
+  // loaded for an immediate send; a scheduled send persists the intent and the
+  // cron re-loads the résumé at actual send time.
+  let resumeAttachment: MailAttachment | null = null;
+  if (attachResume) {
+    if (mode === 'send' && !scheduledSendAt) {
+      try {
+        resumeAttachment = await getResumeAttachment(scope);
+      } catch {
+        return res.status(400).json({ error: 'resume_unreadable', message: 'Could not read your résumé file. Re-upload it in your profile.' });
+      }
+      if (!resumeAttachment) {
+        return res.status(400).json({ error: 'no_resume_on_file', message: 'No résumé on file. Upload one in your profile first.' });
+      }
+    } else if (!(await hasResume(scope))) {
+      return res.status(400).json({ error: 'no_resume_on_file', message: 'No résumé on file. Upload one in your profile first.' });
+    }
+  }
+
   // Deliverability gate for real, immediate sends (scheduled sends are gated by
   // the send-due-touches cron at actual send time). Blocks spam/abuse/over-cap;
   // soft warnings ride back on the success response for the UI to show.
@@ -152,6 +175,7 @@ export default async function handler(req: Request, res: Response) {
     failedReason: null,
     profileVersionId: seq.profileVersionId ?? null,
     profileRefs: touchRefs,
+    attachResume,
   };
 
   let sentRowId: string;
@@ -186,6 +210,7 @@ export default async function handler(req: Request, res: Response) {
       body: bodyText,
       threadId: threadId ?? undefined,
       inReplyTo: priorMessageId ?? undefined,
+      attachments: resumeAttachment ? [resumeAttachment] : undefined,
     };
 
     // Drafts are kept in OutreachOS only - pushing them into the user's Gmail

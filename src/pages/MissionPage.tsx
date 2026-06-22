@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { Send } from 'lucide-react';
+import { Send, Sparkles, Lock, Undo2, Paperclip } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { useConfirm } from '../context/ConfirmContext';
 import { agents, gmail } from '../lib/api';
+import { isPaidPlan } from '../../shared/plans';
 import { asScore } from '../lib/score';
 import { CsvImport } from '../components/CsvImport';
 import { AutopilotPanel } from '../components/AutopilotPanel';
@@ -27,9 +28,20 @@ const MODE_LABEL: Record<string, string> = {
   sales: 'Cold Sales',
 };
 
+// Turn raw agent error codes into something a person can read. Falls through to
+// the original message for anything we don't have a friendlier line for.
+function humanizeAgentError(msg: string): string {
+  if (msg.includes('no_contacts_found'))
+    return 'No reachable contact found for this company yet. Try refreshing the evidence pack, or move on to another target.';
+  if (msg === 'agent_failed') return 'That step hit an error. Please try again in a moment.';
+  return msg;
+}
+
 export function MissionPage() {
   const { id } = useParams<{ id: string }>();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  // AI rewrite + feedback in the email editor is a paid feature.
+  const aiEnabled = isPaidPlan(profile?.plan, profile?.plan_status);
   const confirm = useConfirm();
   const navigate = useNavigate();
   const [mission, setMission] = useState<Mission | null>(null);
@@ -50,6 +62,24 @@ export function MissionPage() {
   const [activeTargetId, setActiveTargetId] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Whether the user has a résumé on file - gates the "Attach résumé" send option.
+  const [hasResume, setHasResume] = useState(false);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    supabase
+      .from('profile_assets')
+      .select('id')
+      .eq('kind', 'resume')
+      .limit(1)
+      .then(({ data }) => {
+        if (!cancelled) setHasResume((data ?? []).length > 0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
 
   const loadMission = useCallback(async () => {
     if (!id || !user?.id) return;
@@ -201,7 +231,7 @@ export function MissionPage() {
     try {
       return await fn();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed');
+      setError(humanizeAgentError(err instanceof Error ? err.message : 'Failed'));
       return null;
     } finally {
       setBusy(null);
@@ -398,7 +428,10 @@ export function MissionPage() {
       )}
 
       <section>
-        <h2 style={{ marginBottom: '0.75rem' }}>Targets</h2>
+        <h2 className="targets-heading">
+          Targets
+          {visibleTargets.length > 0 && <span className="targets-count">{visibleTargets.length}</span>}
+        </h2>
         {visibleTargets.length === 0 ? (
           <div className="empty-illo">
             <h3>No targets yet</h3>
@@ -449,18 +482,25 @@ export function MissionPage() {
                   <AccordionTrigger className="target-trigger">
                     <span className="target-summary">
                       <span className="target-summary-main">
-                        <span className="target-summary-name">{t.company_name}</span>
-                        <span className="target-summary-chips">
+                        <span className="target-summary-top">
                           {score != null && (
                             <span className="target-score" title="Fit score">
                               {score}
                             </span>
                           )}
+                          <span className="target-summary-name">{t.company_name}</span>
                           {t.signal_type && <span className="signal-pill subtle">{t.signal_type}</span>}
+                        </span>
+                        <span className="target-summary-sub">
+                          {t.domain && <span className="target-summary-domain">{t.domain}</span>}
+                          {t.industry && <span>{t.industry}</span>}
+                          {typeof t.employee_count === 'number' && (
+                            <span>{t.employee_count.toLocaleString()} ppl</span>
+                          )}
                         </span>
                       </span>
                       <span className="target-summary-meta">
-                        <span>
+                        <span className={contacts.length > 0 ? 'target-summary-contacts' : 'target-summary-none'}>
                           {contacts.length > 0
                             ? `${contacts.length} contact${contacts.length === 1 ? '' : 's'}`
                             : 'No contacts'}
@@ -478,12 +518,8 @@ export function MissionPage() {
                       <div className="target-content-meta">
                         {t.domain && (
                           <a href={`https://${t.domain}`} target="_blank" rel="noreferrer" className="target-domain">
-                            {t.domain} ↗
+                            Visit {t.domain} ↗
                           </a>
-                        )}
-                        {t.industry && <span className="signal-pill subtle">{t.industry}</span>}
-                        {typeof t.employee_count === 'number' && (
-                          <span className="signal-pill subtle">{t.employee_count.toLocaleString()} ppl</span>
                         )}
                       </div>
                       <div className="target-content-controls">
@@ -538,7 +574,7 @@ export function MissionPage() {
                   </div>
 
                   {pack && pack.bullets.length > 0 && (
-                    <details className="evidence-pack-collapsible" open={contacts.length === 0}>
+                    <details className="evidence-pack-collapsible">
                       <summary>Evidence pack ({pack.bullets.length} bullets)</summary>
                       <ol>
                         {pack.bullets.map((b, i) => (
@@ -625,7 +661,7 @@ export function MissionPage() {
                             {c.headline && <div className="contact-reason muted">{c.headline}</div>}
                             {c.reasoning && <div className="contact-reason">{c.reasoning}</div>}
 
-                            {seq && <SequenceCard key={`${seq.id}:${refreshKey}`} sequence={seq} contact={c} />}
+                            {seq && <SequenceCard key={`${seq.id}:${refreshKey}`} sequence={seq} contact={c} aiEnabled={aiEnabled} hasResume={hasResume} />}
                           </div>
                         );
                       })}
@@ -652,10 +688,14 @@ export function MissionPage() {
   );
 }
 
-function SequenceCard({ sequence, contact }: { sequence: EmailSequence; contact: Contact }) {
+function SequenceCard({ sequence, contact, aiEnabled, hasResume }: { sequence: EmailSequence; contact: Contact; aiEnabled: boolean; hasResume: boolean }) {
   // Collapsed by default: inside an expanded company, auto-opening every draft is
   // exactly the wall-of-text the accordion hierarchy is meant to avoid.
   const [open, setOpen] = useState(false);
+  // Follow-ups stay folded until asked for. They largely restate the initial
+  // email, so showing the first touch alone keeps the reviewer focused on the
+  // one message that actually varies.
+  const [showFollowups, setShowFollowups] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   const [sending, setSending] = useState<string | null>(null);
   const [sendErr, setSendErr] = useState<string | null>(null);
@@ -710,11 +750,11 @@ function SequenceCard({ sequence, contact }: { sequence: EmailSequence; contact:
     });
   }
 
-  async function doSend(touchIndex: number, mode: 'draft' | 'send') {
+  async function doSend(touchIndex: number, mode: 'draft' | 'send', attachResume = false) {
     setSendErr(null);
     setSending(`${mode}:${touchIndex}`);
     try {
-      const r = await gmail.send(sequence.id, touchIndex, mode, overrideEmail || undefined);
+      const r = await gmail.send(sequence.id, touchIndex, mode, overrideEmail || undefined, undefined, attachResume);
       setSentMessages((s) => ({
         ...s,
         [touchIndex]: {
@@ -741,11 +781,11 @@ function SequenceCard({ sequence, contact }: { sequence: EmailSequence; contact:
     }
   }
 
-  async function doSchedule(touchIndex: number, whenISO: string) {
+  async function doSchedule(touchIndex: number, whenISO: string, attachResume = false) {
     setSendErr(null);
     setSending(`schedule:${touchIndex}`);
     try {
-      const r = await gmail.send(sequence.id, touchIndex, 'send', overrideEmail || undefined, whenISO);
+      const r = await gmail.send(sequence.id, touchIndex, 'send', overrideEmail || undefined, whenISO, attachResume);
       setSentMessages((s) => ({
         ...s,
         [touchIndex]: {
@@ -851,6 +891,8 @@ function SequenceCard({ sequence, contact }: { sequence: EmailSequence; contact:
             body={draft.body}
             sent={sentMessages[0]}
             sending={sending}
+            aiEnabled={aiEnabled}
+            hasResume={hasResume}
             onCopy={(t) => copy('initial', t)}
             copied={copied === 'initial'}
             onSend={doSend}
@@ -864,31 +906,47 @@ function SequenceCard({ sequence, contact }: { sequence: EmailSequence; contact:
                 : undefined
             }
           />
-          {draft.followups.map((f, i) => {
-            const idx = i + 1;
-            return (
-              <Touch
-                key={i}
-                label={`Follow-up ${i + 1}`}
-                sublabel={`sends ${f.wait_days} day${f.wait_days === 1 ? '' : 's'} after the previous email`}
-                touchIndex={idx}
-                recipientName={contact.name}
-                recipientEmail={overrideEmail || contact.email || ''}
-                subject={f.subject}
-                body={f.body}
-                sent={sentMessages[idx]}
-                sending={sending}
-                onCopy={(t) => copy(`fu${i}`, t)}
-                copied={copied === `fu${i}`}
-                onSend={doSend}
-                onSchedule={doSchedule}
-                onCancelSchedule={cancelSchedule}
-                onSave={saveTouch}
-                disabled={!sentMessages[0]}
-                disabledReason={!sentMessages[0] ? 'Send the initial email first' : undefined}
-              />
-            );
-          })}
+          {draft.followups.length > 0 && (
+            <button
+              type="button"
+              className="followups-toggle"
+              aria-expanded={showFollowups}
+              onClick={() => setShowFollowups((v) => !v)}
+            >
+              <span className="followups-toggle-caret" aria-hidden>{showFollowups ? '▾' : '▸'}</span>
+              {showFollowups
+                ? 'Hide follow-ups'
+                : `Show ${draft.followups.length} follow-up${draft.followups.length === 1 ? '' : 's'}`}
+            </button>
+          )}
+          {showFollowups &&
+            draft.followups.map((f, i) => {
+              const idx = i + 1;
+              return (
+                <Touch
+                  key={i}
+                  label={`Follow-up ${i + 1}`}
+                  sublabel={`sends ${f.wait_days} day${f.wait_days === 1 ? '' : 's'} after the previous email`}
+                  touchIndex={idx}
+                  recipientName={contact.name}
+                  recipientEmail={overrideEmail || contact.email || ''}
+                  subject={f.subject}
+                  body={f.body}
+                  sent={sentMessages[idx]}
+                  sending={sending}
+                  aiEnabled={aiEnabled}
+                  hasResume={hasResume}
+                  onCopy={(t) => copy(`fu${i}`, t)}
+                  copied={copied === `fu${i}`}
+                  onSend={doSend}
+                  onSchedule={doSchedule}
+                  onCancelSchedule={cancelSchedule}
+                  onSave={saveTouch}
+                  disabled={!sentMessages[0]}
+                  disabledReason={!sentMessages[0] ? 'Send the initial email first' : undefined}
+                />
+              );
+            })}
         </div>
       )}
     </div>
@@ -949,6 +1007,137 @@ function EmailStatusPill({ status }: { status: Contact['email_status'] }) {
   );
 }
 
+// One-tap rewrites + custom instructions for the draft, powered by the refine
+// agent. Paid feature: free users see a locked upsell instead. `onApply` writes
+// the rewritten subject/body back into the editor's local state so the user can
+// keep tweaking (and still has Save / Cancel to commit or discard).
+const AI_QUICK_ACTIONS: Array<{ label: string; instruction: string }> = [
+  { label: 'Shorter', instruction: 'Make it noticeably shorter and tighter without dropping the core ask.' },
+  { label: 'Warmer', instruction: 'Make the tone warmer and more personable, still professional.' },
+  { label: 'More direct', instruction: 'Make it more direct and confident; cut hedging and filler.' },
+  { label: 'Stronger CTA', instruction: 'Sharpen the call to action so the ask is specific and easy to say yes to.' },
+  { label: 'Fix grammar', instruction: 'Fix grammar, spelling, and awkward phrasing; keep the wording otherwise intact.' },
+];
+
+function AiAssist({
+  enabled,
+  subject,
+  body,
+  onApply,
+}: {
+  enabled: boolean;
+  subject: string;
+  body: string;
+  onApply: (subject: string, body: string) => void;
+}) {
+  const [instruction, setInstruction] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  // Snapshot of the text just before the last rewrite, so a bad suggestion is one
+  // click to undo.
+  const [undoSnap, setUndoSnap] = useState<{ subject: string; body: string } | null>(null);
+
+  if (!enabled) {
+    return (
+      <div className="ai-assist ai-assist-locked">
+        <div className="ai-assist-lockhead">
+          <Sparkles size={15} aria-hidden />
+          <span>AI rewrite &amp; feedback</span>
+          <span className="ai-assist-badge">Pro</span>
+        </div>
+        <p className="ai-assist-lockcopy">
+          Rewrite for tone, length, or a stronger ask in one click — with a note on what changed.
+        </p>
+        <Link to="/settings" className="ai-assist-upgrade">
+          <Lock size={13} aria-hidden /> Upgrade to unlock
+        </Link>
+      </div>
+    );
+  }
+
+  async function run(label: string, text: string) {
+    if (!body.trim() || busy) return;
+    setBusy(label);
+    setNote(null);
+    const snap = { subject, body };
+    try {
+      const r = await agents.refine({ subject, body, instruction: text });
+      onApply(r.subject || subject, r.body);
+      setUndoSnap(snap);
+      setNote(r.note);
+      if (label === 'custom') setInstruction('');
+    } catch (err) {
+      toast.error(err instanceof Error ? humanizeAgentError(err.message) : 'Could not rewrite');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="ai-assist">
+      <div className="ai-assist-head">
+        <Sparkles size={14} aria-hidden />
+        <span>AI assist</span>
+      </div>
+      <div className="ai-assist-chips">
+        {AI_QUICK_ACTIONS.map((a) => (
+          <button
+            key={a.label}
+            type="button"
+            className="ai-chip"
+            disabled={!!busy}
+            onClick={() => run(a.label, a.instruction)}
+          >
+            {busy === a.label ? 'Working…' : a.label}
+          </button>
+        ))}
+      </div>
+      <div className="ai-assist-custom">
+        <input
+          className="reply-subject-input"
+          value={instruction}
+          placeholder="Or tell the AI what to change…"
+          disabled={!!busy}
+          onChange={(e) => setInstruction(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && instruction.trim()) {
+              e.preventDefault();
+              run('custom', instruction.trim());
+            }
+          }}
+        />
+        <button
+          type="button"
+          className="btn-primary small"
+          disabled={!!busy || !instruction.trim()}
+          onClick={() => run('custom', instruction.trim())}
+        >
+          {busy === 'custom' ? 'Working…' : 'Rewrite'}
+        </button>
+      </div>
+      {note && (
+        <div className="ai-assist-note">
+          <Sparkles size={13} aria-hidden />
+          <span>{note}</span>
+          {undoSnap && (
+            <button
+              type="button"
+              className="ai-assist-undo"
+              onClick={() => {
+                onApply(undoSnap.subject, undoSnap.body);
+                setUndoSnap(null);
+                setNote(null);
+              }}
+            >
+              <Undo2 size={12} aria-hidden /> Undo
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Touch({
   label,
   sublabel,
@@ -959,6 +1148,8 @@ function Touch({
   body,
   sent,
   sending,
+  aiEnabled,
+  hasResume,
   onCopy,
   copied,
   onSend,
@@ -977,10 +1168,12 @@ function Touch({
   body: string;
   sent: SentMessage | undefined;
   sending: string | null;
+  aiEnabled: boolean;
+  hasResume: boolean;
   onCopy: (text: string) => void;
   copied: boolean;
-  onSend: (touchIndex: number, mode: 'draft' | 'send') => Promise<void>;
-  onSchedule: (touchIndex: number, whenISO: string) => Promise<void>;
+  onSend: (touchIndex: number, mode: 'draft' | 'send', attachResume?: boolean) => Promise<void>;
+  onSchedule: (touchIndex: number, whenISO: string, attachResume?: boolean) => Promise<void>;
   onCancelSchedule: (touchIndex: number) => Promise<void>;
   onSave: (touchIndex: number, subject: string, body: string) => Promise<void>;
   disabled?: boolean;
@@ -997,6 +1190,8 @@ function Touch({
   const [s, setS] = useState(subject);
   const [b, setB] = useState(body);
   const [saving, setSaving] = useState(false);
+  // Per-touch choice to attach the résumé. Only offered when one is on file.
+  const [attachResume, setAttachResume] = useState(false);
 
   useEffect(() => {
     if (!editing) {
@@ -1044,6 +1239,15 @@ function Touch({
             value={b}
             onChange={(e) => setB(e.target.value)}
             rows={9}
+          />
+          <AiAssist
+            enabled={aiEnabled}
+            subject={s}
+            body={b}
+            onApply={(subj, bod) => {
+              setS(subj);
+              setB(bod);
+            }}
           />
           <div className="email-card-actions">
             <button type="button" className="btn-primary small" onClick={save} disabled={saving || !b.trim()}>
@@ -1099,7 +1303,7 @@ function Touch({
                       confirmText: 'Send now',
                     })
                   )
-                    onSend(touchIndex, 'send');
+                    onSend(touchIndex, 'send', sent?.attach_resume ?? false);
                 }}
               >
                 {sending === `send:${touchIndex}` ? (
@@ -1136,7 +1340,7 @@ function Touch({
                           confirmText: 'Send now',
                         })
                       )
-                        onSend(touchIndex, 'send');
+                        onSend(touchIndex, 'send', attachResume);
                     }}
                   >
                     {sending === `send:${touchIndex}` ? (
@@ -1170,7 +1374,7 @@ function Touch({
                     className="link-button"
                     disabled={busy || disabled}
                     title={disabledReason}
-                    onClick={() => onSend(touchIndex, 'draft')}
+                    onClick={() => onSend(touchIndex, 'draft', attachResume)}
                   >
                     {sending === `draft:${touchIndex}` ? 'Saving…' : isDraft ? 'Update Gmail draft' : 'Save to Gmail drafts'}
                   </button>
@@ -1178,6 +1382,17 @@ function Touch({
                 <button type="button" className="link-button" onClick={() => onCopy(`Subject: ${subject}\n\n${body}`)}>
                   {copied ? 'Copied' : 'Copy'}
                 </button>
+                {!isSent && hasResume && (
+                  <label className="attach-resume" title="Attach your résumé (PDF) to this email">
+                    <input
+                      type="checkbox"
+                      checked={attachResume}
+                      disabled={busy}
+                      onChange={(e) => setAttachResume(e.target.checked)}
+                    />
+                    <Paperclip size={13} aria-hidden /> Attach résumé
+                  </label>
+                )}
               </div>
               {picking && !isSent && (
                 <div className="schedule-picker">
@@ -1200,7 +1415,7 @@ function Touch({
                           toast.error('Pick a time in the future.');
                           return;
                         }
-                        await onSchedule(touchIndex, iso);
+                        await onSchedule(touchIndex, iso, attachResume);
                         setPicking(false);
                       }}
                     >

@@ -56,21 +56,21 @@ describe('pickDomainFromResults', () => {
 });
 
 describe('guessDomainCandidates', () => {
-  it('derives <name>.com/.ai/.io, most-likely first', () => {
-    assert.deepEqual(guessDomainCandidates('Cohere'), ['cohere.com', 'cohere.ai', 'cohere.io']);
+  it('derives <name>.com/.ai/.io/.co/.org, most-likely first', () => {
+    assert.deepEqual(guessDomainCandidates('Cohere'), ['cohere.com', 'cohere.ai', 'cohere.io', 'cohere.co', 'cohere.org']);
   });
 
   it('strips corporate suffixes and keeps a first-word fallback', () => {
     // "Cohere Labs" → cohere.* (suffix dropped); multi-word names also try the
     // joined form plus the first word alone.
-    assert.deepEqual(guessDomainCandidates('Cohere Labs'), ['cohere.com', 'cohere.ai', 'cohere.io']);
+    assert.deepEqual(guessDomainCandidates('Cohere Labs'), ['cohere.com', 'cohere.ai', 'cohere.io', 'cohere.co', 'cohere.org']);
     const sierra = guessDomainCandidates('Sierra Studio');
     assert.ok(sierra.includes('sierrastudio.com'));
     assert.ok(sierra.includes('sierra.com'));
   });
 
   it('lowercases and strips spaces/punctuation', () => {
-    assert.deepEqual(guessDomainCandidates('Acme, Inc.'), ['acme.com', 'acme.ai', 'acme.io']);
+    assert.deepEqual(guessDomainCandidates('Acme, Inc.'), ['acme.com', 'acme.ai', 'acme.io', 'acme.co', 'acme.org']);
   });
 
   it('returns nothing for an empty/too-short name', () => {

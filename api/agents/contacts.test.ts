@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolvePoolWithBudget, rankCandidates, narrowIcpBySelection, type ResolvePoolDeps, type ContactSuggestion } from './contacts';
+import { resolvePoolWithBudget, fillWithDisplayOnly, rankCandidates, narrowIcpBySelection, type ResolvePoolDeps, type ContactSuggestion } from './contacts';
 import { defaultContactIcp } from '../_lib/icp';
 import type { ResolvedEmail } from '../_lib/email-resolver';
 import type { ScrapeResult } from '../_lib/web-scrape';
@@ -128,6 +128,42 @@ describe('resolvePoolWithBudget', () => {
     const out = await resolvePoolWithBudget(['A', 'B', 'C'].map(row), 'acme.co', 't1', 3, deps);
     assert.equal(out.rows.length, 3);
     assert.equal(maxInFlight, 3, 'the three needed candidates resolve in parallel');
+  });
+});
+
+describe('fillWithDisplayOnly - surface people even when no email verifies', () => {
+  const withEmail = (name: string): ContactRow => ({ ...row(name), email: `${name}@acme.co`, emailStatus: 'verified' });
+
+  it('returns the resolved rows unchanged when they already fill the ask', () => {
+    const resolved = [withEmail('A')];
+    const out = fillWithDisplayOnly(resolved, [row('A'), row('B')], 1);
+    assert.deepEqual(out.map((r) => r.name), ['A']);
+    assert.equal(out.every((r) => !!r.email), true, 'no email-less rows added when not needed');
+  });
+
+  it('backfills the best email-less people when nothing verified', () => {
+    // Discovery found B and C but no address could be verified for either.
+    const out = fillWithDisplayOnly([], [row('B'), row('C')], 1);
+    assert.deepEqual(out.map((r) => r.name), ['B'], 'best-ranked person surfaces');
+    assert.equal(out[0].email, null);
+    assert.equal(out[0].emailStatus, 'none');
+  });
+
+  it('puts verified-email rows first, then tops up with display-only', () => {
+    const out = fillWithDisplayOnly([withEmail('A')], [row('A'), row('B'), row('C')], 3);
+    assert.deepEqual(out.map((r) => r.name), ['A', 'B', 'C']);
+    assert.equal(!!out[0].email, true);
+    assert.equal(out[1].email, null);
+  });
+
+  it('dedupes a resolved row against its source candidate', () => {
+    // A appears both resolved (with email) and in the ranked pool - keep one A.
+    const out = fillWithDisplayOnly([withEmail('A')], [row('A'), row('B')], 3);
+    assert.deepEqual(out.map((r) => r.name), ['A', 'B']);
+  });
+
+  it('returns empty only when discovery found nobody', () => {
+    assert.equal(fillWithDisplayOnly([], [], 1).length, 0);
   });
 });
 
