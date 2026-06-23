@@ -14,7 +14,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { Logo } from './Logo';
 import { Button } from '@/components/ui/button';
-import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
+import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -44,9 +44,9 @@ function NavItems({ onNavigate }: { onNavigate?: () => void }) {
           onClick={onNavigate}
           className={({ isActive }) =>
             cn(
-              'group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200',
+              'group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors duration-150',
               isActive
-                ? 'bg-gradient-to-r from-sidebar-accent to-sidebar-accent/40 text-sidebar-accent-foreground shadow-[inset_0_1px_0_0_hsl(210_40%_98%/0.05)]'
+                ? 'bg-sidebar-accent text-sidebar-accent-foreground'
                 : 'text-sidebar-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground'
             )
           }
@@ -54,7 +54,7 @@ function NavItems({ onNavigate }: { onNavigate?: () => void }) {
           {({ isActive }) => (
             <>
               {isActive && (
-                <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-full bg-primary shadow-[0_0_8px_0_hsl(153_45%_46%/0.7)]" />
+                <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-full bg-primary" />
               )}
               <Icon
                 className={cn(
@@ -90,7 +90,7 @@ export function AppLayout() {
   return (
     <div className="app-canvas min-h-dvh text-foreground">
       {/* Desktop sidebar */}
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-sidebar-border bg-gradient-to-b from-sidebar to-background md:flex">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-sidebar-border bg-sidebar md:flex">
         <SidebarBrand />
         <div className="mt-2 flex-1 overflow-y-auto pb-4">
           <NavItems />
@@ -99,7 +99,7 @@ export function AppLayout() {
 
       <div className="relative z-10 flex min-h-dvh flex-col md:pl-60">
         {/* Topbar */}
-        <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-3 border-b border-border/70 bg-background/70 px-4 backdrop-blur-xl md:px-6">
+        <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-3 border-b border-border bg-background px-4 md:px-6">
           <div className="flex items-center gap-2">
             {/* Mobile nav trigger */}
             <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
@@ -109,6 +109,7 @@ export function AppLayout() {
                 </Button>
               </SheetTrigger>
               <SheetContent side="left" className="w-64 border-sidebar-border bg-sidebar p-0">
+                <SheetTitle className="sr-only">Navigation</SheetTitle>
                 <SidebarBrand />
                 <div className="mt-2">
                   <NavItems onNavigate={() => setMobileOpen(false)} />
@@ -136,7 +137,7 @@ export function AppLayout() {
                   className="h-9 gap-2 rounded-full border border-border/70 bg-secondary/40 pl-1 pr-2.5 text-sm font-medium text-foreground/90 transition-colors hover:border-border hover:bg-secondary hover:text-foreground data-[state=open]:border-border data-[state=open]:bg-secondary"
                 >
                   <Avatar className="h-7 w-7 ring-1 ring-border/60">
-                    <AvatarFallback className="bg-gradient-to-br from-primary/30 to-primary/5 text-xs font-semibold text-primary">
+                    <AvatarFallback className="bg-primary/15 text-xs font-semibold text-primary">
                       {initial}
                     </AvatarFallback>
                   </Avatar>

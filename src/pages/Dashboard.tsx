@@ -371,22 +371,11 @@ export function Dashboard() {
     return (
       <div className="flex flex-col gap-7 animate-fade-in">
         <header className="relative flex flex-col gap-1.5">
-          {!reduceMotion && (
-            <div
-              aria-hidden
-              className="pointer-events-none absolute -left-12 -top-16 -z-10 h-44 w-2/3 rounded-full opacity-40 blur-[90px]"
-              style={{
-                background: `radial-gradient(closest-side, hsl(${greet.accent} / 0.4), transparent)`,
-                animation: 'mh-breathe 9s ease-in-out infinite',
-                transition: 'background 1.5s ease',
-              }}
-            />
-          )}
           <span className="inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
             <span>{dateLabel}</span>
             <span className="text-muted-foreground/40">·</span>
             <span className="relative inline-flex h-1.5 w-1.5 items-center" aria-hidden title="Live">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/70" />
+              <span className="absolute inline-flex h-full w-full motion-safe:animate-ping rounded-full bg-primary/70" />
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
             </span>
             <span className="tabular-nums text-foreground/70">{timeLabel}</span>
@@ -401,10 +390,6 @@ export function Dashboard() {
 
         {/* Hero */}
         <div className="relative">
-          <div
-            aria-hidden
-            className="pointer-events-none absolute -top-10 left-1/3 h-48 w-2/3 -translate-x-1/2 rounded-full bg-primary/20 blur-[100px]"
-          />
           <div className="panel relative overflow-hidden p-8 md:p-11">
             <div className="relative max-w-xl">
               <span className="inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
@@ -542,18 +527,6 @@ export function Dashboard() {
   return (
     <div className="flex flex-col gap-7 animate-fade-in">
       <header className="relative flex flex-col gap-1.5">
-        {/* Ambient glow whose hue tracks the time of day; gently breathes. */}
-        {!reduceMotion && (
-          <div
-            aria-hidden
-            className="pointer-events-none absolute -left-12 -top-16 -z-10 h-44 w-2/3 rounded-full opacity-40 blur-[90px]"
-            style={{
-              background: `radial-gradient(closest-side, hsl(${greet.accent} / 0.4), transparent)`,
-              animation: 'mh-breathe 9s ease-in-out infinite',
-              transition: 'background 1.5s ease',
-            }}
-          />
-        )}
         <span className="inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
           <span>{dateLabel}</span>
           <span className="text-muted-foreground/40">·</span>
@@ -562,7 +535,7 @@ export function Dashboard() {
             aria-hidden
             title="Live"
           >
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/70" />
+            <span className="absolute inline-flex h-full w-full motion-safe:animate-ping rounded-full bg-primary/70" />
             <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
           </span>
           <span className="tabular-nums text-foreground/70">{timeLabel}</span>
@@ -797,7 +770,7 @@ function SectionHeader({ title, action }: { title: string; action?: ReactNode })
   return (
     <div className="flex items-center justify-between">
       <h2 className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
-        <span aria-hidden className="h-3 w-px rounded-full bg-gradient-to-b from-foreground/30 to-transparent" />
+        <span aria-hidden className="h-3 w-px rounded-full bg-border" />
         {title}
       </h2>
       {action}
@@ -819,8 +792,8 @@ function StatusDot({ tone }: { tone: RunTone }) {
   if (tone === 'running') {
     return (
       <span className="relative flex h-2 w-2 shrink-0" aria-hidden>
-        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-60" />
-        <span className="relative inline-flex h-2 w-2 rounded-full bg-primary shadow-[0_0_8px_0_hsl(153_45%_46%/0.8)]" />
+        <span className="absolute inline-flex h-full w-full motion-safe:animate-ping rounded-full bg-primary opacity-60" />
+        <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
       </span>
     );
   }
