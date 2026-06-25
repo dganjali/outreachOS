@@ -2141,6 +2141,19 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
 }
 .followups-toggle:hover { color: var(--text); background: var(--surface-2); }
 .followups-toggle-caret { font-size: 0.7em; color: var(--text-subtle); }
+.followups-generating {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  align-self: flex-start;
+  padding: var(--space-1) 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+/* Skip a follow-up: dim it and tag it, without removing it from the list. */
+.email-card.is-skipped { opacity: 0.6; }
+.sent-badge.skipped { background: var(--surface-2); color: var(--text-subtle); }
+.followup-skip-toggle { margin-left: auto; }
 .sequence-touch { padding: 0.625rem 0.75rem; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; }
 .sequence-touch-head {
   display: flex;

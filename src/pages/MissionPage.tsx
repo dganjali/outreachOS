@@ -753,7 +753,7 @@ export function MissionPage() {
                             {c.headline && <div className="contact-reason muted">{c.headline}</div>}
                             {c.reasoning && <div className="contact-reason">{c.reasoning}</div>}
 
-                            {seq && <SequenceCard key={`${seq.id}:${refreshKey}`} sequence={seq} contact={c} aiEnabled={aiEnabled} hasResume={hasResume} onContactUpdated={() => loadContactsForTarget(t.id)} />}
+                            {seq && <SequenceCard key={`${seq.id}:${refreshKey}`} sequence={seq} contact={c} aiEnabled={aiEnabled} hasResume={hasResume} onContactUpdated={() => loadContactsForTarget(t.id)} onSequenceUpdated={() => loadSequencesForContact(c.id)} />}
                           </div>
                         );
                       })}
@@ -780,7 +780,7 @@ export function MissionPage() {
   );
 }
 
-function SequenceCard({ sequence, contact, aiEnabled, hasResume, onContactUpdated }: { sequence: EmailSequence; contact: Contact; aiEnabled: boolean; hasResume: boolean; onContactUpdated?: () => void | Promise<void> }) {
+function SequenceCard({ sequence, contact, aiEnabled, hasResume, onContactUpdated, onSequenceUpdated }: { sequence: EmailSequence; contact: Contact; aiEnabled: boolean; hasResume: boolean; onContactUpdated?: () => void | Promise<void>; onSequenceUpdated?: () => void | Promise<void> }) {
   // Collapsed by default: inside an expanded company, auto-opening every draft is
   // exactly the wall-of-text the accordion hierarchy is meant to avoid.
   const [open, setOpen] = useState(false);
@@ -792,6 +792,10 @@ function SequenceCard({ sequence, contact, aiEnabled, hasResume, onContactUpdate
   const [sending, setSending] = useState<string | null>(null);
   const [sendErr, setSendErr] = useState<string | null>(null);
   const [sentMessages, setSentMessages] = useState<Record<number, SentMessage | undefined>>({});
+  // Follow-ups are written asynchronously after the draft returns (see
+  // api/agents/sequence.ts), so a fresh draft shows none until they land. Poll
+  // briefly and surface a "writing…" state instead of looking empty.
+  const [generatingFollowups, setGeneratingFollowups] = useState(false);
   const [overrideEmail, setOverrideEmail] = useState(() => suggestEmail(contact));
   const [needsEmail, setNeedsEmail] = useState(false);
   const [savingEmail, setSavingEmail] = useState(false);
@@ -842,6 +846,59 @@ function SequenceCard({ sequence, contact, aiEnabled, hasResume, onContactUpdate
       setDraft((d) => ({ ...d, followups }));
     }
   }
+
+  // Toggle a single follow-up's skip state. Skipped touches are neither shown as
+  // sendable nor auto-queued by scheduleFollowups (api/_lib/sequencing.ts).
+  async function toggleFollowupSkip(index: number) {
+    const followups = draft.followups.map((f, i) =>
+      i === index ? { ...f, disabled: !f.disabled } : f
+    );
+    const { error } = await supabase.from('email_sequences').update({ followups }).eq('id', sequence.id);
+    if (error) {
+      toast.error(`Couldn't update follow-up: ${error.message}`);
+      return;
+    }
+    setDraft((d) => ({ ...d, followups }));
+  }
+
+  // Poll for asynchronously-generated follow-ups while the card is open and the
+  // draft was created recently. The recency gate avoids polling (and a stuck
+  // "writing…" state) on old drafts whose generation genuinely produced none.
+  useEffect(() => {
+    if (!open || draft.followups.length > 0) return;
+    const ageMs = Date.now() - new Date(sequence.created_at).getTime();
+    if (!(ageMs >= 0 && ageMs < 3 * 60_000)) return;
+
+    let cancelled = false;
+    let ticks = 0;
+    setGeneratingFollowups(true);
+    const id = window.setInterval(async () => {
+      ticks++;
+      const { data } = await supabase
+        .from('email_sequences')
+        .select('followups')
+        .eq('id', sequence.id)
+        .maybeSingle();
+      if (cancelled) return;
+      const followups = (data?.followups ?? []) as EmailSequence['followups'];
+      if (followups.length > 0) {
+        setDraft((d) => ({ ...d, followups }));
+        setGeneratingFollowups(false);
+        window.clearInterval(id);
+        void onSequenceUpdated?.();
+      } else if (ticks >= 12) {
+        // ~48s with no follow-ups: generation likely yielded none. Give up.
+        setGeneratingFollowups(false);
+        window.clearInterval(id);
+      }
+    }, 4000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+      setGeneratingFollowups(false);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, sequence.id, draft.followups.length]);
 
   useEffect(() => {
     supabase
@@ -1033,6 +1090,12 @@ function SequenceCard({ sequence, contact, aiEnabled, hasResume, onContactUpdate
                 : undefined
             }
           />
+          {generatingFollowups && draft.followups.length === 0 && (
+            <div className="followups-generating">
+              <span className="parse-toast-spinner" aria-hidden />
+              Writing follow-ups…
+            </div>
+          )}
           {draft.followups.length > 0 && (
             <button
               type="button"
@@ -1069,6 +1132,8 @@ function SequenceCard({ sequence, contact, aiEnabled, hasResume, onContactUpdate
                   onSchedule={doSchedule}
                   onCancelSchedule={cancelSchedule}
                   onSave={saveTouch}
+                  skipped={!!f.disabled}
+                  onToggleSkip={() => toggleFollowupSkip(i)}
                   disabled={!sentMessages[0]}
                   disabledReason={!sentMessages[0] ? 'Send the initial email first' : undefined}
                 />
@@ -1412,6 +1477,8 @@ function Touch({
   onSave,
   disabled,
   disabledReason,
+  skipped,
+  onToggleSkip,
 }: {
   label: string;
   sublabel?: string;
@@ -1432,9 +1499,15 @@ function Touch({
   onSave: (touchIndex: number, subject: string, body: string) => Promise<void>;
   disabled?: boolean;
   disabledReason?: string;
+  skipped?: boolean;
+  onToggleSkip?: () => void | Promise<void>;
 }) {
   const confirm = useConfirm();
   const isSent = sent?.status === 'sent';
+  // A skipped follow-up is not sendable: fold it into the existing disabled gate
+  // so Send / Schedule / Save-to-Gmail all block, while Edit and Copy stay live.
+  const sendDisabled = disabled || skipped;
+  const sendDisabledReason = skipped ? "Skipped — won't auto-send" : disabledReason;
   const isScheduled = sent?.status === 'queued' && !!sent?.scheduled_send_at;
   const isDraft = sent?.status === 'draft';
   const busy = !!sending;
@@ -1467,7 +1540,7 @@ function Touch({
   }
 
   return (
-    <div className={`email-card${isSent ? ' is-sent' : ''}`}>
+    <div className={`email-card${isSent ? ' is-sent' : ''}${skipped ? ' is-skipped' : ''}`}>
       <div className="email-card-head">
         <span className="email-card-step">
           {label}
@@ -1476,6 +1549,12 @@ function Touch({
         {isSent && <span className="sent-badge">✓ sent</span>}
         {isScheduled && <span className="sent-badge scheduled">scheduled · {formatScheduleStamp(sent!.scheduled_send_at!)}</span>}
         {isDraft && !isSent && !isScheduled && <span className="sent-badge draft">draft saved</span>}
+        {skipped && <span className="sent-badge skipped">skipped</span>}
+        {onToggleSkip && !isSent && !isScheduled && (
+          <button type="button" className="link-button followup-skip-toggle" onClick={onToggleSkip}>
+            {skipped ? 'Include' : 'Skip'}
+          </button>
+        )}
       </div>
 
       {editing ? (
@@ -1553,8 +1632,8 @@ function Touch({
               <button
                 type="button"
                 className="btn-send"
-                disabled={busy || disabled}
-                title={disabledReason}
+                disabled={busy || sendDisabled}
+                title={sendDisabledReason}
                 onClick={async () => {
                   if (
                     await confirm({
@@ -1590,8 +1669,8 @@ function Touch({
                   <button
                     type="button"
                     className="btn-send"
-                    disabled={busy || disabled}
-                    title={disabledReason}
+                    disabled={busy || sendDisabled}
+                    title={sendDisabledReason}
                     onClick={async () => {
                       if (
                         await confirm({
@@ -1616,8 +1695,8 @@ function Touch({
                   <button
                     type="button"
                     className="link-button"
-                    disabled={busy || disabled}
-                    title={disabledReason}
+                    disabled={busy || sendDisabled}
+                    title={sendDisabledReason}
                     onClick={() => setPicking((p) => !p)}
                   >
                     Schedule
@@ -1632,8 +1711,8 @@ function Touch({
                   <button
                     type="button"
                     className="link-button"
-                    disabled={busy || disabled}
-                    title={disabledReason}
+                    disabled={busy || sendDisabled}
+                    title={sendDisabledReason}
                     onClick={() => onSend(touchIndex, 'draft', attachResume)}
                   >
                     {sending === `draft:${touchIndex}` ? 'Saving…' : isDraft ? 'Update Gmail draft' : 'Save to Gmail drafts'}
@@ -1668,7 +1747,7 @@ function Touch({
                     <button
                       type="button"
                       className="btn-primary small"
-                      disabled={busy || disabled || !when}
+                      disabled={busy || sendDisabled || !when}
                       onClick={async () => {
                         const iso = new Date(when).toISOString();
                         if (new Date(iso).getTime() <= Date.now()) {
