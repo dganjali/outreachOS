@@ -1,5 +1,8 @@
 # Cloud Build pipeline - builds the API image and deploys to Cloud Run.
-# Trigger this from a push to main (set up via gcloud builds triggers create).
+# Deploy manually from a clean working tree:
+#   CLOUDSDK_PYTHON=python3.10 gcloud builds submit --config=cloudbuild.yaml --project <PROJECT>
+# (No push-trigger is configured, so $COMMIT_SHA is unset here - the image tag
+#  uses the _TAG substitution below, default 'latest'.)
 #
 # Substitutions (set in the trigger or pass via --substitutions):
 #   _SERVICE       - Cloud Run service name (default: outreachos-api)
@@ -24,14 +27,14 @@ steps:
     args:
       - build
       - -t
-      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$COMMIT_SHA
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:${_TAG}
       - .
 
   # 2. Push it.
   - name: gcr.io/cloud-builders/docker
     args:
       - push
-      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$COMMIT_SHA
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:${_TAG}
 
   # 3. Deploy to Cloud Run.
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
@@ -40,7 +43,7 @@ steps:
       - run
       - deploy
       - ${_SERVICE}
-      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$COMMIT_SHA
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:${_TAG}
       - --region=${_REGION}
       - --platform=managed
       - --allow-unauthenticated
@@ -70,6 +73,11 @@ substitutions:
   _SERVICE: outreachos-api
   _REGION: us-central1
   _AR_REPO: outreachos
+  # Image tag. Defaults to 'latest' so a manual `gcloud builds submit` works out
+  # of the box. ($COMMIT_SHA is only auto-populated for push-triggered builds; a
+  # manual submit leaves it empty -> malformed `:` tag -> docker 125.) Pass
+  # --substitutions=_TAG=$(git rev-parse HEAD) when you want a pinned image tag.
+  _TAG: latest
 
 options:
   logging: CLOUD_LOGGING_ONLY
