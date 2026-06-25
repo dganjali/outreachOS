@@ -23,7 +23,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## P2 — Feature gaps
 
-- [~] **10. Follow-up sequence visibility.** Verified follow-ups ARE rendered + editable in the draft view (SequenceCard → "Show N follow-ups", each with timing "sends X days after…" and inline edit). Real gap: they're generated **async** after the initial draft, so they only appear on a later reload, and there's no per-follow-up disable. Left as a focused follow-up (needs an async "generating…" state / poll + a skip toggle) rather than churned here. _(MissionPage.tsx, api/agents/sequence.ts)_
+- [x] **10. Follow-up sequence visibility.** ✅ Closed both gaps. (a) **Async generating state**: opening a freshly-drafted card now shows a "Writing follow-ups…" spinner and **polls** the row every 4s (recency-gated to drafts <3min old, caps at ~48s) so follow-ups appear automatically — no manual reload. Updates local draft + refreshes the parent map via a new `onSequenceUpdated`. (b) **Per-follow-up skip toggle**: each follow-up has a Skip/Include control; skipped touches dim + tag "skipped" and disable Send/Schedule/Save-to-Gmail (Edit/Copy stay live), with a `disabled` flag persisted on `followups[]`. Backend `scheduleFollowups` honors it — skipped touches are never auto-queued by the cron, while remaining touches keep their original send dates (cumulative cadence still advances) and positional `touchIndex`. Typechecks + build clean; new unit tests cover the skip enforcement. _(MissionPage.tsx, index.css, api/_lib/sequencing.ts + sequencing.test.ts, shared/schemas.ts, shared/types.ts)_
 - [ ] **11. No contact-level status history / activity log.** No timeline of sent/replied/stage-changes. Hard to resume a campaign after days. _(MissionPage.tsx)_
 - [ ] **12. No bulk actions on contacts.** Add checkboxes + a bulk action bar (e.g. mark N as Rejected). _(MissionPage.tsx)_
 - [x] **13. CSV import guidance.** ✅ Added a tooltip on the collapsed "Import CSV" button and a **"Download sample CSV"** link (generates a ready-to-edit template) alongside the existing column spec. _(CsvImport.tsx, index.css)_
@@ -43,3 +43,4 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ### Progress log
 - _2026-06-25_: Created tracking doc, triaged 21 items into P0–P3.
+- _2026-06-25_: Finished #10 — async follow-up "generating…" poll + per-follow-up skip toggle (UI + backend `scheduleFollowups` enforcement + unit tests).

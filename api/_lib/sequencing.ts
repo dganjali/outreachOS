@@ -35,8 +35,14 @@ export async function scheduleFollowups(args: {
 
   for (let i = 0; i < followups.length; i++) {
     const fu = followups[i];
+    // Advance the cadence clock first, so skipping a touch doesn't pull the
+    // remaining follow-ups earlier - their send dates stay where they were.
     cumulative += typeof fu.waitDays === 'number' && fu.waitDays > 0 ? fu.waitDays : DEFAULT_WAIT_DAYS;
     const touchIndex = i + 1;
+
+    // User opted this touch out of the sequence: never auto-queue it. touchIndex
+    // stays positional (gmail/send reads followups[touchIndex - 1]).
+    if (fu.disabled) continue;
 
     const exists = await sent.findOne({ sequenceId: seq._id, touchIndex });
     if (exists) continue;

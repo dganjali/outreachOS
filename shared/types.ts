@@ -150,7 +150,7 @@ export interface EmailSequence {
   anchored_bullets: number[];
   subject: string;
   body: string;
-  followups: Array<{ wait_days: number; subject: string; body: string }>;
+  followups: Array<{ wait_days: number; subject: string; body: string; disabled?: boolean }>;
   status: SequenceStatus;
   // Campaign Autopilot verdict (see CampaignPolicyDoc.autopilotState).
   autopilot_state?: AutopilotState | null;

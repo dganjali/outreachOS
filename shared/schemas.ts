@@ -302,7 +302,7 @@ export interface EmailSequenceDoc extends BaseDoc {
   // subject/body).
   originalSubject?: string | null;
   originalBody?: string | null;
-  followups: Array<{ waitDays: number; subject: string; body: string }>;
+  followups: Array<{ waitDays: number; subject: string; body: string; disabled?: boolean }>;
   status: 'draft' | 'approved' | 'sent' | 'bounced' | 'replied' | 'archived';
   // Campaign Autopilot verdict for this draft. unset/null ⇒ the gate hasn't seen
   // it. 'review' = failed the gate (held for a human); 'ready' = passed but the
