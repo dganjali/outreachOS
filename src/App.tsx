@@ -30,6 +30,7 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ de
 const Privacy = lazy(() => import('./pages/Legal').then((m) => ({ default: m.Privacy })));
 const Terms = lazy(() => import('./pages/Legal').then((m) => ({ default: m.Terms })));
 const WizardPreview = lazy(() => import('./pages/_WizardPreview').then((m) => ({ default: m.WizardPreview })));
+const FeedbackPreview = lazy(() => import('./pages/_FeedbackPreview').then((m) => ({ default: m.FeedbackPreview })));
 
 function RouteFallback() {
   return (
@@ -156,6 +157,8 @@ function App() {
                       out, on a different device. See AuthAction.tsx for why it exists. */}
                   <Route path="/auth/action" element={<AuthAction />} />
                   <Route path="/wizard-preview" element={<WizardPreview />} />
+                  <Route path="/feedback-preview" element={<FeedbackPreview />} />
+                  <Route path="/mn-preview" element={<MissionNew />} />
                   <Route path="/privacy" element={<Privacy />} />
                   <Route path="/terms" element={<Terms />} />
                   <Route

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { Send, Sparkles, Lock, Undo2, Paperclip } from 'lucide-react';
+import { Send, Sparkles, Lock, Undo2, Paperclip, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
@@ -26,6 +26,13 @@ const MODE_LABEL: Record<string, string> = {
   internship: 'Internship / Job',
   recruiting: 'Recruiting',
   sales: 'Cold Sales',
+};
+
+const TARGET_STATUS_LABEL: Record<string, string> = {
+  suggested: 'Suggested',
+  approved: 'Approved',
+  rejected: 'Rejected',
+  contacted: 'Contacted',
 };
 
 // Turn raw agent error codes into something a person can read. Falls through to
@@ -59,6 +66,9 @@ export function MissionPage() {
   // Bumped after a bulk send so SequenceCards remount and re-read their sent state.
   const [refreshKey, setRefreshKey] = useState(0);
   const [sendingAll, setSendingAll] = useState(false);
+  // Bulk contact selection (checkboxes + floating action bar).
+  const [selectedContactIds, setSelectedContactIds] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [activeTargetId, setActiveTargetId] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -305,12 +315,30 @@ export function MissionPage() {
   }
 
   async function setTargetStatus(target: Target, status: Target['status']) {
+    const prev = target.status;
+    if (status === prev) return;
     const { error } = await supabase.from('targets').update({ status }).eq('id', target.id);
     if (error) {
       toast.error(`Could not update ${target.company_name}: ${error.message}`);
       return;
     }
     setTargets((ts) => ts.map((t) => (t.id === target.id ? { ...t, status } : t)));
+    // Status changes are one-click and 'rejected' hides the target outright, so
+    // a misclick (the dropdown sits next to the remove button) is easy. Always
+    // offer a one-click undo back to the prior status.
+    toast.success(`Marked ${target.company_name} as ${TARGET_STATUS_LABEL[status] ?? status}`, {
+      action: {
+        label: 'Undo',
+        onClick: async () => {
+          const { error: undoErr } = await supabase.from('targets').update({ status: prev }).eq('id', target.id);
+          if (undoErr) {
+            toast.error(`Could not undo: ${undoErr.message}`);
+            return;
+          }
+          setTargets((ts) => ts.map((t) => (t.id === target.id ? { ...t, status: prev } : t)));
+        },
+      },
+    });
   }
 
   async function deleteTarget(target: Target) {
@@ -321,6 +349,70 @@ export function MissionPage() {
       return;
     }
     setTargets((ts) => ts.filter((t) => t.id !== target.id));
+  }
+
+  function toggleContactSelected(contactId: string) {
+    setSelectedContactIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(contactId)) next.delete(contactId);
+      else next.add(contactId);
+      return next;
+    });
+  }
+
+  function clearSelection() {
+    setSelectedContactIds(new Set());
+  }
+
+  // Apply a status to every selected contact at once (bulk approve/reject), with
+  // a single undo that restores each contact's prior status.
+  async function bulkSetContactStatus(status: Contact['status']) {
+    const ids = Array.from(selectedContactIds);
+    if (ids.length === 0) return;
+    const prior = new Map<string, Contact['status']>();
+    for (const list of Object.values(contactsByTarget)) {
+      for (const c of list) if (selectedContactIds.has(c.id)) prior.set(c.id, c.status);
+    }
+    setBulkBusy(true);
+    try {
+      const results = await Promise.all(
+        ids.map((cid) => supabase.from('contacts').update({ status }).eq('id', cid))
+      );
+      const failed = results.find((r) => r.error);
+      if (failed?.error) throw new Error(failed.error.message);
+      setContactsByTarget((byT) => {
+        const next: Record<string, Contact[]> = {};
+        for (const [tid, list] of Object.entries(byT)) {
+          next[tid] = list.map((c) => (selectedContactIds.has(c.id) ? { ...c, status } : c));
+        }
+        return next;
+      });
+      const n = ids.length;
+      clearSelection();
+      toast.success(`Marked ${n} contact${n === 1 ? '' : 's'} as ${status}`, {
+        action: {
+          label: 'Undo',
+          onClick: async () => {
+            await Promise.all(
+              Array.from(prior.entries()).map(([cid, st]) =>
+                supabase.from('contacts').update({ status: st }).eq('id', cid)
+              )
+            );
+            setContactsByTarget((byT) => {
+              const next: Record<string, Contact[]> = {};
+              for (const [tid, list] of Object.entries(byT)) {
+                next[tid] = list.map((c) => (prior.has(c.id) ? { ...c, status: prior.get(c.id)! } : c));
+              }
+              return next;
+            });
+          },
+        },
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not update contacts');
+    } finally {
+      setBulkBusy(false);
+    }
   }
 
   // With send-only Gmail scope the app can't see replies, so this is the
@@ -410,16 +502,7 @@ export function MissionPage() {
 
       <AutopilotPanel missionId={mission.id} />
 
-      <section className="mission-overview-card">
-        <div className="mission-overview-row">
-          <strong>Offer</strong>
-          <span>{mission.goal}</span>
-        </div>
-        <div className="mission-overview-row">
-          <strong>Audience</strong>
-          <span>{mission.target_description}</span>
-        </div>
-      </section>
+      <MissionBriefCard mission={mission} onSaved={loadMission} />
 
       {error && (
         <div className="banner-error" role="alert">
@@ -489,7 +572,7 @@ export function MissionPage() {
                             </span>
                           )}
                           <span className="target-summary-name">{t.company_name}</span>
-                          {t.signal_type && <span className="signal-pill subtle">{t.signal_type}</span>}
+                          {t.signal_type && <span className="signal-pill" data-signal={t.signal_type}>{t.signal_type}</span>}
                         </span>
                         <span className="target-summary-sub">
                           {t.domain && <span className="target-summary-domain">{t.domain}</span>}
@@ -523,20 +606,26 @@ export function MissionPage() {
                         )}
                       </div>
                       <div className="target-content-controls">
-                        <select
-                          value={t.status}
-                          onChange={(e) => setTargetStatus(t, e.target.value as Target['status'])}
-                        >
-                          <option value="suggested">Suggested</option>
-                          <option value="approved">Approved</option>
-                          <option value="rejected">Rejected</option>
-                          <option value="contacted">Contacted</option>
-                        </select>
+                        <label className="target-status-control">
+                          <span className="target-status-label">Status</span>
+                          <select
+                            value={t.status}
+                            onChange={(e) => setTargetStatus(t, e.target.value as Target['status'])}
+                            aria-label={`Status for ${t.company_name}`}
+                          >
+                            <option value="suggested">Suggested</option>
+                            <option value="approved">Approved</option>
+                            <option value="rejected">Rejected</option>
+                            <option value="contacted">Contacted</option>
+                          </select>
+                        </label>
+                        <span className="target-controls-sep" aria-hidden />
                         <button
                           type="button"
                           className="link-button target-delete"
                           onClick={() => deleteTarget(t)}
-                          title="Remove target"
+                          title={`Remove ${t.company_name}`}
+                          aria-label={`Remove ${t.company_name}`}
                         >
                           ×
                         </button>
@@ -581,7 +670,7 @@ export function MissionPage() {
                           <li key={i}>
                             <span className="evidence-fact">{b.fact}</span>
                             <span className="evidence-meta">
-                              {b.signal_type && <span className="signal-pill subtle">{b.signal_type}</span>}
+                              {b.signal_type && <span className="signal-pill" data-signal={b.signal_type}>{b.signal_type}</span>}
                               {b.recency && <span> · {b.recency}</span>}
                               {b.source_url && (
                                 <>
@@ -613,7 +702,10 @@ export function MissionPage() {
                                   <span className="contact-role">{c.role}</span>
                                 </span>
                                 {typeof c.confidence === 'number' && (
-                                  <span className="confidence" title="Confidence">
+                                  <span
+                                    className="confidence"
+                                    title="Estimated reply-likelihood — how promising this contact is to reach for this mission (role & seniority fit plus signals). Higher is better."
+                                  >
                                     {Math.round(c.confidence * 100)}%
                                   </span>
                                 )}
@@ -661,7 +753,7 @@ export function MissionPage() {
                             {c.headline && <div className="contact-reason muted">{c.headline}</div>}
                             {c.reasoning && <div className="contact-reason">{c.reasoning}</div>}
 
-                            {seq && <SequenceCard key={`${seq.id}:${refreshKey}`} sequence={seq} contact={c} aiEnabled={aiEnabled} hasResume={hasResume} />}
+                            {seq && <SequenceCard key={`${seq.id}:${refreshKey}`} sequence={seq} contact={c} aiEnabled={aiEnabled} hasResume={hasResume} onContactUpdated={() => loadContactsForTarget(t.id)} />}
                           </div>
                         );
                       })}
@@ -688,7 +780,7 @@ export function MissionPage() {
   );
 }
 
-function SequenceCard({ sequence, contact, aiEnabled, hasResume }: { sequence: EmailSequence; contact: Contact; aiEnabled: boolean; hasResume: boolean }) {
+function SequenceCard({ sequence, contact, aiEnabled, hasResume, onContactUpdated }: { sequence: EmailSequence; contact: Contact; aiEnabled: boolean; hasResume: boolean; onContactUpdated?: () => void | Promise<void> }) {
   // Collapsed by default: inside an expanded company, auto-opening every draft is
   // exactly the wall-of-text the accordion hierarchy is meant to avoid.
   const [open, setOpen] = useState(false);
@@ -702,11 +794,31 @@ function SequenceCard({ sequence, contact, aiEnabled, hasResume }: { sequence: E
   const [sentMessages, setSentMessages] = useState<Record<number, SentMessage | undefined>>({});
   const [overrideEmail, setOverrideEmail] = useState(() => suggestEmail(contact));
   const [needsEmail, setNeedsEmail] = useState(false);
+  const [savingEmail, setSavingEmail] = useState(false);
   const [draft, setDraft] = useState({
     subject: sequence.subject,
     body: sequence.body,
     followups: sequence.followups,
   });
+
+  // Persist the entered recipient address onto the contact so it's reused for
+  // every email to them (and the "no verified address" warning clears), rather
+  // than only routing this one send. onContactUpdated refreshes the parent.
+  async function saveEmailToContact() {
+    const email = overrideEmail.trim();
+    if (!email || email === contact.email) return;
+    setSavingEmail(true);
+    try {
+      const { error } = await supabase.from('contacts').update({ email }).eq('id', contact.id);
+      if (error) throw new Error(error.message);
+      toast.success('Email saved to contact');
+      await onContactUpdated?.();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not save email');
+    } finally {
+      setSavingEmail(false);
+    }
+  }
 
   async function saveTouch(touchIndex: number, subject: string, body: string) {
     // Send reads subject/body from the server, so a silently failed save here
@@ -867,17 +979,32 @@ function SequenceCard({ sequence, contact, aiEnabled, hasResume }: { sequence: E
           )}
           {(needsEmail || !contact.email) && (
             <div className="email-override">
-              <label>
+              <span className="email-override-label">
                 {contact.likely_email_pattern
-                  ? `Recipient email (no verified address - pattern suggests ${contact.likely_email_pattern})`
-                  : 'Recipient email (no verified address on file)'}
+                  ? `Recipient email — no verified address (pattern suggests ${contact.likely_email_pattern})`
+                  : 'Recipient email — no verified address on file'}
+              </span>
+              <div className="email-override-row">
                 <input
                   type="email"
                   value={overrideEmail}
                   onChange={(e) => setOverrideEmail(e.target.value)}
                   placeholder="contact@company.com"
+                  aria-label="Recipient email address"
                 />
-              </label>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  disabled={savingEmail || !overrideEmail.trim() || overrideEmail.trim() === contact.email}
+                  onClick={saveEmailToContact}
+                >
+                  {savingEmail ? 'Saving…' : 'Save to contact'}
+                </button>
+              </div>
+              <p className="email-override-hint">
+                Add an email to enable sending. <strong>Save to contact</strong> reuses it for every email to this
+                person; otherwise it applies to this send only.
+              </p>
             </div>
           )}
           {sendErr && <div className="banner-error">{sendErr}</div>}
@@ -1007,6 +1134,133 @@ function EmailStatusPill({ status }: { status: Contact['email_status'] }) {
   );
 }
 
+// Editable mission brief. Outreach evolves, so the core pitch (offer / audience /
+// location) and a private notes field can be refined after creation - not just at
+// the wizard. View mode shows the brief with an Edit affordance; edit mode is an
+// inline form that writes back to the mission and reloads.
+function MissionBriefCard({
+  mission,
+  onSaved,
+}: {
+  mission: Mission;
+  onSaved: () => void | Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [goal, setGoal] = useState(mission.goal);
+  const [audience, setAudience] = useState(mission.target_description);
+  const [geo, setGeo] = useState(mission.geo ?? '');
+  const [notes, setNotes] = useState(mission.notes ?? '');
+  const [saving, setSaving] = useState(false);
+
+  // Re-sync from the source when it changes and we're not mid-edit.
+  useEffect(() => {
+    if (!editing) {
+      setGoal(mission.goal);
+      setAudience(mission.target_description);
+      setGeo(mission.geo ?? '');
+      setNotes(mission.notes ?? '');
+    }
+  }, [mission, editing]);
+
+  async function save() {
+    if (!goal.trim() || !audience.trim()) {
+      toast.error('Offer and audience can’t be empty.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const { error } = await supabase
+        .from('missions')
+        .update({
+          goal: goal.trim(),
+          target_description: audience.trim(),
+          geo: geo.trim() || null,
+          notes: notes.trim() || null,
+        })
+        .eq('id', mission.id);
+      if (error) throw new Error(error.message);
+      await onSaved();
+      setEditing(false);
+      toast.success('Mission brief updated');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not save changes');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <section className="mission-overview-card is-editing">
+        <div className="mission-overview-edit">
+          <label className="email-field-label">Offer</label>
+          <textarea className="reply-body-input" rows={3} value={goal} onChange={(e) => setGoal(e.target.value)} />
+          <label className="email-field-label">Audience</label>
+          <textarea
+            className="reply-body-input"
+            rows={3}
+            value={audience}
+            onChange={(e) => setAudience(e.target.value)}
+          />
+          <label className="email-field-label">Location focus (optional)</label>
+          <input
+            className="reply-subject-input"
+            value={geo}
+            onChange={(e) => setGeo(e.target.value)}
+            placeholder="e.g. Toronto, Canada — scopes contact discovery"
+          />
+          <label className="email-field-label">Notes (optional)</label>
+          <textarea
+            className="reply-body-input"
+            rows={2}
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Private context — e.g. “paused until August”, “post-Series A only”."
+          />
+          <div className="email-card-actions">
+            <button type="button" className="btn-send" onClick={save} disabled={saving}>
+              {saving ? 'Saving…' : 'Save changes'}
+            </button>
+            <button type="button" className="link-button" onClick={() => setEditing(false)} disabled={saving}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="mission-overview-card">
+      <button type="button" className="mission-overview-edit-btn" onClick={() => setEditing(true)}>
+        <Pencil size={13} aria-hidden /> Edit
+      </button>
+      <div className="mission-overview-grid">
+        <div className="mission-overview-row">
+          <strong>Offer</strong>
+          <span>{mission.goal}</span>
+        </div>
+        <div className="mission-overview-row">
+          <strong>Audience</strong>
+          <span>{mission.target_description}</span>
+        </div>
+        {mission.geo && (
+          <div className="mission-overview-row">
+            <strong>Location</strong>
+            <span>{mission.geo}</span>
+          </div>
+        )}
+        {mission.notes && (
+          <div className="mission-overview-row">
+            <strong>Notes</strong>
+            <span className="mission-overview-notes">{mission.notes}</span>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 // One-tap rewrites + custom instructions for the draft, powered by the refine
 // agent. Paid feature: free users see a locked upsell instead. `onApply` writes
 // the rewritten subject/body back into the editor's local state so the user can
@@ -1108,7 +1362,7 @@ function AiAssist({
         />
         <button
           type="button"
-          className="btn-primary small"
+          className="ai-assist-rewrite"
           disabled={!!busy || !instruction.trim()}
           onClick={() => run('custom', instruction.trim())}
         >
@@ -1226,6 +1480,28 @@ function Touch({
 
       {editing ? (
         <div className="email-card-edit">
+          {/* Pinned toolbar: Save / Cancel stay above the fold while the long
+              edit form (subject + body + AI assist) scrolls beneath it (#7). */}
+          <div className="email-edit-toolbar">
+            <span className="email-edit-toolbar-title">Editing draft</span>
+            <div className="email-edit-toolbar-actions">
+              <button
+                type="button"
+                className="link-button"
+                onClick={() => {
+                  setEditing(false);
+                  setS(subject);
+                  setB(body);
+                }}
+                disabled={saving}
+              >
+                Cancel
+              </button>
+              <button type="button" className="btn-send" onClick={save} disabled={saving || !b.trim()}>
+                {saving ? 'Saving…' : 'Save changes'}
+              </button>
+            </div>
+          </div>
           <label className="email-field-label">Subject</label>
           <input
             className="reply-subject-input"
@@ -1238,7 +1514,7 @@ function Touch({
             className="reply-body-input"
             value={b}
             onChange={(e) => setB(e.target.value)}
-            rows={9}
+            rows={6}
           />
           <AiAssist
             enabled={aiEnabled}
@@ -1249,22 +1525,6 @@ function Touch({
               setB(bod);
             }}
           />
-          <div className="email-card-actions">
-            <button type="button" className="btn-primary small" onClick={save} disabled={saving || !b.trim()}>
-              {saving ? 'Saving…' : 'Save changes'}
-            </button>
-            <button
-              type="button"
-              className="link-button"
-              onClick={() => {
-                setEditing(false);
-                setS(subject);
-                setB(body);
-              }}
-            >
-              Cancel
-            </button>
-          </div>
         </div>
       ) : (
         <>

@@ -66,6 +66,9 @@ export interface Mission {
   // Optional location focus (region/country/city) used to scope and rank
   // contact discovery. null = no geographic preference.
   geo: string | null;
+  // Free-text notes the user keeps on the mission (context, status reminders
+  // like "paused until August", targeting caveats). Editable from the brief card.
+  notes?: string | null;
   status: string;
   archived_at: string | null;
   // The reusable persona (voice) this mission drafts as. Required for new

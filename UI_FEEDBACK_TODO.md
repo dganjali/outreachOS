@@ -1,0 +1,45 @@
+# UI / UX Feedback — Tracking Checklist
+
+Source: user walkthrough (2026-06-25). Ordered by priority. Check items off as completed.
+
+Legend: `[ ]` todo · `[~]` in progress · `[x]` done
+
+---
+
+## P0 — Lead complaint + trust-breaking data bugs
+
+- [x] **1. Redesign the "AI Assist" panel.** ✅ Rebuilt dark-correct: emerald-tinted dark card (was a glaring light box from `--accent-softer`), legible emerald header (was invalid `color: var(--accent)`), clean chip pills, proper emerald "Rewrite" CTA, fixed locked-variant tokens. Verified via screenshot on `/feedback-preview`. _(src/index.css ~2209, src/pages/MissionPage.tsx)_
+- [x] **2. Draft count mismatch.** ✅ Root cause: `sequence.ts` did `insertOne` with a fresh id every time and never cleared the prior draft, so re-running the pipeline/autopilot stacked duplicate `email_sequences` rows — the list/dashboard counted raw rows while the header deduped by contact. Fixed both sides: (a) sequence regenerate now replaces the prior *unsent* draft (guarded so scheduled/sent history is never deleted) — also stops autopilot double-drafting; (b) Missions list + Dashboard now count *distinct contacts*, so counts agree even on pre-existing duplicate data. Typechecks clean. _(api/agents/sequence.ts, Missions.tsx, Dashboard.tsx)_
+- [x] **3. Mission header "contacts" count.** ✅ Verified already correct — header uses `totalContacts = allContacts.length` where contacts are batch-loaded for ALL target ids (MissionPage.tsx:158), not just the expanded target. The "4" the user saw was genuinely mission-wide (only Moonvalley had contacts at the time). No change needed. _(MissionPage.tsx)_
+
+## P1 — High-friction UX bugs (everyday flows)
+
+- [x] **4. Editable mission brief (incl. notes field).** ✅ New `MissionBriefCard` with view/edit modes: Offer, Audience, Location, and a new private **Notes** field (e.g. "paused until August") are all editable inline via an "Edit" affordance (top-right of the brief card), saved back to the mission. Added `notes` to schema + frontend type (no migration needed — schemaless + passthrough PATCH). Typechecks clean. _(covers "Offer/Audience read-only", "no inline editing of brief", and #13 "no notes field")_ _(MissionPage.tsx, index.css, shared/schemas.ts, src/types.ts)_
+- [x] **5. New-mission "Next" button.** ✅ Now stays clickable; clicking with blanks reveals inline per-field errors (danger border + message under each of name/offer/audience) and keeps you on step 1. Button reads as not-ready via `aria-disabled` styling. Verified in browser. _(MissionNew.tsx, index.css)_
+- [x] **6. New-mission Cancel control.** ✅ Added an explicit "Cancel" button (footer-left on step 1) that returns to /missions; steps 2–3 keep "Back". Verified in DOM. _(MissionNew.tsx)_
+- [x] **7. Draft edit mode hijacks the viewport.** ✅ Edit mode now has a **pinned top toolbar** ("Editing draft" + Cancel + emerald Save changes) that stays above the fold while the form scrolls; reduced the body textarea from 9→6 rows. Also fixed invalid `--accent` focus rings on the reply inputs (now a visible emerald ring). Verified via preview. _(MissionPage.tsx, index.css)_
+- [x] **8. "Send email" / no verified address.** ✅ The amber box now has a clear label, an input + **"Save to contact"** button (persists the address so it's reused, vs. one-off send), and helper text spelling out the difference. New `onContactUpdated` refreshes the parent. Verified via preview. _(MissionPage.tsx, index.css)_
+- [x] **9. Status dropdown misclick.** ✅ Added a "Status" label + a vertical divider separating the dropdown from the × remove (× now hovers danger-colored), and an **Undo toast** on every status change (key for 'rejected', which hides the target). Verified via preview. _(MissionPage.tsx, index.css)_
+
+## P2 — Feature gaps
+
+- [~] **10. Follow-up sequence visibility.** Verified follow-ups ARE rendered + editable in the draft view (SequenceCard → "Show N follow-ups", each with timing "sends X days after…" and inline edit). Real gap: they're generated **async** after the initial draft, so they only appear on a later reload, and there's no per-follow-up disable. Left as a focused follow-up (needs an async "generating…" state / poll + a skip toggle) rather than churned here. _(MissionPage.tsx, api/agents/sequence.ts)_
+- [ ] **11. No contact-level status history / activity log.** No timeline of sent/replied/stage-changes. Hard to resume a campaign after days. _(MissionPage.tsx)_
+- [ ] **12. No bulk actions on contacts.** Add checkboxes + a bulk action bar (e.g. mark N as Rejected). _(MissionPage.tsx)_
+- [x] **13. CSV import guidance.** ✅ Added a tooltip on the collapsed "Import CSV" button and a **"Download sample CSV"** link (generates a ready-to-edit template) alongside the existing column spec. _(CsvImport.tsx, index.css)_
+- [x] **14. Voice rename-in-place.** ✅ Each voice card (ME → Personalization) now has a hover **rename pencil**; clicking swaps the card into a name input (Enter to save, Esc/blur to cancel) via `updatePersona`. No more diving into the Edit Voice drawer just to rename. Verified via preview. _(me/PersonaStudio.tsx, index.css)_
+
+## P3 — Polish / nice-to-haves
+
+- [x] **15. Dashboard skeleton loaders.** ✅ Upgraded the shared `<Skeleton>` from a faint pulse to a **shimmer sweep** (`.app-skeleton`, respects reduced-motion) and replaced the dashboard's 3 plain rects with **structured skeleton cards** that mimic a real mission card (title + status pill + progress + stat row). Verified via preview. _(ui/skeleton.tsx, Dashboard.tsx, index.css)_
+- [x] **16. "N drafts to review" card names the missions.** ✅ The focus card now lists the mission names with pending drafts (e.g. "Find me a summer Internship · Q1 sponsorship") and links **straight to that mission** when only one has drafts. _(Dashboard.tsx)_
+- [x] **17. Autopilot progress indicator.** ✅ Added a spinner next to the "Working on the first batch…" state and an always-on cadence line — "Last ran 12m ago · checks every 24h" (or "First run on the next cycle") — so users aren't flying blind. _(AutopilotPanel.tsx, index.css)_
+- [x] **18. Confidence score tooltip.** ✅ Replaced the bare `title="Confidence"` with an explanatory tooltip: it's the estimated **reply-likelihood** (role/seniority fit + signals), per CONTACT_ENGINE.md §5. _(MissionPage.tsx)_
+- [x] **19. Evidence pack tag colors.** ✅ Color-coded the signal pills by type (funding=green, hiring=blue, launch=purple, sponsorship=amber, partnership=teal, leadership=pink, press=indigo, talk=orange, …) via a `data-signal` attr; dark-correct hues. Verified via preview. _(MissionPage.tsx, index.css)_
+- [ ] **20. More keyboard shortcuts + `?` help overlay.** Build on the existing `/`-to-search (e.g. `n` new mission, `r` run pipeline), surfaced in a help overlay. _(AppLayout.tsx)_
+- [x] **21. Inbox unread count badge.** ✅ The Inbox nav item now shows a filled count badge (caps at "9+") when there are unhandled replies, polled every 60s + on window focus, on both desktop sidebar and mobile sheet. _(AppLayout.tsx)_
+
+---
+
+### Progress log
+- _2026-06-25_: Created tracking doc, triaged 21 items into P0–P3.

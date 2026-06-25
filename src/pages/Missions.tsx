@@ -51,6 +51,27 @@ function countBy(rows: Array<Record<string, unknown>>, key: string): Map<string,
   return map;
 }
 
+// Count DISTINCT values of `distinctKey` within each `groupKey`. Used for draft
+// counts: a "draft" is one-per-contact, so counting distinct contacts (not raw
+// email_sequences rows) keeps this card in agreement with the mission header and
+// dashboard even if a contact ever ends up with more than one sequence row.
+function countDistinctBy(
+  rows: Array<Record<string, unknown>>,
+  groupKey: string,
+  distinctKey: string
+): Map<string, number> {
+  const seen = new Map<string, Set<string>>();
+  for (const r of rows) {
+    const g = String(r[groupKey] ?? '');
+    const d = String(r[distinctKey] ?? '');
+    if (!seen.has(g)) seen.set(g, new Set());
+    seen.get(g)!.add(d);
+  }
+  const map = new Map<string, number>();
+  for (const [g, set] of seen) map.set(g, set.size);
+  return map;
+}
+
 const MODE_LABEL: Record<string, string> = {
   sponsorship: 'Sponsorship',
   bd: 'BD',
@@ -138,12 +159,12 @@ export function Missions() {
       if (ids.length > 0) {
         const [tRes, sRes] = await Promise.all([
           supabase.from('targets').select('id, mission_id').in('mission_id', ids),
-          supabase.from('email_sequences').select('id, mission_id').in('mission_id', ids),
+          supabase.from('email_sequences').select('mission_id, contact_id').in('mission_id', ids),
         ]);
         if (tRes.error) throw new Error(tRes.error.message);
         if (sRes.error) throw new Error(sRes.error.message);
         targetCounts = countBy(tRes.data ?? [], 'mission_id');
-        draftCounts = countBy(sRes.data ?? [], 'mission_id');
+        draftCounts = countDistinctBy(sRes.data ?? [], 'mission_id', 'contact_id');
       }
       setMissions(
         list.map((m) => ({

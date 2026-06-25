@@ -8,6 +8,12 @@ interface ParsedRow {
   fit_reason?: string;
 }
 
+// Template offered via "Download sample CSV" so the expected format is concrete.
+const SAMPLE_CSV = `company,domain,why_now,fit_reason
+Vercel,vercel.com,Sponsored 6 hackathons in 2025,Strong dev-tools brand with active student programs
+Linear,linear.app,Just launched Linear for Designers,Fast-growing team that invests in community outreach
+`;
+
 interface Props {
   missionId: string;
   onImported: () => void;
@@ -89,9 +95,27 @@ export function CsvImport({ missionId, onImported }: Props) {
     reader.readAsText(file);
   }
 
+  // Generate + download a ready-to-edit template so users know the exact format.
+  function downloadSample() {
+    const blob = new Blob([SAMPLE_CSV], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'outreachos-targets-sample.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
   if (!open) {
     return (
-      <button type="button" className="btn-secondary" onClick={() => setOpen(true)}>
+      <button
+        type="button"
+        className="btn-secondary"
+        onClick={() => setOpen(true)}
+        title="Bulk-add target companies from a CSV (company, domain, why_now, fit_reason)"
+      >
         Import CSV
       </button>
     );
@@ -104,7 +128,10 @@ export function CsvImport({ missionId, onImported }: Props) {
         <button type="button" className="link-button" onClick={() => setOpen(false)}>×</button>
       </div>
       <p className="section-hint">
-        Header row optional. Recognized columns: <code>company</code>, <code>domain</code>, <code>why_now</code>, <code>fit_reason</code>. Or paste one company per line.
+        Header row optional. Recognized columns: <code>company</code>, <code>domain</code>, <code>why_now</code>, <code>fit_reason</code>. Or paste one company per line.{' '}
+        <button type="button" className="link-button csv-sample-link" onClick={downloadSample}>
+          Download sample CSV
+        </button>
       </p>
       <textarea
         rows={6}

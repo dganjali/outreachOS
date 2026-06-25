@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Check } from 'lucide-react';
+import { Check, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import { billing } from '../lib/api';
@@ -133,9 +133,15 @@ export function AutopilotPanel({ missionId }: { missionId: string }) {
     if (counts.queued) statusFrags.push(`${counts.queued} scheduled`);
     if (counts.review) statusFrags.push(`${counts.review} to review`);
     if (sentToday) statusFrags.push(`${sentToday} sent today`);
-    if (p.last_sourced_at) statusFrags.push(`sourced ${relativeTime(p.last_sourced_at)}`);
   }
   const status = statusFrags.length ? statusFrags.join(' · ') : 'Working on the first batch…';
+  // "Working" = enabled but nothing has happened yet, so we show a spinner; the
+  // cadence line removes the "flying blind" feeling by stating when it last ran
+  // and how often it checks.
+  const working = enabled && !!p && statusFrags.length === 0 && !p.last_sourced_at;
+  const cadence = p
+    ? `${p.last_sourced_at ? `Last ran ${relativeTime(p.last_sourced_at)}` : 'First run on the next cycle'} · checks every ${p.cycle_interval_hours ?? 24}h`
+    : '';
 
   return (
     <div className="autopilot-panel">
@@ -158,7 +164,11 @@ export function AutopilotPanel({ missionId }: { missionId: string }) {
 
       {enabled && p && (
         <>
-          <p className="autopilot-status">{status}</p>
+          <p className="autopilot-status">
+            {working && <Loader2 size={13} className="pw-spin" aria-hidden />}
+            <span>{status}</span>
+          </p>
+          {cadence && <p className="autopilot-cadence">{cadence}</p>}
 
           <div className="pw">
             <div className="pw-field-label">When a draft is ready</div>

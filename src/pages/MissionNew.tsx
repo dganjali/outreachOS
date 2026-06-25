@@ -50,6 +50,9 @@ export function MissionNew() {
 
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // Set once the user clicks "Next" with required fields empty, so we can reveal
+  // inline per-field errors instead of a silently-dead disabled button (#5).
+  const [triedNext, setTriedNext] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -58,8 +61,21 @@ export function MissionNew() {
       .catch((e) => setError(e instanceof Error ? e.message : 'failed to load voices'));
   }, [user]);
 
-  const step1Valid = name.trim() && whatSending.trim() && whoAndWhy.trim();
+  const missingName = !name.trim();
+  const missingOffer = !whatSending.trim();
+  const missingAudience = !whoAndWhy.trim();
+  const step1Valid = !missingName && !missingOffer && !missingAudience;
   const selectedPersona = personas.find((p) => p.id === personaId) ?? null;
+
+  // Advance from step 1: if anything required is blank, reveal inline errors and
+  // stay put instead of doing nothing.
+  function nextFromStep1() {
+    if (!step1Valid) {
+      setTriedNext(true);
+      return;
+    }
+    goto(2, 'forward');
+  }
 
   function goto(s: Step, direction: 'forward' | 'back') {
     setDir(direction);
@@ -157,12 +173,14 @@ export function MissionNew() {
                 <label className="pw-field">
                   <span className="pw-field-label">Mission name</span>
                   <input
-                    className="pw-input"
+                    className={`pw-input${triedNext && missingName ? ' is-error' : ''}`}
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="e.g. Q1 sponsorship outreach"
+                    aria-invalid={triedNext && missingName}
                     autoFocus
                   />
+                  {triedNext && missingName && <span className="pw-field-error">Give your mission a name.</span>}
                 </label>
 
                 <div className="pw-field-label">Mode</div>
@@ -192,22 +210,26 @@ export function MissionNew() {
                 <label className="pw-field">
                   <span className="pw-field-label">What you're sending / your offer</span>
                   <textarea
-                    className="pw-input pw-textarea"
+                    className={`pw-input pw-textarea${triedNext && missingOffer ? ' is-error' : ''}`}
                     rows={3}
                     value={whatSending}
                     onChange={(e) => setWhatSending(e.target.value)}
                     placeholder="Be specific. e.g. 'Sponsorship tiers $5k–25k for a 1,400-person developer conference (60% senior engineers).'"
+                    aria-invalid={triedNext && missingOffer}
                   />
+                  {triedNext && missingOffer && <span className="pw-field-error">Describe what you're offering.</span>}
                 </label>
                 <label className="pw-field">
                   <span className="pw-field-label">Who you want to reach</span>
                   <textarea
-                    className="pw-input pw-textarea"
+                    className={`pw-input pw-textarea${triedNext && missingAudience ? ' is-error' : ''}`}
                     rows={3}
                     value={whoAndWhy}
                     onChange={(e) => setWhoAndWhy(e.target.value)}
                     placeholder="e.g. 'Dev-tools companies with active student programs and recent hackathon sponsorships in 2025.'"
+                    aria-invalid={triedNext && missingAudience}
                   />
+                  {triedNext && missingAudience && <span className="pw-field-error">Describe who you want to reach.</span>}
                 </label>
                 <label className="pw-field">
                   <span className="pw-field-label">
@@ -329,15 +351,19 @@ export function MissionNew() {
 
         <footer className="pw-actions">
           <div>
-            {step > 1 && (
+            {step > 1 ? (
               <button type="button" className="pw-btn-ghost" onClick={() => goto((step - 1) as Step, 'back')} disabled={saving}>
                 <ArrowLeft size={15} /> Back
+              </button>
+            ) : (
+              <button type="button" className="pw-btn-ghost" onClick={() => navigate('/missions')} disabled={saving}>
+                Cancel
               </button>
             )}
           </div>
           <div className="pw-actions-right">
             {step === 1 && (
-              <button type="button" className="pw-btn-primary" onClick={() => goto(2, 'forward')} disabled={!step1Valid}>
+              <button type="button" className="pw-btn-primary" onClick={nextFromStep1} aria-disabled={!step1Valid}>
                 Next <ArrowRight size={15} />
               </button>
             )}

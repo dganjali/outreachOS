@@ -218,6 +218,9 @@ export interface MissionDoc extends BaseDoc {
   // Optional location focus (region/country/city) for contact discovery. null =
   // no geographic preference. See CONTACT_ENGINE.md §4.
   geo?: string | null;
+  // Free-text notes the user keeps on the mission (context, status reminders,
+  // targeting caveats). Optional so pre-notes missions read as undefined.
+  notes?: string | null;
   // Cached Ideal Contact Profile - generated once on first contact discovery and
   // reused across this mission's targets (CONTACT_ENGINE.md §2/§8). Optional so
   // pre-engine missions read as undefined; lazily backfilled on next run.

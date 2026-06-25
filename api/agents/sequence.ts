@@ -19,6 +19,7 @@ import type {
   EmailSequenceDoc,
   EvidencePackDoc,
   MissionDoc,
+  SentMessageDoc,
   TargetDoc,
 } from '../../shared/schemas';
 
@@ -107,6 +108,30 @@ export default async function handler(req: Request, res: Response) {
     // Initial email - grounded engine, single critique pass (bulk tier).
     const result = await runDraftEngine(ctx, 'bulk');
     const { subject, body, angle, claims } = result.draft;
+
+    // Idempotent regenerate: a "draft" is one-per-contact, so replace any prior
+    // UNSENT draft for this contact instead of stacking a duplicate row. Without
+    // this, re-running the pipeline (or autopilot sourcing) accumulates rows that
+    // (a) inflate the draft counts in the missions list / dashboard / header and
+    // (b) make autopilot-tick gate & draft the same contact twice. Only delete
+    // drafts that have NO sent_messages referencing them, so scheduled or
+    // already-sent history is never touched.
+    const priorDrafts = await scope
+      .collection<EmailSequenceDoc>('email_sequences')
+      .find({ contactId: contact_id, status: 'draft' });
+    if (priorDrafts.length > 0) {
+      const priorIds = priorDrafts.map((s) => s._id);
+      const refs = await scope
+        .collection<SentMessageDoc>('sent_messages')
+        .find({ sequenceId: { $in: priorIds } });
+      const referenced = new Set(refs.map((m) => m.sequenceId));
+      const deletable = priorIds.filter((id) => !referenced.has(id));
+      if (deletable.length > 0) {
+        await scope
+          .collection<EmailSequenceDoc>('email_sequences')
+          .deleteMany({ _id: { $in: deletable } });
+      }
+    }
 
     const row = await scope.collection<EmailSequenceDoc>('email_sequences').insertOne({
       _id: newId(),

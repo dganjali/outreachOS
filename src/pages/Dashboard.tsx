@@ -105,6 +105,24 @@ function countByMission(rows: Array<Record<string, unknown>>): Map<string, numbe
   return map;
 }
 
+// Distinct-value count per mission. Drafts are one-per-contact, so the card's
+// "drafts" stat counts distinct contacts (not raw email_sequences rows) to stay
+// in agreement with the missions list and the mission header.
+function countDistinctByMission(
+  rows: Array<Record<string, unknown>>,
+  distinctKey: string
+): Map<string, number> {
+  const seen = new Map<string, Set<string>>();
+  for (const r of rows) {
+    const m = String(r.mission_id ?? '');
+    if (!seen.has(m)) seen.set(m, new Set());
+    seen.get(m)!.add(String(r[distinctKey] ?? ''));
+  }
+  const map = new Map<string, number>();
+  for (const [m, set] of seen) map.set(m, set.size);
+  return map;
+}
+
 function profileCompleteness(profile: Record<string, unknown> | null | undefined): number {
   if (!profile) return 0;
   const filled = PROFILE_FIELDS.filter((f) => {
@@ -257,11 +275,11 @@ export function Dashboard() {
         const [tRes, cRes, sRes] = await Promise.all([
           supabase.from('targets').select('id, mission_id').in('mission_id', missionIds),
           supabase.from('contacts').select('id, mission_id').in('mission_id', missionIds),
-          supabase.from('email_sequences').select('id, mission_id').in('mission_id', missionIds),
+          supabase.from('email_sequences').select('mission_id, contact_id').in('mission_id', missionIds),
         ]);
         counts.targets = countByMission(tRes.data ?? []);
         counts.contacts = countByMission(cRes.data ?? []);
-        counts.drafts = countByMission(sRes.data ?? []);
+        counts.drafts = countDistinctByMission(sRes.data ?? [], 'contact_id');
       }
       const missionsWithStats: MissionWithStats[] = missionsList.map((m) => ({
         ...m,
@@ -514,14 +532,22 @@ export function Dashboard() {
   }
 
   // ---- Active dashboard ----
+  // Which missions actually have drafts pending, so the focus card names them
+  // (and links straight to the mission when there's only one).
+  const draftMissions = missions.filter((m) => m.draft_count > 0);
+  const draftMissionsSub =
+    draftMissions.length > 0
+      ? draftMissions.slice(0, 3).map((m) => m.name).join(' · ') +
+        (draftMissions.length > 3 ? ` +${draftMissions.length - 3} more` : '')
+      : 'Agent-written emails waiting for your eyes.';
   const focusItems = [
     stats.drafts > 0
       ? {
           key: 'drafts',
           count: stats.drafts,
           noun: stats.drafts === 1 ? 'draft to review' : 'drafts to review',
-          sub: 'Agent-written emails waiting for your eyes.',
-          to: '/missions',
+          sub: draftMissionsSub,
+          to: draftMissions.length === 1 ? `/missions/${draftMissions[0].id}` : '/missions',
           cta: 'Review drafts',
         }
       : null,
@@ -674,9 +700,20 @@ export function Dashboard() {
           />
           {loading ? (
             <div className="flex flex-col gap-2">
-              <Skeleton className="h-[5.5rem] w-full rounded-lg" />
-              <Skeleton className="h-[5.5rem] w-full rounded-lg" />
-              <Skeleton className="h-[5.5rem] w-full rounded-lg" />
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="skeleton-card">
+                  <div className="skeleton-card-row">
+                    <Skeleton className="h-4 w-40" />
+                    <Skeleton className="ml-auto h-5 w-16 rounded-full" />
+                  </div>
+                  <Skeleton className="h-2.5 w-full rounded-full" />
+                  <div className="skeleton-card-row">
+                    <Skeleton className="h-3 w-20" />
+                    <Skeleton className="h-3 w-16" />
+                    <Skeleton className="h-3 w-16" />
+                  </div>
+                </div>
+              ))}
             </div>
           ) : (
             <div className="panel divide-y divide-border/70 overflow-hidden">

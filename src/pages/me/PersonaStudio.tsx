@@ -6,8 +6,8 @@
 // so configuration is progressive instead of a wall.
 
 import { useCallback, useEffect, useState } from 'react';
-import { Mic2, Plus, Check, Trash2, Loader2 } from 'lucide-react';
-import { listPersonas, deletePersona, isPersonaCalibrated } from '../../lib/personas';
+import { Mic2, Plus, Check, Trash2, Loader2, Pencil } from 'lucide-react';
+import { listPersonas, deletePersona, updatePersona, isPersonaCalibrated } from '../../lib/personas';
 import { PersonaWizard } from '../../components/persona/PersonaWizard';
 import type { Persona } from '../../types';
 
@@ -20,6 +20,10 @@ export function PersonaStudio({ userId }: { userId: string | undefined }) {
   // Persona id awaiting delete confirmation, and the one currently deleting.
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Inline rename: the card whose name is being edited, the draft, and a saving flag.
+  const [editingNameId, setEditingNameId] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState('');
+  const [savingName, setSavingName] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!userId) return;
@@ -51,6 +55,35 @@ export function PersonaStudio({ userId }: { userId: string | undefined }) {
       setError(e instanceof Error ? e.message : 'Could not delete this voice');
     } finally {
       setDeletingId(null);
+    }
+  }
+
+  function startRename(p: Persona) {
+    setEditingNameId(p.id);
+    setNameDraft(p.name);
+  }
+  function cancelRename() {
+    setEditingNameId(null);
+    setNameDraft('');
+  }
+  async function commitRename(id: string) {
+    const next = nameDraft.trim();
+    const current = personas.find((x) => x.id === id);
+    if (!current || !next || next === current.name) {
+      cancelRename();
+      return;
+    }
+    setSavingName(true);
+    setError(null);
+    try {
+      await updatePersona(id, { name: next });
+      setPersonas((prev) => prev.map((x) => (x.id === id ? { ...x, name: next } : x)));
+      setEditingNameId(null);
+      setNameDraft('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not rename this voice');
+    } finally {
+      setSavingName(false);
     }
   }
 
@@ -103,26 +136,65 @@ export function PersonaStudio({ userId }: { userId: string | undefined }) {
         <div className="me-voice-grid">
           {personas.map((p) => (
             <div key={p.id} className="me-voice-card-wrap">
-              <button type="button" className="me-voice-card" onClick={() => setActive(p.id)}>
-                <div className="me-voice-card-top">
-                  <span className="me-voice-name">{p.name}</span>
+              {editingNameId === p.id ? (
+                <div className="me-voice-card me-voice-card-editing">
+                  <input
+                    className="me-voice-name-input"
+                    value={nameDraft}
+                    autoFocus
+                    maxLength={80}
+                    disabled={savingName}
+                    aria-label="Voice name"
+                    onChange={(e) => setNameDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        commitRename(p.id);
+                      } else if (e.key === 'Escape') {
+                        e.preventDefault();
+                        cancelRename();
+                      }
+                    }}
+                    onBlur={() => commitRename(p.id)}
+                  />
+                  <span className="me-voice-rename-hint">
+                    {savingName ? 'Saving…' : 'Enter to save · Esc to cancel'}
+                  </span>
                 </div>
-                <p className="me-voice-summary">
-                  {p.style_profile?.voice_summary?.trim() ||
-                    (p.mode ? `${capitalize(p.mode)} voice` : 'No tone tuned yet')}
-                </p>
-                <div className="me-voice-status">
-                  {isPersonaCalibrated(p) ? (
-                    <span className="me-voice-tag is-ready">
-                      <Check size={12} /> Calibrated
-                    </span>
-                  ) : (
-                    <span className="me-voice-tag">Draft</span>
-                  )}
-                </div>
-              </button>
+              ) : (
+                <button type="button" className="me-voice-card" onClick={() => setActive(p.id)}>
+                  <div className="me-voice-card-top">
+                    <span className="me-voice-name">{p.name}</span>
+                  </div>
+                  <p className="me-voice-summary">
+                    {p.style_profile?.voice_summary?.trim() ||
+                      (p.mode ? `${capitalize(p.mode)} voice` : 'No tone tuned yet')}
+                  </p>
+                  <div className="me-voice-status">
+                    {isPersonaCalibrated(p) ? (
+                      <span className="me-voice-tag is-ready">
+                        <Check size={12} /> Calibrated
+                      </span>
+                    ) : (
+                      <span className="me-voice-tag">Draft</span>
+                    )}
+                  </div>
+                </button>
+              )}
 
-              {confirmId === p.id ? (
+              {editingNameId !== p.id && (
+                <button
+                  type="button"
+                  className="me-voice-rename"
+                  aria-label={`Rename ${p.name}`}
+                  title="Rename voice"
+                  onClick={() => startRename(p)}
+                >
+                  <Pencil size={13} />
+                </button>
+              )}
+
+              {editingNameId === p.id ? null : confirmId === p.id ? (
                 <div className="me-voice-confirm" role="group" aria-label={`Delete ${p.name}?`}>
                   <span className="me-voice-confirm-label">Delete?</span>
                   <button
