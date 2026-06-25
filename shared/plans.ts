@@ -95,6 +95,18 @@ export const PLAN_ORDER: PlanId[] = ['free', 'starter', 'pro', 'scale'];
 
 export const DEFAULT_PLAN: PlanId = 'free';
 
+/**
+ * ISO-4217 currency all plan prices are billed in. The Stripe Prices are
+ * denominated in CAD, so the UI must say so - a bare "$" reads as USD to most
+ * visitors. Keep this in sync with the currency of the Stripe Prices.
+ */
+export const PLAN_CURRENCY = 'CAD';
+
+/** Monthly price with an explicit Canadian-dollar marker, e.g. "C$29". */
+export function formatPriceMonthly(priceMonthly: number): string {
+  return `C$${priceMonthly}`;
+}
+
 export function isPlanId(v: unknown): v is PlanId {
   return v === 'free' || v === 'starter' || v === 'pro' || v === 'scale';
 }

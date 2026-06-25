@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Check, Loader2, Zap } from 'lucide-react';
 import { billing, type BillingMe } from '../lib/api';
-import { PLANS, PLAN_ORDER, type PlanId } from '../../shared/plans';
+import { PLANS, PLAN_ORDER, formatPriceMonthly, type PlanId } from '../../shared/plans';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -138,7 +138,7 @@ export function PlanBilling() {
                 {isCurrent && <Badge variant="secondary" className="text-primary">Current</Badge>}
               </div>
               <div className="mt-1 text-2xl font-semibold tracking-tight text-foreground">
-                ${plan.priceMonthly}
+                {formatPriceMonthly(plan.priceMonthly)}
                 <span className="text-sm font-normal text-muted-foreground">/mo</span>
               </div>
               <p className="mt-1 text-xs text-muted-foreground">{plan.blurb}</p>

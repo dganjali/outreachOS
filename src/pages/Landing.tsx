@@ -14,7 +14,7 @@ import {
   AccordionTrigger,
 } from '@/components/ui/accordion';
 import { cn } from '@/lib/utils';
-import { PLANS, PLAN_ORDER } from '../../shared/plans';
+import { PLANS, PLAN_ORDER, formatPriceMonthly } from '../../shared/plans';
 
 const REPLACES = ['Apollo', 'LinkedIn', 'ChatGPT', 'Spreadsheets', 'Gmail'];
 
@@ -440,7 +440,7 @@ export function Landing() {
                         <span className="font-display text-[2.5rem] font-semibold tracking-tight text-foreground">Free</span>
                       ) : (
                         <>
-                          <span className="font-display text-[2.5rem] font-semibold tracking-tight text-foreground">${plan.priceMonthly}</span>
+                          <span className="font-display text-[2.5rem] font-semibold tracking-tight text-foreground">{formatPriceMonthly(plan.priceMonthly)}</span>
                           <span className="text-sm text-muted-foreground">/mo</span>
                         </>
                       )}

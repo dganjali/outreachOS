@@ -68,13 +68,23 @@ function currentMonthKey(now = new Date()): string {
   return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
+/**
+ * Mission launches used in the current month, read from the monotonic counter
+ * on the profile - the same source checkMissionQuota enforces against. Pure (no
+ * DB), so callers that already hold the profile (e.g. billing /me) can reuse it
+ * instead of counting mission docs, which would diverge from enforcement the
+ * moment a mission is deleted.
+ */
+export function missionsUsedThisMonth(profile: Pick<ProfileDoc, 'missionQuota'> | null | undefined): number {
+  const q = profile?.missionQuota;
+  return q && q.period === currentMonthKey() ? q.used : 0;
+}
+
 /** How many launches the caller has used this month, and their plan's cap. */
 async function missionUsage(scope: UserScope): Promise<{ used: number; limit: number }> {
   const profile = await scope.collection<ProfileDoc>('profiles').findOne({});
   const limit = planLimits(profile?.plan, profile?.planStatus).missionsPerMonth;
-  const q = profile?.missionQuota;
-  const used = q && q.period === currentMonthKey() ? q.used : 0;
-  return { used, limit };
+  return { used: missionsUsedThisMonth(profile), limit };
 }
 
 /**

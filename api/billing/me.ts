@@ -6,6 +6,7 @@ import { requireUser } from '../_lib/auth';
 import { forUser } from '../_lib/db';
 import type { ProfileDoc, AgentRunDoc } from '../../shared/schemas';
 import { resolvePlan, planLimits, DEFAULT_PLAN } from '../../shared/plans';
+import { missionsUsedThisMonth } from '../_lib/runs';
 
 export default async function handler(req: Request, res: Response) {
   const user = await requireUser(req, res);
@@ -17,14 +18,13 @@ export default async function handler(req: Request, res: Response) {
   const plan = resolvePlan(profile?.plan, profile?.planStatus);
   const limits = planLimits(profile?.plan, profile?.planStatus);
 
-  const now = new Date();
-  const dayAgo = new Date(now.getTime() - 86_400_000);
-  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const dayAgo = new Date(Date.now() - 86_400_000);
 
-  const [runsToday, missionsThisMonth] = await Promise.all([
-    scope.collection<AgentRunDoc>('agent_runs').countDocuments({ startedAt: { $gte: dayAgo } }),
-    scope.collection('missions').countDocuments({ createdAt: { $gte: monthStart } }),
-  ]);
+  // Mission usage comes from the monotonic monthly counter (the same source
+  // checkMissionQuota enforces against) - NOT a live count of mission docs,
+  // which would under-report after a delete and mislead a paying user.
+  const runsToday = await scope.collection<AgentRunDoc>('agent_runs').countDocuments({ startedAt: { $gte: dayAgo } });
+  const missionsThisMonth = missionsUsedThisMonth(profile);
 
   return res.json({
     plan, // effective plan id (free if canceled/incomplete)
