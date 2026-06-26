@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   Send, Sparkles, Lock, Undo2, Paperclip, Pencil,
-  Plane, Radar, Users, PenLine, Clock, Eye, MessageSquare, Check, ChevronRight,
+  Plane, PlaneTakeoff, Radar, Users, PenLine, Clock, Eye, MessageSquare, Check, ChevronRight,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
@@ -821,11 +821,11 @@ function MissionTopbar({
         {!autopilotOn && (
           <button
             type="button"
-            className="btn-go"
+            className="btn-go mtop-run"
             onClick={onRun}
             title="Find companies, research them, surface contacts, and draft initial emails, live."
           >
-            Run pipeline
+            <PlaneTakeoff size={15} aria-hidden /> Run pipeline
           </button>
         )}
       </div>
@@ -949,7 +949,7 @@ function AutopilotCockpit({
                   <span className="flight-trail" style={{ width: `${f.progress}%` }} aria-hidden />
                   {/* Clamp the plane so it stays fully in-frame even when landed. */}
                   <span className="flight-plane" style={{ left: `${Math.min(f.progress, 95)}%` }} aria-hidden>
-                    <Plane size={13} />
+                    <Plane size={16} />
                   </span>
                 </div>
                 <span className="flight-phase">{f.phase}</span>
