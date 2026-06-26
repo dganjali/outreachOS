@@ -18,6 +18,7 @@ import type {
   EvidencePack,
   EmailSequence,
   SentMessage,
+  Reply,
 } from '../types';
 
 const MODE_LABEL: Record<string, string> = {
@@ -69,6 +70,9 @@ export function MissionPage() {
   // Bulk contact selection (checkboxes + floating action bar).
   const [selectedContactIds, setSelectedContactIds] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+  // Per-contact activity timeline sources (sent emails + inbound replies).
+  const [sentByContact, setSentByContact] = useState<Record<string, SentMessage[]>>({});
+  const [repliesByContact, setRepliesByContact] = useState<Record<string, Reply[]>>({});
   const [activeTargetId, setActiveTargetId] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -229,6 +233,41 @@ export function MissionPage() {
         .eq('status', 'sent');
       if (cancelled) return;
       setInitialSentSeqIds(new Set((sent ?? []).map((m) => (m as { sequence_id: string }).sequence_id)));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [contactIdsKey, refreshKey]);
+
+  // Activity-timeline sources: every sent/scheduled email and every inbound
+  // reply for the mission's contacts, batched into two requests. Powers the
+  // per-contact "Activity" log (so a campaign can be resumed days later).
+  useEffect(() => {
+    const ids = contactIdsKey ? contactIdsKey.split(',') : [];
+    if (ids.length === 0) {
+      setSentByContact({});
+      setRepliesByContact({});
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const [sentRes, repRes] = await Promise.all([
+        supabase
+          .from('sent_messages')
+          .select('id, contact_id, touch_index, subject, status, scheduled_send_at, sent_at, created_at')
+          .in('contact_id', ids),
+        supabase
+          .from('replies')
+          .select('id, contact_id, subject, snippet, received_at, created_at')
+          .in('contact_id', ids),
+      ]);
+      if (cancelled) return;
+      const sBy: Record<string, SentMessage[]> = {};
+      for (const m of (sentRes.data ?? []) as SentMessage[]) (sBy[m.contact_id] ??= []).push(m);
+      setSentByContact(sBy);
+      const rBy: Record<string, Reply[]> = {};
+      for (const r of (repRes.data ?? []) as Reply[]) (rBy[r.contact_id] ??= []).push(r);
+      setRepliesByContact(rBy);
     })();
     return () => {
       cancelled = true;
@@ -694,8 +733,15 @@ export function MissionPage() {
                       {contacts.map((c) => {
                         const seq = sequencesByContact[c.id];
                         return (
-                          <div key={c.id} className="contact-row">
+                          <div key={c.id} className={`contact-row${selectedContactIds.has(c.id) ? ' selected' : ''}`}>
                             <div className="contact-row-head">
+                              <input
+                                type="checkbox"
+                                className="contact-select"
+                                checked={selectedContactIds.has(c.id)}
+                                onChange={() => toggleContactSelected(c.id)}
+                                aria-label={`Select ${c.name}`}
+                              />
                               <div className="contact-identity">
                                 <span className="contact-name-line">
                                   <strong>{c.name}</strong>
@@ -754,6 +800,12 @@ export function MissionPage() {
                             {c.reasoning && <div className="contact-reason">{c.reasoning}</div>}
 
                             {seq && <SequenceCard key={`${seq.id}:${refreshKey}`} sequence={seq} contact={c} aiEnabled={aiEnabled} hasResume={hasResume} onContactUpdated={() => loadContactsForTarget(t.id)} onSequenceUpdated={() => loadSequencesForContact(c.id)} />}
+                            <ContactActivity
+                              contact={c}
+                              sequence={seq}
+                              sent={sentByContact[c.id] ?? []}
+                              replies={repliesByContact[c.id] ?? []}
+                            />
                           </div>
                         );
                       })}
@@ -776,7 +828,115 @@ export function MissionPage() {
           </Accordion>
         )}
       </section>
+
+      {selectedContactIds.size > 0 && (
+        <div className="bulk-action-bar" role="region" aria-label="Bulk contact actions">
+          <span className="bulk-count">
+            {selectedContactIds.size} contact{selectedContactIds.size === 1 ? '' : 's'} selected
+          </span>
+          <div className="bulk-actions">
+            <button
+              type="button"
+              className="btn-secondary small"
+              disabled={bulkBusy}
+              onClick={() => bulkSetContactStatus('approved')}
+            >
+              Approve
+            </button>
+            <button
+              type="button"
+              className="btn-secondary small"
+              disabled={bulkBusy}
+              onClick={() => bulkSetContactStatus('contacted')}
+            >
+              Mark contacted
+            </button>
+            <button
+              type="button"
+              className="btn-secondary small bulk-danger"
+              disabled={bulkBusy}
+              onClick={() => bulkSetContactStatus('rejected')}
+            >
+              Reject
+            </button>
+            <button type="button" className="link-button" disabled={bulkBusy} onClick={clearSelection}>
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+// Per-contact activity timeline, synthesized from real timestamps we already
+// have: discovery, draft, each sent/scheduled email, and inbound replies. No
+// status-change events (we don't store their timestamps) - the current status
+// is shown on the row itself.
+function fmtActivityTime(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+function ContactActivity({
+  contact,
+  sequence,
+  sent,
+  replies,
+}: {
+  contact: Contact;
+  sequence?: EmailSequence | null;
+  sent: SentMessage[];
+  replies: Reply[];
+}) {
+  const events = useMemo(() => {
+    type Ev = { at: string | null; label: string; detail?: string; kind: string };
+    const evs: Ev[] = [];
+    const sourceLabel =
+      contact.source === 'csv' ? 'Imported from CSV' : contact.source === 'manual' ? 'Added manually' : 'Found via web search';
+    evs.push({ at: contact.created_at, kind: 'found', label: 'Contact discovered', detail: sourceLabel });
+    if (sequence) evs.push({ at: sequence.created_at, kind: 'draft', label: 'Draft written' });
+    for (const m of sent) {
+      const touchLabel = m.touch_index === 0 ? 'Initial email' : `Follow-up ${m.touch_index}`;
+      if (m.status === 'sent' && m.sent_at) {
+        evs.push({ at: m.sent_at, kind: 'sent', label: `${touchLabel} sent`, detail: m.subject });
+      } else if ((m.status === 'queued' || m.status === 'draft') && m.scheduled_send_at) {
+        evs.push({ at: m.scheduled_send_at, kind: 'scheduled', label: `${touchLabel} scheduled`, detail: m.subject });
+      } else if (m.status === 'failed' || m.status === 'bounced') {
+        evs.push({ at: m.created_at, kind: 'failed', label: `${touchLabel} ${m.status}`, detail: m.subject });
+      }
+    }
+    for (const r of replies) {
+      evs.push({ at: r.received_at || r.created_at, kind: 'reply', label: 'Reply received', detail: r.subject || r.snippet || undefined });
+    }
+    return evs.sort((a, b) => {
+      if (!a.at) return 1;
+      if (!b.at) return -1;
+      return new Date(a.at).getTime() - new Date(b.at).getTime();
+    });
+  }, [contact, sequence, sent, replies]);
+
+  // Only "discovered" so far - nothing worth a collapsible timeline yet.
+  if (events.length <= 1) return null;
+
+  return (
+    <details className="contact-activity">
+      <summary>Activity ({events.length})</summary>
+      <ol className="activity-timeline">
+        {events.map((e, i) => (
+          <li key={i} className={`activity-event activity-${e.kind}`}>
+            <span className="activity-dot" aria-hidden />
+            <span className="activity-body">
+              <span className="activity-label">{e.label}</span>
+              {e.detail && <span className="activity-detail">{e.detail}</span>}
+            </span>
+            <time className="activity-time">{fmtActivityTime(e.at)}</time>
+          </li>
+        ))}
+      </ol>
+    </details>
   );
 }
 

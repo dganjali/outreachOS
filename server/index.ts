@@ -112,7 +112,13 @@ app.use((_req: Request, res: Response, next: NextFunction) => {
 // Per-IP request ceiling on every endpoint.
 app.use(globalRateLimit);
 
-app.get('/healthz', (_req, res) => res.json({ ok: true }));
+// Health check. `/healthz` works for container-internal probes, but Google's
+// Front End swallows the literal `/healthz` path on the public URL (it never
+// reaches this container), so external uptime checks must hit `/api/healthz` -
+// the `/api/*` prefix is forwarded through to us. Keep both.
+const healthz = (_req: Request, res: Response) => res.json({ ok: true });
+app.get('/healthz', healthz);
+app.get('/api/healthz', healthz);
 
 // billing
 app.post('/api/billing/checkout', wrap(billingCheckout));

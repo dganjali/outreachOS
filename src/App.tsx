@@ -29,6 +29,9 @@ const Me = lazy(() => import('./pages/Me').then((m) => ({ default: m.Me })));
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })));
 const Privacy = lazy(() => import('./pages/Legal').then((m) => ({ default: m.Privacy })));
 const Terms = lazy(() => import('./pages/Legal').then((m) => ({ default: m.Terms })));
+// Internal QA-only scaffolding. Gated behind import.meta.env.DEV so the routes
+// (and their chunks) never ship to production — `false && …` is statically
+// dead in the prod build, letting Rollup tree-shake these imports out entirely.
 const WizardPreview = lazy(() => import('./pages/_WizardPreview').then((m) => ({ default: m.WizardPreview })));
 const FeedbackPreview = lazy(() => import('./pages/_FeedbackPreview').then((m) => ({ default: m.FeedbackPreview })));
 
@@ -156,9 +159,13 @@ function App() {
                       email recovery). Public + ungated - users may arrive here signed
                       out, on a different device. See AuthAction.tsx for why it exists. */}
                   <Route path="/auth/action" element={<AuthAction />} />
-                  <Route path="/wizard-preview" element={<WizardPreview />} />
-                  <Route path="/feedback-preview" element={<FeedbackPreview />} />
-                  <Route path="/mn-preview" element={<MissionNew />} />
+                  {import.meta.env.DEV && (
+                    <>
+                      <Route path="/wizard-preview" element={<WizardPreview />} />
+                      <Route path="/feedback-preview" element={<FeedbackPreview />} />
+                      <Route path="/mn-preview" element={<MissionNew />} />
+                    </>
+                  )}
                   <Route path="/privacy" element={<Privacy />} />
                   <Route path="/terms" element={<Terms />} />
                   <Route

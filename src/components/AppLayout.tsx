@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, NavLink, Outlet } from 'react-router-dom';
+import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
   Target,
@@ -34,6 +34,102 @@ const NAV = [
   { to: '/me', label: 'Me', icon: User },
   { to: '/settings', label: 'Settings', icon: SettingsIcon },
 ];
+
+// App-wide keyboard shortcuts, surfaced in the `?` help overlay. Single-key
+// nav (guarded against firing while typing). Builds on the existing `/`-to-focus
+// search on the Missions page.
+const SHORTCUTS: { keys: string; label: string }[] = [
+  { keys: 'n', label: 'New mission' },
+  { keys: 'd', label: 'Go to Dashboard' },
+  { keys: 'm', label: 'Go to Missions' },
+  { keys: 'i', label: 'Go to Inbox' },
+  { keys: '/', label: 'Search missions (on Missions)' },
+  { keys: '?', label: 'Show this help' },
+];
+
+function ShortcutsHelp({ open, onClose }: { open: boolean; onClose: () => void }) {
+  if (!open) return null;
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Keyboard shortcuts"
+    >
+      <div
+        className="w-full max-w-sm rounded-xl border border-border bg-card p-5 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-foreground">Keyboard shortcuts</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="text-muted-foreground transition-colors hover:text-foreground"
+          >
+            ✕
+          </button>
+        </div>
+        <ul className="flex flex-col gap-2">
+          {SHORTCUTS.map((s) => (
+            <li key={s.keys} className="flex items-center justify-between gap-4 text-sm">
+              <span className="text-muted-foreground">{s.label}</span>
+              <kbd className="rounded border border-border bg-secondary px-1.5 py-0.5 font-mono text-xs text-foreground">
+                {s.keys}
+              </kbd>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+// Global single-key shortcuts. No-op while the user is typing in a field or
+// holding a modifier (so it never hijacks browser/OS chords or text entry).
+function useGlobalShortcuts(onToggleHelp: () => void, onCloseHelp: () => void) {
+  const navigate = useNavigate();
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        onCloseHelp();
+        return;
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      const typing =
+        !!t &&
+        (t.tagName === 'INPUT' ||
+          t.tagName === 'TEXTAREA' ||
+          t.tagName === 'SELECT' ||
+          t.isContentEditable);
+      if (typing) return;
+      switch (e.key) {
+        case '?':
+          e.preventDefault();
+          onToggleHelp();
+          break;
+        case 'n':
+          e.preventDefault();
+          navigate('/missions/new');
+          break;
+        case 'd':
+          navigate('/dashboard');
+          break;
+        case 'm':
+          navigate('/missions');
+          break;
+        case 'i':
+          navigate('/inbox');
+          break;
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [navigate, onToggleHelp, onCloseHelp]);
+}
 
 // Poll the count of replies still needing a response, so the Inbox nav can carry
 // an urgency badge. Replies are populated by a daily cron + handled in the inbox,
@@ -124,8 +220,13 @@ function SidebarBrand() {
 
 export function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const { user, profile, signOut } = useAuth();
   const inboxCount = useUnhandledReplyCount();
+  useGlobalShortcuts(
+    () => setHelpOpen((v) => !v),
+    () => setHelpOpen(false)
+  );
   const displayName = profile?.name || user?.email || 'User';
   const email = user?.email || '';
   const initial = displayName.trim().charAt(0).toUpperCase();
@@ -221,6 +322,8 @@ export function AppLayout() {
           </div>
         </main>
       </div>
+
+      <ShortcutsHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
     </div>
   );
 }
