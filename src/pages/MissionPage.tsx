@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { ReactNode, CSSProperties } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   Send, Sparkles, Lock, Undo2, Paperclip, Pencil,
-  Plane, PlaneTakeoff, Radar, Users, PenLine, Clock, Eye, MessageSquare, Check, ChevronRight,
+  Plane, PlaneTakeoff, Radar, Search, Users, PenLine, Clock, Eye, MessageSquare, Check, ChevronRight, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
@@ -590,24 +590,42 @@ export function MissionPage() {
   // travelled down the pipeline (sourced → researched → contacted → drafted →
   // sent → replied), mapped to a position + flight phase.
   const flights: Flight[] = visibleTargets
-    .map((t) => {
+    .map((t): Flight => {
       const cs = contactsByTarget[t.id] ?? [];
-      const replied = cs.some((c) => c.status === 'replied');
-      const sent = cs.some((c) => {
+      const repliedN = cs.filter((c) => c.status === 'replied').length;
+      const sentN = cs.filter((c) => {
         const s = sequencesByContact[c.id];
         return (s && initialSentSeqIds.has(s.id)) || c.status === 'contacted';
-      });
-      const drafted = cs.some((c) => sequencesByContact[c.id]);
+      }).length;
+      const draftsN = cs.filter((c) => sequencesByContact[c.id]).length;
       const pack = packsByTarget[t.id];
+
       let progress = 12;
       let phase = 'Taxiing';
       let tone = 'taxi';
-      if (replied) { progress = 100; phase = 'Landed'; tone = 'landed'; }
-      else if (sent) { progress = 86; phase = 'Descending'; tone = 'sent'; }
-      else if (drafted) { progress = 66; phase = 'Cruising'; tone = 'cruise'; }
-      else if (cs.length) { progress = 46; phase = 'Climbing'; tone = 'climb'; }
-      else if (pack) { progress = 30; phase = 'Climbing'; tone = 'climb'; }
-      return { id: t.id, name: t.company_name, signal: t.signal_type ?? null, progress, phase, tone, contacts: cs.length };
+      let stage: Flight['stage'] = 'sourced';
+      let note = 'Sourced — researching next.';
+      if (repliedN > 0) {
+        progress = 100; phase = 'Landed'; tone = 'landed'; stage = 'replied';
+        note = `${repliedN} repl${repliedN === 1 ? 'y' : 'ies'} in. Follow-ups paused.`;
+      } else if (sentN > 0) {
+        progress = 86; phase = 'Descending'; tone = 'sent'; stage = 'sent';
+        note = `${sentN} email${sentN === 1 ? '' : 's'} sent — awaiting a reply.`;
+      } else if (draftsN > 0) {
+        progress = 66; phase = 'Cruising'; tone = 'cruise'; stage = 'drafted';
+        note = `${draftsN} draft${draftsN === 1 ? '' : 's'} ready to send.`;
+      } else if (cs.length) {
+        progress = 46; phase = 'Climbing'; tone = 'climb'; stage = 'contacts';
+        note = `${cs.length} contact${cs.length === 1 ? '' : 's'} found — drafting outreach.`;
+      } else if (pack) {
+        progress = 30; phase = 'Climbing'; tone = 'climb'; stage = 'researched';
+        note = 'Researched — finding the right contacts.';
+      }
+      return {
+        id: t.id, name: t.company_name, signal: t.signal_type ?? null,
+        progress, phase, tone, stage, note,
+        contacts: cs.length, drafts: draftsN, sent: sentN, replied: repliedN,
+      };
     })
     .sort((a, b) => b.progress - a.progress || a.name.localeCompare(b.name));
 
@@ -656,7 +674,7 @@ export function MissionPage() {
                 {sendableInitials.length > 0 && (
                   <button
                     type="button"
-                    className="btn-go"
+                    className="btn-go btn-launch"
                     disabled={sendingAll}
                     onClick={sendAllInitial}
                     title="Send the initial email to every contact that has a draft and a recipient address"
@@ -771,8 +789,9 @@ type Metrics = {
   review: number;
 };
 
-// One company's journey down the pipeline, positioned along the cockpit's
-// Airspace route (0 = just sourced, 100 = replied/landed).
+// One company in Autopilot's airspace — a cloud the user can click to see what
+// Autopilot is doing with it. `stage` picks the cloud's status icon; `progress`
+// only seeds its starting position in the drift.
 type Flight = {
   id: string;
   name: string;
@@ -780,7 +799,12 @@ type Flight = {
   progress: number;
   phase: string;
   tone: string;
+  stage: 'sourced' | 'researched' | 'contacts' | 'drafted' | 'sent' | 'replied';
+  note: string;
   contacts: number;
+  drafts: number;
+  sent: number;
+  replied: number;
 };
 
 function MissionTopbar({
@@ -821,7 +845,7 @@ function MissionTopbar({
         {!autopilotOn && (
           <button
             type="button"
-            className="btn-go mtop-run"
+            className="btn-go btn-launch"
             onClick={onRun}
             title="Find companies, research them, surface contacts, and draft initial emails, live."
           >
@@ -910,19 +934,7 @@ function AutopilotCockpit({
 
   return (
     <div className="cockpit">
-      <div className={`cockpit-deck phase-${phase}`}>
-        <span className="cockpit-plane" aria-hidden>
-          <Plane size={22} />
-        </span>
-        <div className="cockpit-deck-text">
-          <span className="cockpit-status">Autopilot · {phaseLabel}</span>
-          <span className="cockpit-cadence">{cadence}</span>
-        </div>
-        <span className="cockpit-lamp">
-          <span className="cockpit-lamp-dot" aria-hidden />
-          Engaged
-        </span>
-      </div>
+      <Skyfield phase={phase} phaseLabel={phaseLabel} cadence={cadence} flights={flights} />
 
       <div className="cockpit-gauges">
         <Gauge icon={<Radar size={15} />} label="Sourced" value={metrics.targets} />
@@ -933,31 +945,6 @@ function AutopilotCockpit({
         <Gauge icon={<Eye size={15} />} label="To review" value={metrics.review} alert={metrics.review > 0} />
         <Gauge icon={<MessageSquare size={15} />} label="Replies" value={metrics.replies} />
       </div>
-
-      {flights.length > 0 && (
-        <section className="airspace">
-          <div className="airspace-head">
-            <Plane size={14} aria-hidden />
-            <span>Airspace</span>
-            <span className="airspace-sub">{flights.length} in flight</span>
-          </div>
-          <div className="airspace-list">
-            {flights.map((f) => (
-              <div key={f.id} className={`flight tone-${f.tone}`} title={`${f.name} · ${f.phase}`}>
-                <span className="flight-name">{f.name}</span>
-                <div className="flight-sky">
-                  <span className="flight-trail" style={{ width: `${f.progress}%` }} aria-hidden />
-                  {/* Clamp the plane so it stays fully in-frame even when landed. */}
-                  <span className="flight-plane" style={{ left: `${Math.min(f.progress, 95)}%` }} aria-hidden>
-                    <Plane size={16} />
-                  </span>
-                </div>
-                <span className="flight-phase">{f.phase}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
 
       <div className="cockpit-throttle">
         <div className="cockpit-throttle-label">When a draft is ready</div>
@@ -1043,6 +1030,119 @@ function AutopilotCockpit({
       </p>
     </div>
   );
+}
+
+// The flight view: one hero plane and a calm sky, with each company drifting
+// past as a labelled cloud you can click to see what Autopilot is doing with it.
+// Vertical lanes keep the clouds from stacking; the (negative) per-cloud
+// animation delay spreads them across the drift so they never clump.
+const SKY_LANES = [14, 38, 60, 26, 50, 18, 44, 64, 32, 56, 22, 48, 36, 12];
+
+function Skyfield({
+  phase,
+  phaseLabel,
+  cadence,
+  flights,
+}: {
+  phase: 'holding' | 'taxiing' | 'cruising';
+  phaseLabel: string;
+  cadence: string;
+  flights: Flight[];
+}) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Keep the sky calm: a few new companies a day means this rarely overflows,
+  // but cap it so the scene never turns into a swarm. The rest stay in the gauges.
+  const clouds = flights.slice(0, 14);
+  const selected = flights.find((f) => f.id === selectedId) ?? null;
+
+  return (
+    <div className="sky">
+      <div className={`sky-scene phase-${phase}`} onClick={() => setSelectedId(null)}>
+        <div className="sky-status">
+          <span className="sky-status-kicker">Autopilot</span>
+          <span className="sky-status-phase">{phaseLabel}</span>
+          <span className="sky-status-cadence">{cadence}</span>
+          <span className="sky-lamp">
+            <span className="sky-lamp-dot" aria-hidden />
+            Engaged
+          </span>
+        </div>
+
+        <div className="sky-hero" aria-hidden>
+          <span className="sky-hero-trail" />
+          <Plane size={34} />
+        </div>
+
+        {clouds.map((f, i) => (
+          <button
+            key={f.id}
+            type="button"
+            className={`cloud stage-${f.stage} tone-${f.tone}${selectedId === f.id ? ' is-selected' : ''}`}
+            style={
+              {
+                top: `${SKY_LANES[i % SKY_LANES.length]}%`,
+                left: `${f.progress}%`,
+                '--i': i,
+                '--n': clouds.length,
+              } as CSSProperties
+            }
+            onClick={(e) => {
+              e.stopPropagation();
+              setSelectedId((s) => (s === f.id ? null : f.id));
+            }}
+            title={`${f.name} · ${f.phase}`}
+          >
+            <span className="cloud-icon" aria-hidden>{stageIcon(f.stage)}</span>
+            <span className="cloud-name">{f.name}</span>
+          </button>
+        ))}
+
+        {flights.length > clouds.length && (
+          <span className="sky-more">+{flights.length - clouds.length} more</span>
+        )}
+      </div>
+
+      {selected && <FlightDetail flight={selected} onClose={() => setSelectedId(null)} />}
+    </div>
+  );
+}
+
+function FlightDetail({ flight, onClose }: { flight: Flight; onClose: () => void }) {
+  return (
+    <div className={`flight-detail tone-${flight.tone}`}>
+      <span className="flight-detail-icon" aria-hidden>{stageIcon(flight.stage)}</span>
+      <div className="flight-detail-body">
+        <div className="flight-detail-top">
+          <strong>{flight.name}</strong>
+          {flight.signal && (
+            <span className="signal-pill" data-signal={flight.signal}>{flight.signal}</span>
+          )}
+          <span className="flight-detail-phase">{flight.phase}</span>
+        </div>
+        <p className="flight-detail-note">{flight.note}</p>
+        <div className="flight-detail-stats">
+          <span>{flight.contacts} contact{flight.contacts === 1 ? '' : 's'}</span>
+          <span>{flight.drafts} draft{flight.drafts === 1 ? '' : 's'}</span>
+          <span>{flight.sent} sent</span>
+          {flight.replied > 0 && <span>{flight.replied} replied</span>}
+        </div>
+      </div>
+      <button type="button" className="flight-detail-close" onClick={onClose} aria-label="Close">
+        <X size={15} />
+      </button>
+    </div>
+  );
+}
+
+function stageIcon(stage: Flight['stage']): ReactNode {
+  switch (stage) {
+    case 'sourced': return <Radar size={13} />;
+    case 'researched': return <Search size={13} />;
+    case 'contacts': return <Users size={13} />;
+    case 'drafted': return <PenLine size={13} />;
+    case 'sent': return <Send size={13} />;
+    case 'replied': return <MessageSquare size={13} />;
+  }
 }
 
 function Gauge({
