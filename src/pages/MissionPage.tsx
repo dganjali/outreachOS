@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { Send, Sparkles, Lock, Undo2, Paperclip, Pencil } from 'lucide-react';
+import {
+  Send, Sparkles, Lock, Undo2, Paperclip, Pencil,
+  Plane, Radar, Users, PenLine, Clock, Eye, MessageSquare, Check, ChevronRight,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
@@ -9,8 +13,6 @@ import { agents, gmail } from '../lib/api';
 import { isPaidPlan } from '../../shared/plans';
 import { asScore } from '../lib/score';
 import { CsvImport } from '../components/CsvImport';
-import { AutopilotPanel } from '../components/AutopilotPanel';
-import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '../components/ui/accordion';
 import type {
   Mission,
   Target,
@@ -19,6 +21,7 @@ import type {
   EmailSequence,
   SentMessage,
   Reply,
+  CampaignPolicy,
 } from '../types';
 
 const MODE_LABEL: Record<string, string> = {
@@ -34,6 +37,18 @@ const TARGET_STATUS_LABEL: Record<string, string> = {
   approved: 'Approved',
   rejected: 'Rejected',
   contacted: 'Contacted',
+};
+
+// First-write defaults for a mission's Autopilot policy. Everything the user
+// never configures directly; the cron normalizes missing fields too.
+const AP_DEFAULTS = {
+  auto_send: false,
+  targets_per_cycle: 5,
+  cycle_interval_hours: 24,
+  daily_send_cap: 10,
+  send_window: { start_hour: 9, end_hour: 17 },
+  timezone: typeof Intl !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().timeZone : 'America/Toronto',
+  min_confidence: 0.6,
 };
 
 // Turn raw agent error codes into something a person can read. Falls through to
@@ -73,11 +88,14 @@ export function MissionPage() {
   // Per-contact activity timeline sources (sent emails + inbound replies).
   const [sentByContact, setSentByContact] = useState<Record<string, SentMessage[]>>({});
   const [repliesByContact, setRepliesByContact] = useState<Record<string, Reply[]>>({});
-  const [activeTargetId, setActiveTargetId] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Whether the user has a résumé on file - gates the "Attach résumé" send option.
   const [hasResume, setHasResume] = useState(false);
+  // Autopilot (paid). The mission page renders as a hands-off status "cockpit"
+  // when this policy is enabled, and as the manual action console otherwise.
+  const paid = isPaidPlan(profile?.plan, profile?.plan_status);
+  const [policy, setPolicy] = useState<CampaignPolicy | null>(null);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -152,10 +170,17 @@ export function MissionPage() {
     setSequencesByContact((s) => ({ ...s, [contactId]: seq }));
   }
 
+  const loadPolicy = useCallback(async () => {
+    if (!id) return;
+    const { data } = await supabase.from('campaign_policies').select('*').eq('mission_id', id).maybeSingle();
+    setPolicy((data as CampaignPolicy | null) ?? null);
+  }, [id]);
+
   useEffect(() => {
     loadMission();
     loadTargets();
-  }, [loadMission, loadTargets]);
+    loadPolicy();
+  }, [loadMission, loadTargets, loadPolicy]);
 
   // Batched: contacts + evidence for ALL targets in two requests (was 2 per
   // target). Keyed on the id list so it only refires when the set changes.
@@ -294,13 +319,11 @@ export function MissionPage() {
   }
 
   async function findContacts(target: Target) {
-    setActiveTargetId(target.id);
     const r = await runWith(`contacts:${target.id}`, () => agents.contacts(target.id));
     if (r) await loadContactsForTarget(target.id);
   }
 
   async function buildEvidence(target: Target) {
-    setActiveTargetId(target.id);
     const r = await runWith(`evidence:${target.id}`, () => agents.evidence(target.id));
     if (r) await loadEvidenceForTarget(target.id);
   }
@@ -473,6 +496,49 @@ export function MissionPage() {
     toast.success(`Marked ${c.name} as replied. Their scheduled follow-ups will not send.`);
   }
 
+  // Flip Autopilot on/off. Free users are routed to the upgrade page instead of
+  // toggling anything. First enable creates the policy row with sane defaults.
+  async function toggleAutopilot() {
+    if (!paid) {
+      navigate('/settings');
+      return;
+    }
+    if (!id) return;
+    try {
+      if (!policy) {
+        const { data, error } = await supabase
+          .from('campaign_policies')
+          .insert({ mission_id: id, enabled: true, ...AP_DEFAULTS })
+          .select('*')
+          .single();
+        if (error) throw new Error(error.message);
+        setPolicy(data as CampaignPolicy);
+        toast.success('Autopilot on. It starts sourcing and drafting on its next cycle.');
+      } else {
+        const next = !policy.enabled;
+        const { error } = await supabase.from('campaign_policies').update({ enabled: next }).eq('id', policy.id);
+        if (error) throw new Error(error.message);
+        setPolicy({ ...policy, enabled: next });
+        toast.success(next ? 'Autopilot on.' : 'Autopilot off. You are back in manual control.');
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not update Autopilot');
+    }
+  }
+
+  // Throttle controls (review-first vs auto-send, daily cap). Optimistic with a
+  // rollback on failure so the cockpit toggles feel instant.
+  async function saveAutopilotField(patch: Partial<CampaignPolicy>) {
+    if (!policy) return;
+    const prev = policy;
+    setPolicy({ ...policy, ...patch });
+    const { error } = await supabase.from('campaign_policies').update(patch).eq('id', policy.id);
+    if (error) {
+      toast.error(error.message);
+      setPolicy(prev);
+    }
+  }
+
   if (!mission) {
     return <p style={{ color: 'var(--text-muted)' }}>Loading…</p>;
   }
@@ -483,63 +549,53 @@ export function MissionPage() {
   // 'rejected' - keep them out of the output so the user only sees real targets.
   const visibleTargets = targets.filter((t) => t.status !== 'rejected');
 
+  // Whether to render the hands-off Autopilot cockpit (paid + enabled) vs. the
+  // manual action console.
+  const autopilotOn = paid && !!policy?.enabled;
+
+  // Cross-mission counts that feed the cockpit instruments. All derived from
+  // state we already load - no extra queries.
+  const allSent = Object.values(sentByContact).flat();
+  const sentCount = allSent.filter((m) => m.status === 'sent').length;
+  const scheduledCount = allSent.filter((m) => m.status === 'queued').length;
+  const repliesCount = allContacts.filter((c) => c.status === 'replied').length;
+  const sentToday =
+    policy?.counter && policy.counter.date === new Date().toISOString().slice(0, 10) ? policy.counter.sent : 0;
+
+  // Drafts Autopilot wrote but is holding for the user (low confidence /
+  // unverified address, or review-first mode) - the one actionable list in the
+  // cockpit. Already-sent ones drop off.
+  const reviewItems: Array<{ target: Target; contact: Contact; sequence: EmailSequence }> = [];
+  for (const t of visibleTargets) {
+    for (const c of contactsByTarget[t.id] ?? []) {
+      const seq = sequencesByContact[c.id];
+      if (!seq) continue;
+      if ((seq.autopilot_state === 'ready' || seq.autopilot_state === 'review') && !initialSentSeqIds.has(seq.id)) {
+        reviewItems.push({ target: t, contact: c, sequence: seq });
+      }
+    }
+  }
+
+  const metrics = {
+    targets: visibleTargets.length,
+    contacts: totalContacts,
+    drafts: totalDrafts,
+    sent: sentCount,
+    scheduled: scheduledCount,
+    replies: repliesCount,
+    review: reviewItems.length,
+  };
+
   return (
-    <div className="mission-detail">
-      <Link to="/missions" className="mission-detail-back">
-        ← Missions
-      </Link>
-
-      <header className="mission-detail-header">
-        <div className="mission-detail-headline">
-          <h1 style={{ margin: 0 }}>{mission.name}</h1>
-          <div className="mission-detail-meta">
-            <span className="mode-pill">{MODE_LABEL[mission.mode] ?? mission.mode}</span>
-            <span className="mission-detail-stats">
-              <span>{visibleTargets.length} targets</span>
-              <span>{totalContacts} contacts</span>
-              <span>{totalDrafts} drafts</span>
-            </span>
-          </div>
-        </div>
-        <div className="mission-detail-actions">
-          <CsvImport missionId={mission.id} onImported={loadTargets} />
-          {sendableInitials.length > 0 && (
-            <button
-              type="button"
-              className="btn-send-all"
-              disabled={sendingAll}
-              onClick={sendAllInitial}
-              title="Send the initial email to every contact that has a draft and a recipient address"
-            >
-              {sendingAll ? (
-                `Sending ${sendableInitials.length}…`
-              ) : (
-                <>
-                  <Send size={15} aria-hidden /> Send all ({sendableInitials.length})
-                </>
-              )}
-            </button>
-          )}
-          <button
-            type="button"
-            className="btn-secondary"
-            disabled={busy === 'targeting'}
-            onClick={findTargets}
-          >
-            {busy === 'targeting' ? 'Researching…' : targets.length === 0 ? 'Find targets' : 'Find more targets'}
-          </button>
-          <button
-            type="button"
-            className="btn-primary go"
-            onClick={() => navigate(`/missions/${mission.id}/run`)}
-            title="Find targets, build evidence packs, find contacts, and draft initial emails, live."
-          >
-            Run pipeline
-          </button>
-        </div>
-      </header>
-
-      <AutopilotPanel missionId={mission.id} />
+    <div className="mx">
+      <MissionTopbar
+        mission={mission}
+        metrics={metrics}
+        paid={paid}
+        autopilotOn={autopilotOn}
+        onToggleAutopilot={toggleAutopilot}
+        onRun={() => navigate(`/missions/${mission.id}/run`)}
+      />
 
       <MissionBriefCard mission={mission} onSaved={loadMission} />
 
@@ -549,323 +605,744 @@ export function MissionPage() {
         </div>
       )}
 
-      <section>
-        <h2 className="targets-heading">
-          Targets
-          {visibleTargets.length > 0 && <span className="targets-count">{visibleTargets.length}</span>}
-        </h2>
-        {visibleTargets.length === 0 ? (
-          <div className="empty-illo">
-            <h3>No targets yet</h3>
-            <p>
-              Run the full pipeline to find companies, build evidence, surface the right
-              contacts, and draft initial emails — live, in one go. Or drive each step yourself.
-            </p>
-            <div className="empty-steps" aria-hidden>
-              <span><b>1</b> Find targets</span>
-              <span><b>2</b> Research &amp; contacts</span>
-              <span><b>3</b> Drafts ready</span>
+      {autopilotOn && policy ? (
+        <AutopilotCockpit
+          policy={policy}
+          metrics={metrics}
+          sentToday={sentToday}
+          reviewItems={reviewItems}
+          refreshKey={refreshKey}
+          aiEnabled={aiEnabled}
+          hasResume={hasResume}
+          onSaveField={saveAutopilotField}
+          onReloadContacts={loadContactsForTarget}
+          onReloadSequence={loadSequencesForContact}
+          onViewTargets={toggleAutopilot}
+        />
+      ) : (
+        <>
+          <section className="console">
+            <div className="console-bar">
+              <h2 className="console-title">
+                Pipeline
+                {visibleTargets.length > 0 && <span className="console-count">{visibleTargets.length}</span>}
+              </h2>
+              <div className="console-bar-actions">
+                {sendableInitials.length > 0 && (
+                  <button
+                    type="button"
+                    className="btn-go"
+                    disabled={sendingAll}
+                    onClick={sendAllInitial}
+                    title="Send the initial email to every contact that has a draft and a recipient address"
+                  >
+                    {sendingAll ? (
+                      `Sending ${sendableInitials.length}…`
+                    ) : (
+                      <>
+                        <Send size={14} aria-hidden /> Send all ({sendableInitials.length})
+                      </>
+                    )}
+                  </button>
+                )}
+                <CsvImport missionId={mission.id} onImported={loadTargets} />
+                {visibleTargets.length > 0 && (
+                  <button type="button" className="btn-secondary" disabled={busy === 'targeting'} onClick={findTargets}>
+                    {busy === 'targeting' ? 'Researching…' : 'Find more'}
+                  </button>
+                )}
+              </div>
             </div>
-            <div className="empty-illo-actions">
+
+            {visibleTargets.length === 0 ? (
+              <div className="empty-illo">
+                <div className="empty-illo-graphic" aria-hidden>
+                  <Radar size={28} />
+                </div>
+                <h3>No companies yet</h3>
+                <p>
+                  Run the pipeline to find companies, research them, surface the right people, and draft outreach —
+                  live, in one pass. Or drive each step yourself.
+                </p>
+                <div className="empty-illo-actions">
+                  <button type="button" className="btn-go" onClick={() => navigate(`/missions/${mission.id}/run`)}>
+                    Run pipeline
+                  </button>
+                  <button type="button" className="btn-secondary" disabled={busy === 'targeting'} onClick={findTargets}>
+                    {busy === 'targeting' ? 'Researching…' : 'Find companies'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <ul className="tgt-list">
+                {visibleTargets.map((t) => (
+                  <TargetRow
+                    key={t.id}
+                    target={t}
+                    contacts={contactsByTarget[t.id] ?? []}
+                    pack={packsByTarget[t.id]}
+                    sequencesByContact={sequencesByContact}
+                    initialSentSeqIds={initialSentSeqIds}
+                    sentByContact={sentByContact}
+                    repliesByContact={repliesByContact}
+                    refreshKey={refreshKey}
+                    busy={busy}
+                    aiEnabled={aiEnabled}
+                    hasResume={hasResume}
+                    selectedContactIds={selectedContactIds}
+                    onBuildEvidence={buildEvidence}
+                    onFindContacts={findContacts}
+                    onGenerateSequence={generateSequence}
+                    onSetStatus={setTargetStatus}
+                    onDelete={deleteTarget}
+                    onMarkReplied={markContactReplied}
+                    onToggleSelected={toggleContactSelected}
+                    onReloadContacts={loadContactsForTarget}
+                    onReloadSequence={loadSequencesForContact}
+                  />
+                ))}
+              </ul>
+            )}
+          </section>
+
+          {selectedContactIds.size > 0 && (
+            <div className="bulk-action-bar" role="region" aria-label="Bulk contact actions">
+              <span className="bulk-count">
+                {selectedContactIds.size} contact{selectedContactIds.size === 1 ? '' : 's'} selected
+              </span>
+              <div className="bulk-actions">
+                <button type="button" className="btn-secondary small" disabled={bulkBusy} onClick={() => bulkSetContactStatus('approved')}>
+                  Approve
+                </button>
+                <button type="button" className="btn-secondary small" disabled={bulkBusy} onClick={() => bulkSetContactStatus('contacted')}>
+                  Mark contacted
+                </button>
+                <button type="button" className="btn-secondary small bulk-danger" disabled={bulkBusy} onClick={() => bulkSetContactStatus('rejected')}>
+                  Reject
+                </button>
+                <button type="button" className="link-button" disabled={bulkBusy} onClick={clearSelection}>
+                  Clear
+                </button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Topbar: compact identity + live stat strip + the Autopilot switch (the one
+// control that flips the whole page between manual console and cockpit).
+// ---------------------------------------------------------------------------
+type Metrics = {
+  targets: number;
+  contacts: number;
+  drafts: number;
+  sent: number;
+  scheduled: number;
+  replies: number;
+  review: number;
+};
+
+function MissionTopbar({
+  mission,
+  metrics,
+  paid,
+  autopilotOn,
+  onToggleAutopilot,
+  onRun,
+}: {
+  mission: Mission;
+  metrics: Metrics;
+  paid: boolean;
+  autopilotOn: boolean;
+  onToggleAutopilot: () => void;
+  onRun: () => void;
+}) {
+  return (
+    <header className="mtop">
+      <div className="mtop-left">
+        <Link to="/missions" className="mtop-back">
+          ← Missions
+        </Link>
+        <div className="mtop-title">
+          <h1>{mission.name}</h1>
+          <div className="mtop-meta">
+            <span className="mode-pill">{MODE_LABEL[mission.mode] ?? mission.mode}</span>
+            <span className="mtop-stats">
+              <span>{metrics.targets} targets</span>
+              <span>{metrics.contacts} contacts</span>
+              <span>{metrics.sent} sent</span>
+            </span>
+          </div>
+        </div>
+      </div>
+      <div className="mtop-actions">
+        <AutopilotToggle paid={paid} on={autopilotOn} onToggle={onToggleAutopilot} />
+        {!autopilotOn && (
+          <button
+            type="button"
+            className="btn-go"
+            onClick={onRun}
+            title="Find companies, research them, surface contacts, and draft initial emails, live."
+          >
+            Run pipeline
+          </button>
+        )}
+      </div>
+    </header>
+  );
+}
+
+function AutopilotToggle({ paid, on, onToggle }: { paid: boolean; on: boolean; onToggle: () => void }) {
+  if (!paid) {
+    return (
+      <button type="button" className="ap-toggle ap-locked" onClick={onToggle} title="Autopilot is a paid feature">
+        <Plane size={14} aria-hidden /> Autopilot <span className="ap-pro">Pro</span>
+      </button>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className={`ap-toggle${on ? ' is-on' : ''}`}
+      onClick={onToggle}
+      role="switch"
+      aria-checked={on}
+      title={on ? 'Turn Autopilot off' : 'Hand this mission to Autopilot'}
+    >
+      <Plane size={14} aria-hidden /> Autopilot
+      <span className="ap-switch" aria-hidden>
+        <span className="ap-knob" />
+      </span>
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Autopilot cockpit (paid, enabled): a hands-off flight deck. Instruments show
+// the state of everything; the only controls are the throttle, and the only
+// action is clearing drafts Autopilot held for review.
+// ---------------------------------------------------------------------------
+function AutopilotCockpit({
+  policy,
+  metrics,
+  sentToday,
+  reviewItems,
+  refreshKey,
+  aiEnabled,
+  hasResume,
+  onSaveField,
+  onReloadContacts,
+  onReloadSequence,
+  onViewTargets,
+}: {
+  policy: CampaignPolicy;
+  metrics: Metrics;
+  sentToday: number;
+  reviewItems: Array<{ target: Target; contact: Contact; sequence: EmailSequence }>;
+  refreshKey: number;
+  aiEnabled: boolean;
+  hasResume: boolean;
+  onSaveField: (patch: Partial<CampaignPolicy>) => void | Promise<void>;
+  onReloadContacts: (targetId: string) => void | Promise<void>;
+  onReloadSequence: (contactId: string) => void | Promise<void>;
+  onViewTargets: () => void;
+}) {
+  const [capDraft, setCapDraft] = useState(String(policy.daily_send_cap));
+
+  // Flight phase drives the headline + lamp. Holding (someone must act) > taxiing
+  // (enabled, nothing sourced yet) > cruising (running normally).
+  const phase: 'holding' | 'taxiing' | 'cruising' =
+    metrics.review > 0
+      ? 'holding'
+      : !policy.last_sourced_at && metrics.contacts === 0 && metrics.drafts === 0
+        ? 'taxiing'
+        : 'cruising';
+  const phaseLabel =
+    phase === 'holding' ? 'Holding for review' : phase === 'taxiing' ? 'Taxiing — preparing first batch' : 'Cruising';
+  const cadence = `${
+    policy.last_sourced_at ? `Last run ${relativeTime(policy.last_sourced_at)}` : 'First run on the next cycle'
+  } · checks every ${policy.cycle_interval_hours ?? 24}h`;
+
+  return (
+    <div className="cockpit">
+      <div className={`cockpit-deck phase-${phase}`}>
+        <span className="cockpit-plane" aria-hidden>
+          <Plane size={22} />
+        </span>
+        <div className="cockpit-deck-text">
+          <span className="cockpit-status">Autopilot · {phaseLabel}</span>
+          <span className="cockpit-cadence">{cadence}</span>
+        </div>
+        <span className="cockpit-lamp">
+          <span className="cockpit-lamp-dot" aria-hidden />
+          Engaged
+        </span>
+      </div>
+
+      <div className="cockpit-gauges">
+        <Gauge icon={<Radar size={15} />} label="Sourced" value={metrics.targets} />
+        <Gauge icon={<Users size={15} />} label="Contacts" value={metrics.contacts} />
+        <Gauge icon={<PenLine size={15} />} label="Drafted" value={metrics.drafts} />
+        <Gauge icon={<Send size={15} />} label="Sent" value={metrics.sent} sub={sentToday ? `${sentToday} today` : undefined} />
+        <Gauge icon={<Clock size={15} />} label="Scheduled" value={metrics.scheduled} />
+        <Gauge icon={<Eye size={15} />} label="To review" value={metrics.review} alert={metrics.review > 0} />
+        <Gauge icon={<MessageSquare size={15} />} label="Replies" value={metrics.replies} />
+      </div>
+
+      <div className="cockpit-throttle">
+        <div className="cockpit-throttle-label">When a draft is ready</div>
+        <div className="ap-choices">
+          <button
+            type="button"
+            className={`ap-choice${!policy.auto_send ? ' is-on' : ''}`}
+            onClick={() => onSaveField({ auto_send: false })}
+            aria-pressed={!policy.auto_send}
+          >
+            {!policy.auto_send && (
+              <span className="ap-choice-check">
+                <Check size={12} />
+              </span>
+            )}
+            <span className="ap-choice-title">Review first</span>
+            <span className="ap-choice-hint">Autopilot drafts and waits. You approve every send.</span>
+          </button>
+          <button
+            type="button"
+            className={`ap-choice${policy.auto_send ? ' is-on' : ''}`}
+            onClick={() => onSaveField({ auto_send: true })}
+            aria-pressed={policy.auto_send}
+          >
+            {policy.auto_send && (
+              <span className="ap-choice-check">
+                <Check size={12} />
+              </span>
+            )}
+            <span className="ap-choice-title">Send automatically</span>
+            <span className="ap-choice-hint">Sends verified, high-confidence contacts. Holds the rest for review.</span>
+          </button>
+        </div>
+        {policy.auto_send && (
+          <label className="cockpit-cap">
+            <span>Send at most</span>
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={capDraft}
+              onChange={(e) => setCapDraft(e.target.value)}
+              onBlur={() => onSaveField({ daily_send_cap: clampCap(capDraft) })}
+            />
+            <span>emails / day</span>
+          </label>
+        )}
+      </div>
+
+      {reviewItems.length > 0 && (
+        <section className="cockpit-review">
+          <div className="cockpit-review-head">
+            <Eye size={15} aria-hidden />
+            <span>Awaiting your clearance</span>
+            <span className="console-count">{reviewItems.length}</span>
+          </div>
+          <div className="cockpit-review-list">
+            {reviewItems.map(({ target, contact, sequence }) => (
+              <div key={sequence.id} className="cockpit-review-item">
+                <div className="cri-id">
+                  <strong>{contact.name}</strong>
+                  <span className="pc-role">{contact.role}</span>
+                  <span className="cri-co">{target.company_name}</span>
+                </div>
+                <SequenceCard
+                  key={`${sequence.id}:${refreshKey}`}
+                  sequence={sequence}
+                  contact={contact}
+                  aiEnabled={aiEnabled}
+                  hasResume={hasResume}
+                  onContactUpdated={() => onReloadContacts(target.id)}
+                  onSequenceUpdated={() => onReloadSequence(contact.id)}
+                />
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <div className="cockpit-foot">
+        <p className="cockpit-note">
+          Autopilot only sends to verified addresses, during business hours, and sources a few new companies a day.
+          Low-confidence drafts always wait here for you.
+        </p>
+        <button type="button" className="link-button" onClick={onViewTargets}>
+          Turn off &amp; take manual control
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Gauge({
+  icon,
+  label,
+  value,
+  sub,
+  alert,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: number;
+  sub?: string;
+  alert?: boolean;
+}) {
+  return (
+    <div className={`gauge${alert ? ' is-alert' : ''}`}>
+      <span className="gauge-icon" aria-hidden>
+        {icon}
+      </span>
+      <span className="gauge-val">{value}</span>
+      <span className="gauge-label">{label}</span>
+      {sub && <span className="gauge-sub">{sub}</span>}
+    </div>
+  );
+}
+
+function relativeTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return '';
+  const mins = Math.round((Date.now() - then) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.round(hrs / 24)}d ago`;
+}
+
+function clampCap(v: string): number {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 10;
+  return Math.max(1, Math.min(100, Math.round(n)));
+}
+
+// ---------------------------------------------------------------------------
+// Manual console: one row per company that leads with the single next action,
+// expanding into a clean Research + People workspace. Replaces the old nested
+// accordion-in-accordion wall.
+// ---------------------------------------------------------------------------
+type TargetStage = {
+  stage: 'research' | 'contacts' | 'draft' | 'review' | 'done';
+  label: string;
+  cta: string | null;
+};
+
+function targetStage(
+  pack: EvidencePack | undefined,
+  contacts: Contact[],
+  sequencesByContact: Record<string, EmailSequence | null | undefined>,
+  initialSentSeqIds: Set<string>,
+): TargetStage {
+  if (!pack) return { stage: 'research', label: 'Needs research', cta: 'Research' };
+  if (contacts.length === 0) return { stage: 'contacts', label: 'Needs contacts', cta: 'Find contacts' };
+  const drafted = contacts.filter((c) => sequencesByContact[c.id]);
+  if (drafted.length === 0) return { stage: 'draft', label: 'Ready to draft', cta: 'Draft emails' };
+  const unsent = drafted.filter((c) => {
+    const s = sequencesByContact[c.id];
+    return s && !initialSentSeqIds.has(s.id) && c.status !== 'replied';
+  });
+  if (unsent.length > 0)
+    return { stage: 'review', label: `${unsent.length} draft${unsent.length === 1 ? '' : 's'} ready`, cta: 'Review & send' };
+  return { stage: 'done', label: 'Contacted', cta: null };
+}
+
+function TargetRow({
+  target: t,
+  contacts,
+  pack,
+  sequencesByContact,
+  initialSentSeqIds,
+  sentByContact,
+  repliesByContact,
+  refreshKey,
+  busy,
+  aiEnabled,
+  hasResume,
+  selectedContactIds,
+  onBuildEvidence,
+  onFindContacts,
+  onGenerateSequence,
+  onSetStatus,
+  onDelete,
+  onMarkReplied,
+  onToggleSelected,
+  onReloadContacts,
+  onReloadSequence,
+}: {
+  target: Target;
+  contacts: Contact[];
+  pack: EvidencePack | undefined;
+  sequencesByContact: Record<string, EmailSequence | null | undefined>;
+  initialSentSeqIds: Set<string>;
+  sentByContact: Record<string, SentMessage[]>;
+  repliesByContact: Record<string, Reply[]>;
+  refreshKey: number;
+  busy: string | null;
+  aiEnabled: boolean;
+  hasResume: boolean;
+  selectedContactIds: Set<string>;
+  onBuildEvidence: (t: Target) => void | Promise<void>;
+  onFindContacts: (t: Target) => void | Promise<void>;
+  onGenerateSequence: (c: Contact) => void | Promise<void>;
+  onSetStatus: (t: Target, status: Target['status']) => void | Promise<void>;
+  onDelete: (t: Target) => void | Promise<void>;
+  onMarkReplied: (c: Contact) => void | Promise<void>;
+  onToggleSelected: (id: string) => void;
+  onReloadContacts: (targetId: string) => void | Promise<void>;
+  onReloadSequence: (contactId: string) => void | Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const score = asScore(t.score);
+  const stage = targetStage(pack, contacts, sequencesByContact, initialSentSeqIds);
+  const draftCount = contacts.filter((c) => sequencesByContact[c.id]).length;
+  const evidenceBusy = busy === `evidence:${t.id}`;
+  const contactsBusy = busy === `contacts:${t.id}`;
+
+  // The next-action button. Run-style stages fire their agent and open the row
+  // so progress is visible; expand-style stages just reveal the workspace.
+  function runPrimary() {
+    setOpen(true);
+    if (stage.stage === 'research') onBuildEvidence(t);
+    else if (stage.stage === 'contacts') onFindContacts(t);
+  }
+  const primaryBusy =
+    (stage.stage === 'research' && evidenceBusy) || (stage.stage === 'contacts' && contactsBusy);
+
+  return (
+    <li className={`tgt status-${t.status}${open ? ' is-open' : ''}`}>
+      <div className="tgt-bar">
+        <button type="button" className="tgt-main" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+          <ChevronRight size={15} className="tgt-caret" aria-hidden />
+          {score != null && (
+            <span className="tgt-score" title="Fit score">
+              {score}
+            </span>
+          )}
+          <span className="tgt-name">{t.company_name}</span>
+          {t.signal_type && (
+            <span className="signal-pill" data-signal={t.signal_type}>
+              {t.signal_type}
+            </span>
+          )}
+          {t.domain && <span className="tgt-domain">{t.domain}</span>}
+        </button>
+        <div className="tgt-aside">
+          <span className={`tgt-stage stage-${stage.stage}`}>{stage.label}</span>
+          {stage.cta && (
+            <button type="button" className="btn-primary small tgt-cta" disabled={primaryBusy} onClick={runPrimary}>
+              {primaryBusy ? 'Working…' : stage.cta}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {open && (
+        <div className="tgt-detail">
+          <div className="tgt-detail-top">
+            <div className="tgt-detail-facts">
+              {t.industry && <span>{t.industry}</span>}
+              {typeof t.employee_count === 'number' && <span>{t.employee_count.toLocaleString()} ppl</span>}
+              {t.domain && (
+                <a href={`https://${t.domain}`} target="_blank" rel="noreferrer" className="tgt-visit">
+                  Visit ↗
+                </a>
+              )}
+            </div>
+            <div className="tgt-detail-controls">
+              <select
+                className="tgt-status-select"
+                value={t.status}
+                onChange={(e) => onSetStatus(t, e.target.value as Target['status'])}
+                aria-label={`Status for ${t.company_name}`}
+              >
+                <option value="suggested">Suggested</option>
+                <option value="approved">Approved</option>
+                <option value="rejected">Rejected</option>
+                <option value="contacted">Contacted</option>
+              </select>
               <button
                 type="button"
-                className="btn-primary go"
-                onClick={() => navigate(`/missions/${mission.id}/run`)}
+                className="tgt-remove"
+                onClick={() => onDelete(t)}
+                title={`Remove ${t.company_name}`}
+                aria-label={`Remove ${t.company_name}`}
               >
-                Run pipeline
-              </button>
-              <button
-                type="button"
-                className="btn-secondary"
-                disabled={busy === 'targeting'}
-                onClick={findTargets}
-              >
-                {busy === 'targeting' ? 'Researching…' : 'Find targets manually'}
+                ×
               </button>
             </div>
           </div>
-        ) : (
-          <Accordion
-            type="multiple"
-            className="target-accordion"
-            defaultValue={visibleTargets[0] ? [visibleTargets[0].id] : []}
-          >
-            {visibleTargets.map((t) => {
-              const contacts = contactsByTarget[t.id] ?? [];
-              const pack = packsByTarget[t.id];
-              const score = asScore(t.score);
-              const draftCount = contacts.filter((c) => sequencesByContact[c.id]).length;
-              return (
-                <AccordionItem
-                  key={t.id}
-                  value={t.id}
-                  className={`target-item status-${t.status} ${activeTargetId === t.id ? 'active' : ''}`}
-                >
-                  <AccordionTrigger className="target-trigger">
-                    <span className="target-summary">
-                      <span className="target-summary-main">
-                        <span className="target-summary-top">
-                          {score != null && (
-                            <span className="target-score" title="Fit score">
-                              {score}
-                            </span>
-                          )}
-                          <span className="target-summary-name">{t.company_name}</span>
-                          {t.signal_type && <span className="signal-pill" data-signal={t.signal_type}>{t.signal_type}</span>}
+
+          {(t.why_now || t.fit_reason) && (
+            <div className="tgt-why">
+              {t.why_now && (
+                <p>
+                  <strong>Why now</strong> {t.why_now}
+                </p>
+              )}
+              {t.fit_reason && <p className="tgt-why-fit">{t.fit_reason}</p>}
+            </div>
+          )}
+
+          {/* Research */}
+          <div className="tgt-sec">
+            <div className="tgt-sec-head">
+              <span className="tgt-sec-title">Research</span>
+              <button type="button" className="btn-secondary small" disabled={evidenceBusy} onClick={() => onBuildEvidence(t)}>
+                {evidenceBusy ? 'Researching…' : pack ? 'Refresh' : 'Build evidence'}
+              </button>
+            </div>
+            {pack && pack.bullets.length > 0 ? (
+              <ol className="ev-list">
+                {pack.bullets.map((b, i) => (
+                  <li key={i}>
+                    <span className="ev-fact">{b.fact}</span>
+                    <span className="ev-meta">
+                      {b.signal_type && (
+                        <span className="signal-pill" data-signal={b.signal_type}>
+                          {b.signal_type}
                         </span>
-                        <span className="target-summary-sub">
-                          {t.domain && <span className="target-summary-domain">{t.domain}</span>}
-                          {t.industry && <span>{t.industry}</span>}
-                          {typeof t.employee_count === 'number' && (
-                            <span>{t.employee_count.toLocaleString()} ppl</span>
-                          )}
-                        </span>
-                      </span>
-                      <span className="target-summary-meta">
-                        <span className={contacts.length > 0 ? 'target-summary-contacts' : 'target-summary-none'}>
-                          {contacts.length > 0
-                            ? `${contacts.length} contact${contacts.length === 1 ? '' : 's'}`
-                            : 'No contacts'}
-                        </span>
-                        {draftCount > 0 && (
-                          <span className="target-summary-drafts">
-                            {draftCount} draft{draftCount === 1 ? '' : 's'}
-                          </span>
-                        )}
-                      </span>
-                    </span>
-                  </AccordionTrigger>
-                  <AccordionContent className="target-content">
-                    <div className="target-content-head">
-                      <div className="target-content-meta">
-                        {t.domain && (
-                          <a href={`https://${t.domain}`} target="_blank" rel="noreferrer" className="target-domain">
-                            Visit {t.domain} ↗
+                      )}
+                      {b.recency && <span> · {b.recency}</span>}
+                      {b.source_url && (
+                        <>
+                          {' · '}
+                          <a href={b.source_url} target="_blank" rel="noreferrer">
+                            {b.source_title || 'source'} ↗
                           </a>
-                        )}
-                      </div>
-                      <div className="target-content-controls">
-                        <label className="target-status-control">
-                          <span className="target-status-label">Status</span>
-                          <select
-                            value={t.status}
-                            onChange={(e) => setTargetStatus(t, e.target.value as Target['status'])}
-                            aria-label={`Status for ${t.company_name}`}
-                          >
-                            <option value="suggested">Suggested</option>
-                            <option value="approved">Approved</option>
-                            <option value="rejected">Rejected</option>
-                            <option value="contacted">Contacted</option>
-                          </select>
-                        </label>
-                        <span className="target-controls-sep" aria-hidden />
-                        <button
-                          type="button"
-                          className="link-button target-delete"
-                          onClick={() => deleteTarget(t)}
-                          title={`Remove ${t.company_name}`}
-                          aria-label={`Remove ${t.company_name}`}
-                        >
-                          ×
-                        </button>
-                      </div>
-                    </div>
+                        </>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="tgt-sec-empty">No evidence yet. Research the company to personalize every email.</p>
+            )}
+          </div>
 
-                  {(t.why_now || t.fit_reason) && (
-                    <div className="target-rationale">
-                      {t.why_now && <p className="target-whynow"><strong>Why now</strong> {t.why_now}</p>}
-                      {t.fit_reason && <p className="target-fit">{t.fit_reason}</p>}
-                    </div>
-                  )}
-
-                  <div className="target-actions target-actions-grouped">
-                    <button
-                      type="button"
-                      className="btn-secondary"
-                      disabled={busy === `evidence:${t.id}`}
-                      onClick={() => buildEvidence(t)}
-                    >
-                      {busy === `evidence:${t.id}` ? 'Researching…' : pack ? '↻ Refresh evidence' : '+ Evidence pack'}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-secondary"
-                      disabled={busy === `contacts:${t.id}`}
-                      onClick={() => findContacts(t)}
-                    >
-                      {busy === `contacts:${t.id}`
-                        ? 'Searching…'
-                        : contacts.length > 0
-                          ? `↻ Find more contacts (${contacts.length})`
-                          : '+ Find contacts'}
-                    </button>
-                  </div>
-
-                  {pack && pack.bullets.length > 0 && (
-                    <details className="evidence-pack-collapsible">
-                      <summary>Evidence pack ({pack.bullets.length} bullets)</summary>
-                      <ol>
-                        {pack.bullets.map((b, i) => (
-                          <li key={i}>
-                            <span className="evidence-fact">{b.fact}</span>
-                            <span className="evidence-meta">
-                              {b.signal_type && <span className="signal-pill" data-signal={b.signal_type}>{b.signal_type}</span>}
-                              {b.recency && <span> · {b.recency}</span>}
-                              {b.source_url && (
-                                <>
-                                  {' '}
-                                  ·{' '}
-                                  <a href={b.source_url} target="_blank" rel="noreferrer">
-                                    {b.source_title || 'source'} ↗
-                                  </a>
-                                </>
-                              )}
+          {/* People */}
+          <div className="tgt-sec">
+            <div className="tgt-sec-head">
+              <span className="tgt-sec-title">
+                People{contacts.length > 0 && <span className="tgt-sec-count">{contacts.length}</span>}
+              </span>
+              <button type="button" className="btn-secondary small" disabled={contactsBusy} onClick={() => onFindContacts(t)}>
+                {contactsBusy ? 'Searching…' : contacts.length > 0 ? 'Find more' : 'Find contacts'}
+              </button>
+            </div>
+            {contacts.length === 0 ? (
+              <p className="tgt-sec-empty">
+                {pack
+                  ? 'Find the decision-makers, then draft a personalized email to each.'
+                  : 'Build evidence first, then find contacts to draft personalized emails to.'}
+              </p>
+            ) : (
+              <div className="ppl">
+                {contacts.map((c) => {
+                  const seq = sequencesByContact[c.id];
+                  return (
+                    <div key={c.id} className={`pc${selectedContactIds.has(c.id) ? ' selected' : ''}`}>
+                      <div className="pc-head">
+                        <input
+                          type="checkbox"
+                          className="pc-select"
+                          checked={selectedContactIds.has(c.id)}
+                          onChange={() => onToggleSelected(c.id)}
+                          aria-label={`Select ${c.name}`}
+                        />
+                        <div className="pc-id">
+                          <span className="pc-name">
+                            <strong>{c.name}</strong>
+                            <span className="pc-role">{c.role}</span>
+                          </span>
+                          {typeof c.confidence === 'number' && (
+                            <span
+                              className="pc-conf"
+                              title="Estimated reply-likelihood — role & seniority fit plus signals. Higher is better."
+                            >
+                              {Math.round(c.confidence * 100)}%
                             </span>
-                          </li>
-                        ))}
-                      </ol>
-                    </details>
-                  )}
+                          )}
+                        </div>
+                        <div className="pc-actions">
+                          {c.linkedin_url && (
+                            <a href={c.linkedin_url} target="_blank" rel="noreferrer" className="link-pill">
+                              LinkedIn ↗
+                            </a>
+                          )}
+                          {c.status === 'replied' ? (
+                            <span className="status-pill is-success" title="Follow-ups stopped">
+                              replied
+                            </span>
+                          ) : (
+                            c.status === 'contacted' && (
+                              <button
+                                type="button"
+                                className="btn-secondary small"
+                                title="They wrote back in Gmail - stop their scheduled follow-ups"
+                                onClick={() => onMarkReplied(c)}
+                              >
+                                Mark replied
+                              </button>
+                            )
+                          )}
+                          <button
+                            type="button"
+                            className="btn-primary small"
+                            disabled={busy === `sequence:${c.id}` || !pack}
+                            title={!pack ? 'Build an evidence pack first' : ''}
+                            onClick={() => onGenerateSequence(c)}
+                          >
+                            {busy === `sequence:${c.id}` ? 'Drafting…' : seq ? 'Regenerate' : 'Draft email'}
+                          </button>
+                        </div>
+                      </div>
+                      {c.email ? (
+                        <div className="pc-email">
+                          {c.email} <EmailStatusPill status={c.email_status} />
+                        </div>
+                      ) : (
+                        c.likely_email_pattern && <div className="pc-email muted">Pattern: {c.likely_email_pattern}</div>
+                      )}
+                      {c.headline && <div className="pc-note muted">{c.headline}</div>}
+                      {c.reasoning && <div className="pc-note">{c.reasoning}</div>}
 
-                  {contacts.length > 0 && (
-                    <div className="contact-list">
-                      <div className="contact-list-title">Contacts ({contacts.length})</div>
-                      {contacts.map((c) => {
-                        const seq = sequencesByContact[c.id];
-                        return (
-                          <div key={c.id} className={`contact-row${selectedContactIds.has(c.id) ? ' selected' : ''}`}>
-                            <div className="contact-row-head">
-                              <input
-                                type="checkbox"
-                                className="contact-select"
-                                checked={selectedContactIds.has(c.id)}
-                                onChange={() => toggleContactSelected(c.id)}
-                                aria-label={`Select ${c.name}`}
-                              />
-                              <div className="contact-identity">
-                                <span className="contact-name-line">
-                                  <strong>{c.name}</strong>
-                                  <span className="contact-role">{c.role}</span>
-                                </span>
-                                {typeof c.confidence === 'number' && (
-                                  <span
-                                    className="confidence"
-                                    title="Estimated reply-likelihood — how promising this contact is to reach for this mission (role & seniority fit plus signals). Higher is better."
-                                  >
-                                    {Math.round(c.confidence * 100)}%
-                                  </span>
-                                )}
-                              </div>
-                              <div className="contact-row-actions">
-                                {c.linkedin_url && (
-                                  <a href={c.linkedin_url} target="_blank" rel="noreferrer" className="link-pill">
-                                    LinkedIn ↗
-                                  </a>
-                                )}
-                                {c.status === 'replied' ? (
-                                  <span className="signal-pill subtle" title="Follow-ups stopped">replied</span>
-                                ) : (
-                                  c.status === 'contacted' && (
-                                    <button
-                                      type="button"
-                                      className="btn-secondary small"
-                                      title="They wrote back in Gmail - stop their scheduled follow-ups"
-                                      onClick={() => markContactReplied(c)}
-                                    >
-                                      Mark replied
-                                    </button>
-                                  )
-                                )}
-                                <button
-                                  type="button"
-                                  className="btn-primary small"
-                                  disabled={busy === `sequence:${c.id}` || !pack}
-                                  title={!pack ? 'Build an evidence pack first' : ''}
-                                  onClick={() => generateSequence(c)}
-                                >
-                                  {busy === `sequence:${c.id}` ? 'Drafting…' : seq ? 'Regenerate' : 'Draft email'}
-                                </button>
-                              </div>
-                            </div>
-                            {c.email && (
-                              <div className="contact-email">
-                                {c.email}{' '}
-                                <EmailStatusPill status={c.email_status} />
-                              </div>
-                            )}
-                            {!c.email && c.likely_email_pattern && (
-                              <div className="contact-email muted">Pattern: {c.likely_email_pattern}</div>
-                            )}
-                            {c.headline && <div className="contact-reason muted">{c.headline}</div>}
-                            {c.reasoning && <div className="contact-reason">{c.reasoning}</div>}
-
-                            {seq && <SequenceCard key={`${seq.id}:${refreshKey}`} sequence={seq} contact={c} aiEnabled={aiEnabled} hasResume={hasResume} onContactUpdated={() => loadContactsForTarget(t.id)} onSequenceUpdated={() => loadSequencesForContact(c.id)} />}
-                            <ContactActivity
-                              contact={c}
-                              sequence={seq}
-                              sent={sentByContact[c.id] ?? []}
-                              replies={repliesByContact[c.id] ?? []}
-                            />
-                          </div>
-                        );
-                      })}
+                      {seq && (
+                        <SequenceCard
+                          key={`${seq.id}:${refreshKey}`}
+                          sequence={seq}
+                          contact={c}
+                          aiEnabled={aiEnabled}
+                          hasResume={hasResume}
+                          onContactUpdated={() => onReloadContacts(t.id)}
+                          onSequenceUpdated={() => onReloadSequence(c.id)}
+                        />
+                      )}
+                      <ContactActivity
+                        contact={c}
+                        sequence={seq}
+                        sent={sentByContact[c.id] ?? []}
+                        replies={repliesByContact[c.id] ?? []}
+                      />
                     </div>
-                  )}
-
-                  {contacts.length === 0 && (
-                    <div className="contact-empty">
-                      <span>
-                        {pack
-                          ? 'No contacts yet. Hit “Find contacts” to surface the decision-makers, then draft an email to each.'
-                          : 'No contacts yet. Build an evidence pack first, then find contacts to draft personalized emails to.'}
-                      </span>
-                    </div>
-                  )}
-                  </AccordionContent>
-                </AccordionItem>
-              );
-            })}
-          </Accordion>
-        )}
-      </section>
-
-      {selectedContactIds.size > 0 && (
-        <div className="bulk-action-bar" role="region" aria-label="Bulk contact actions">
-          <span className="bulk-count">
-            {selectedContactIds.size} contact{selectedContactIds.size === 1 ? '' : 's'} selected
-          </span>
-          <div className="bulk-actions">
-            <button
-              type="button"
-              className="btn-secondary small"
-              disabled={bulkBusy}
-              onClick={() => bulkSetContactStatus('approved')}
-            >
-              Approve
-            </button>
-            <button
-              type="button"
-              className="btn-secondary small"
-              disabled={bulkBusy}
-              onClick={() => bulkSetContactStatus('contacted')}
-            >
-              Mark contacted
-            </button>
-            <button
-              type="button"
-              className="btn-secondary small bulk-danger"
-              disabled={bulkBusy}
-              onClick={() => bulkSetContactStatus('rejected')}
-            >
-              Reject
-            </button>
-            <button type="button" className="link-button" disabled={bulkBusy} onClick={clearSelection}>
-              Clear
-            </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}
-    </div>
+    </li>
   );
 }
 
