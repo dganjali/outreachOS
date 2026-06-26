@@ -586,6 +586,31 @@ export function MissionPage() {
     review: reviewItems.length,
   };
 
+  // One "flight" per company for the cockpit Airspace view: how far each has
+  // travelled down the pipeline (sourced → researched → contacted → drafted →
+  // sent → replied), mapped to a position + flight phase.
+  const flights: Flight[] = visibleTargets
+    .map((t) => {
+      const cs = contactsByTarget[t.id] ?? [];
+      const replied = cs.some((c) => c.status === 'replied');
+      const sent = cs.some((c) => {
+        const s = sequencesByContact[c.id];
+        return (s && initialSentSeqIds.has(s.id)) || c.status === 'contacted';
+      });
+      const drafted = cs.some((c) => sequencesByContact[c.id]);
+      const pack = packsByTarget[t.id];
+      let progress = 12;
+      let phase = 'Taxiing';
+      let tone = 'taxi';
+      if (replied) { progress = 100; phase = 'Landed'; tone = 'landed'; }
+      else if (sent) { progress = 86; phase = 'Descending'; tone = 'sent'; }
+      else if (drafted) { progress = 66; phase = 'Cruising'; tone = 'cruise'; }
+      else if (cs.length) { progress = 46; phase = 'Climbing'; tone = 'climb'; }
+      else if (pack) { progress = 30; phase = 'Climbing'; tone = 'climb'; }
+      return { id: t.id, name: t.company_name, signal: t.signal_type ?? null, progress, phase, tone, contacts: cs.length };
+    })
+    .sort((a, b) => b.progress - a.progress || a.name.localeCompare(b.name));
+
   return (
     <div className="mx">
       <MissionTopbar
@@ -610,6 +635,7 @@ export function MissionPage() {
           policy={policy}
           metrics={metrics}
           sentToday={sentToday}
+          flights={flights}
           reviewItems={reviewItems}
           refreshKey={refreshKey}
           aiEnabled={aiEnabled}
@@ -617,7 +643,6 @@ export function MissionPage() {
           onSaveField={saveAutopilotField}
           onReloadContacts={loadContactsForTarget}
           onReloadSequence={loadSequencesForContact}
-          onViewTargets={toggleAutopilot}
         />
       ) : (
         <>
@@ -746,6 +771,18 @@ type Metrics = {
   review: number;
 };
 
+// One company's journey down the pipeline, positioned along the cockpit's
+// Airspace route (0 = just sourced, 100 = replied/landed).
+type Flight = {
+  id: string;
+  name: string;
+  signal: string | null;
+  progress: number;
+  phase: string;
+  tone: string;
+  contacts: number;
+};
+
 function MissionTopbar({
   mission,
   metrics,
@@ -780,7 +817,7 @@ function MissionTopbar({
         </div>
       </div>
       <div className="mtop-actions">
-        <AutopilotToggle paid={paid} on={autopilotOn} onToggle={onToggleAutopilot} />
+        <ModeSwitch paid={paid} on={autopilotOn} onToggle={onToggleAutopilot} />
         {!autopilotOn && (
           <button
             type="button"
@@ -796,28 +833,32 @@ function MissionTopbar({
   );
 }
 
-function AutopilotToggle({ paid, on, onToggle }: { paid: boolean; on: boolean; onToggle: () => void }) {
-  if (!paid) {
-    return (
-      <button type="button" className="ap-toggle ap-locked" onClick={onToggle} title="Autopilot is a paid feature">
-        <Plane size={14} aria-hidden /> Autopilot <span className="ap-pro">Pro</span>
-      </button>
-    );
-  }
+// Segmented Manual / Autopilot switch. Names both modes and shows which is
+// active; the active Autopilot segment carries the one sparing green accent.
+// For free users the Autopilot segment is a locked Pro upsell.
+function ModeSwitch({ paid, on, onToggle }: { paid: boolean; on: boolean; onToggle: () => void }) {
   return (
-    <button
-      type="button"
-      className={`ap-toggle${on ? ' is-on' : ''}`}
-      onClick={onToggle}
-      role="switch"
-      aria-checked={on}
-      title={on ? 'Turn Autopilot off' : 'Hand this mission to Autopilot'}
-    >
-      <Plane size={14} aria-hidden /> Autopilot
-      <span className="ap-switch" aria-hidden>
-        <span className="ap-knob" />
-      </span>
-    </button>
+    <div className="ms" role="group" aria-label="Mission mode">
+      <button
+        type="button"
+        className={`ms-seg${!on ? ' is-active' : ''}`}
+        aria-pressed={!on}
+        onClick={() => on && onToggle()}
+      >
+        Manual
+      </button>
+      <button
+        type="button"
+        className={`ms-seg ms-seg-auto${on ? ' is-active' : ''}${!paid ? ' is-locked' : ''}`}
+        aria-pressed={on}
+        onClick={() => (paid ? !on && onToggle() : onToggle())}
+        title={paid ? 'Hand this mission to Autopilot' : 'Autopilot is a paid feature'}
+      >
+        {!paid ? <Lock size={12} aria-hidden /> : <Plane size={13} aria-hidden />}
+        Autopilot
+        {!paid && <span className="ms-pro">Pro</span>}
+      </button>
+    </div>
   );
 }
 
@@ -830,6 +871,7 @@ function AutopilotCockpit({
   policy,
   metrics,
   sentToday,
+  flights,
   reviewItems,
   refreshKey,
   aiEnabled,
@@ -837,11 +879,11 @@ function AutopilotCockpit({
   onSaveField,
   onReloadContacts,
   onReloadSequence,
-  onViewTargets,
 }: {
   policy: CampaignPolicy;
   metrics: Metrics;
   sentToday: number;
+  flights: Flight[];
   reviewItems: Array<{ target: Target; contact: Contact; sequence: EmailSequence }>;
   refreshKey: number;
   aiEnabled: boolean;
@@ -849,7 +891,6 @@ function AutopilotCockpit({
   onSaveField: (patch: Partial<CampaignPolicy>) => void | Promise<void>;
   onReloadContacts: (targetId: string) => void | Promise<void>;
   onReloadSequence: (contactId: string) => void | Promise<void>;
-  onViewTargets: () => void;
 }) {
   const [capDraft, setCapDraft] = useState(String(policy.daily_send_cap));
 
@@ -892,6 +933,31 @@ function AutopilotCockpit({
         <Gauge icon={<Eye size={15} />} label="To review" value={metrics.review} alert={metrics.review > 0} />
         <Gauge icon={<MessageSquare size={15} />} label="Replies" value={metrics.replies} />
       </div>
+
+      {flights.length > 0 && (
+        <section className="airspace">
+          <div className="airspace-head">
+            <Plane size={14} aria-hidden />
+            <span>Airspace</span>
+            <span className="airspace-sub">{flights.length} in flight</span>
+          </div>
+          <div className="airspace-list">
+            {flights.map((f) => (
+              <div key={f.id} className={`flight tone-${f.tone}`} title={`${f.name} · ${f.phase}`}>
+                <span className="flight-name">{f.name}</span>
+                <div className="flight-sky">
+                  <span className="flight-trail" style={{ width: `${f.progress}%` }} aria-hidden />
+                  {/* Clamp the plane so it stays fully in-frame even when landed. */}
+                  <span className="flight-plane" style={{ left: `${Math.min(f.progress, 95)}%` }} aria-hidden>
+                    <Plane size={13} />
+                  </span>
+                </div>
+                <span className="flight-phase">{f.phase}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <div className="cockpit-throttle">
         <div className="cockpit-throttle-label">When a draft is ready</div>
@@ -971,15 +1037,10 @@ function AutopilotCockpit({
         </section>
       )}
 
-      <div className="cockpit-foot">
-        <p className="cockpit-note">
-          Autopilot only sends to verified addresses, during business hours, and sources a few new companies a day.
-          Low-confidence drafts always wait here for you.
-        </p>
-        <button type="button" className="link-button" onClick={onViewTargets}>
-          Turn off &amp; take manual control
-        </button>
-      </div>
+      <p className="cockpit-note">
+        Autopilot only sends to verified addresses, during business hours, and sources a few new companies a day.
+        Low-confidence drafts always wait here for you. Switch to <strong>Manual</strong> any time, up top.
+      </p>
     </div>
   );
 }
