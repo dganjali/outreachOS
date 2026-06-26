@@ -18,6 +18,18 @@
         "server:dev"
       ],
       "port": 8080
+    },
+    {
+      "name": "outreachos-preview",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "preview",
+        "--",
+        "--port",
+        "4173"
+      ],
+      "port": 4173
     }
   ]
 }

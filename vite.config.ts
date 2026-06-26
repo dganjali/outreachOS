@@ -20,23 +20,17 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        // Split the heaviest dependencies into their own long-lived chunks.
-        // Three.js (only the Landing scene needs it) and Firebase dominated the
-        // two >500kB bundles; isolating them keeps the app shell small and lets
-        // each big lib cache independently across deploys.
+        // Only split out heavy *leaf* libraries — ones the app imports but that
+        // never import app/vendor code back, so isolating them can't create a
+        // cross-chunk circular dependency. (A broader split that separated
+        // react/vendor produced a "Cannot access 'b' before initialization" TDZ
+        // crash at runtime — black screen. Don't reintroduce that.) Three.js is
+        // Landing-only and dominated that route's bundle; Firebase is the next
+        // largest. Everything else stays on Vite's safe default chunking.
         manualChunks(id) {
           if (!id.includes('node_modules')) return;
           if (id.includes('/three/') || id.includes('/three@')) return 'three';
-          if (id.includes('firebase') || id.includes('@firebase')) return 'firebase';
-          if (id.includes('@radix-ui')) return 'radix';
-          if (
-            id.includes('/react/') ||
-            id.includes('/react-dom/') ||
-            id.includes('/react-router') ||
-            id.includes('/scheduler/')
-          )
-            return 'react';
-          return 'vendor';
+          if (id.includes('/firebase/') || id.includes('/@firebase/')) return 'firebase';
         },
       },
     },
