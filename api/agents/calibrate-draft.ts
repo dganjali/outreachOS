@@ -120,9 +120,9 @@ export default async function handler(req: Request, res: Response) {
   missions.sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0));
   const mission = missions[0] ?? null;
 
-  const mode = (mission?.mode ?? persona.mode ?? 'sales') as MissionMode;
-  const goal = mission?.goal ?? persona.offer ?? '';
-  const audience = mission?.targetDescription ?? persona.audience ?? '';
+  const mode = (persona.mode ?? mission?.mode ?? 'sales') as MissionMode;
+  const goal = persona.offer || mission?.goal || '';
+  const audience = persona.audience || mission?.targetDescription || '';
   const geo = mission?.geo ?? null;
 
   const run = await startRun(scope, { agentType: 'draft', missionId: mission?._id });
