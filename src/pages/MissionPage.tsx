@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { ReactNode, CSSProperties } from 'react';
+import type { ReactNode } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   Send, Sparkles, Lock, Undo2, Paperclip, Pencil,
-  Plane, PlaneTakeoff, Radar, Search, Users, PenLine, Clock, Eye, MessageSquare, Check, ChevronRight, X,
+  Plane, PlaneTakeoff, Radar, Search, Users, PenLine, Clock, Eye, MessageSquare, Check, ChevronRight, X, Gauge as GaugeIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
@@ -604,30 +604,43 @@ export function MissionPage() {
       let phase = 'Taxiing';
       let tone = 'taxi';
       let stage: Flight['stage'] = 'sourced';
-      let note = 'Sourced — researching next.';
+      let stat = 'researching';
+      let note = 'Sourced — researching the company next.';
       if (repliedN > 0) {
         progress = 100; phase = 'Landed'; tone = 'landed'; stage = 'replied';
+        stat = `${repliedN} repl${repliedN === 1 ? 'y' : 'ies'}`;
         note = `${repliedN} repl${repliedN === 1 ? 'y' : 'ies'} in. Follow-ups paused.`;
       } else if (sentN > 0) {
         progress = 86; phase = 'Descending'; tone = 'sent'; stage = 'sent';
+        stat = `${sentN} sent`;
         note = `${sentN} email${sentN === 1 ? '' : 's'} sent — awaiting a reply.`;
       } else if (draftsN > 0) {
         progress = 66; phase = 'Cruising'; tone = 'cruise'; stage = 'drafted';
-        note = `${draftsN} draft${draftsN === 1 ? '' : 's'} ready to send.`;
+        stat = `${draftsN} draft${draftsN === 1 ? '' : 's'} ready`;
+        note = `${draftsN} draft${draftsN === 1 ? '' : 's'} ready — queued for the next send window.`;
       } else if (cs.length) {
         progress = 46; phase = 'Climbing'; tone = 'climb'; stage = 'contacts';
+        stat = `${cs.length} contact${cs.length === 1 ? '' : 's'}`;
         note = `${cs.length} contact${cs.length === 1 ? '' : 's'} found — drafting outreach.`;
       } else if (pack) {
         progress = 30; phase = 'Climbing'; tone = 'climb'; stage = 'researched';
+        stat = 'finding contacts';
         note = 'Researched — finding the right contacts.';
       }
       return {
         id: t.id, name: t.company_name, signal: t.signal_type ?? null,
-        progress, phase, tone, stage, note,
+        progress, phase, tone, stage, stat, note,
         contacts: cs.length, drafts: draftsN, sent: sentN, replied: repliedN,
       };
     })
     .sort((a, b) => b.progress - a.progress || a.name.localeCompare(b.name));
+
+  // Soonest upcoming scheduled send, for the cockpit's flight-plan readout.
+  const upcomingSends = allSent
+    .filter((m) => m.status === 'queued' && m.scheduled_send_at)
+    .map((m) => m.scheduled_send_at as string)
+    .sort();
+  const nextScheduledAt = upcomingSends.find((iso) => new Date(iso).getTime() > Date.now()) ?? upcomingSends[0] ?? null;
 
   return (
     <div className="mx">
@@ -653,6 +666,7 @@ export function MissionPage() {
           policy={policy}
           metrics={metrics}
           sentToday={sentToday}
+          nextScheduledAt={nextScheduledAt}
           flights={flights}
           reviewItems={reviewItems}
           refreshKey={refreshKey}
@@ -790,8 +804,8 @@ type Metrics = {
 };
 
 // One company in Autopilot's airspace — a cloud the user can click to see what
-// Autopilot is doing with it. `stage` picks the cloud's status icon; `progress`
-// only seeds its starting position in the drift.
+// Autopilot is doing with it. `stage` picks the cloud's status icon; `stat` is
+// the at-a-glance metric shown on the cloud; `progress` orders them.
 type Flight = {
   id: string;
   name: string;
@@ -800,6 +814,7 @@ type Flight = {
   phase: string;
   tone: string;
   stage: 'sourced' | 'researched' | 'contacts' | 'drafted' | 'sent' | 'replied';
+  stat: string;
   note: string;
   contacts: number;
   drafts: number;
@@ -895,6 +910,7 @@ function AutopilotCockpit({
   policy,
   metrics,
   sentToday,
+  nextScheduledAt,
   flights,
   reviewItems,
   refreshKey,
@@ -907,6 +923,7 @@ function AutopilotCockpit({
   policy: CampaignPolicy;
   metrics: Metrics;
   sentToday: number;
+  nextScheduledAt: string | null;
   flights: Flight[];
   reviewItems: Array<{ target: Target; contact: Contact; sequence: EmailSequence }>;
   refreshKey: number;
@@ -932,9 +949,53 @@ function AutopilotCockpit({
     policy.last_sourced_at ? `Last run ${relativeTime(policy.last_sourced_at)}` : 'First run on the next cycle'
   } · checks every ${policy.cycle_interval_hours ?? 24}h`;
 
+  // Flight plan: when Autopilot will next source and send.
+  const nextRunMs = policy.last_sourced_at
+    ? new Date(policy.last_sourced_at).getTime() + (policy.cycle_interval_hours ?? 24) * 3_600_000
+    : null;
+  const nextRunLabel = nextRunMs == null ? 'next cycle' : nextRunMs > Date.now() ? `in ${untilLabel(nextRunMs)}` : 'due now';
+  const sw = policy.send_window ?? { start_hour: 9, end_hour: 17 };
+  const sendWindow = `${fmtHour(sw.start_hour)}–${fmtHour(sw.end_hour)}`;
+  const tzCity = (policy.timezone || '').split('/').pop()?.replace(/_/g, ' ') ?? '';
+
   return (
     <div className="cockpit">
       <Skyfield phase={phase} phaseLabel={phaseLabel} cadence={cadence} flights={flights} />
+
+      <div className="cockpit-plan">
+        <span className="plan-item">
+          <Radar size={14} aria-hidden />
+          <span className="plan-k">Next sourcing</span>
+          <span className="plan-v">{nextRunLabel}</span>
+        </span>
+        {policy.auto_send ? (
+          <>
+            <span className="plan-item">
+              <Send size={14} aria-hidden />
+              <span className="plan-k">Sends</span>
+              <span className="plan-v">{sendWindow}{tzCity && <em> {tzCity}</em>}</span>
+            </span>
+            <span className="plan-item">
+              <GaugeIcon size={14} aria-hidden />
+              <span className="plan-k">Today</span>
+              <span className="plan-v">{sentToday} / {policy.daily_send_cap} sent</span>
+            </span>
+          </>
+        ) : (
+          <span className="plan-item">
+            <Eye size={14} aria-hidden />
+            <span className="plan-k">Sending</span>
+            <span className="plan-v">on your approval</span>
+          </span>
+        )}
+        {nextScheduledAt && (
+          <span className="plan-item">
+            <Clock size={14} aria-hidden />
+            <span className="plan-k">Next scheduled</span>
+            <span className="plan-v">{formatScheduleStamp(nextScheduledAt)}</span>
+          </span>
+        )}
+      </div>
 
       <div className="cockpit-gauges">
         <Gauge icon={<Radar size={15} />} label="Sourced" value={metrics.targets} />
@@ -1032,12 +1093,10 @@ function AutopilotCockpit({
   );
 }
 
-// The flight view: one hero plane and a calm sky, with each company drifting
-// past as a labelled cloud you can click to see what Autopilot is doing with it.
-// Vertical lanes keep the clouds from stacking; the (negative) per-cloud
-// animation delay spreads them across the drift so they never clump.
-const SKY_LANES = [14, 38, 60, 26, 50, 18, 44, 64, 32, 56, 22, 48, 36, 12];
-
+// The flight view: one hero plane in a calm sky, with each company shown as a
+// cloud card (status icon + name + at-a-glance metric). Clicking a cloud opens a
+// detail card with what Autopilot is doing. Static — no drift; clouds flow-wrap
+// so they never overlap and the scene scales to any company count.
 function Skyfield({
   phase,
   phaseLabel,
@@ -1050,55 +1109,49 @@ function Skyfield({
   flights: Flight[];
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  // Keep the sky calm: a few new companies a day means this rarely overflows,
-  // but cap it so the scene never turns into a swarm. The rest stay in the gauges.
   const clouds = flights.slice(0, 14);
   const selected = flights.find((f) => f.id === selectedId) ?? null;
 
   return (
     <div className="sky">
-      <div className={`sky-scene phase-${phase}`} onClick={() => setSelectedId(null)}>
-        <div className="sky-status">
-          <span className="sky-status-kicker">Autopilot</span>
-          <span className="sky-status-phase">{phaseLabel}</span>
-          <span className="sky-status-cadence">{cadence}</span>
-          <span className="sky-lamp">
-            <span className="sky-lamp-dot" aria-hidden />
-            Engaged
-          </span>
+      <div className={`sky-scene phase-${phase}`}>
+        <div className="sky-head">
+          <div className="sky-status">
+            <span className="sky-status-kicker">Autopilot</span>
+            <span className="sky-status-phase">{phaseLabel}</span>
+            <span className="sky-status-cadence">{cadence}</span>
+            <span className="sky-lamp">
+              <span className="sky-lamp-dot" aria-hidden />
+              Engaged
+            </span>
+          </div>
+          <div className="sky-hero" aria-hidden>
+            <span className="sky-hero-trail" />
+            <Plane size={34} />
+          </div>
         </div>
 
-        <div className="sky-hero" aria-hidden>
-          <span className="sky-hero-trail" />
-          <Plane size={34} />
-        </div>
-
-        {clouds.map((f, i) => (
-          <button
-            key={f.id}
-            type="button"
-            className={`cloud stage-${f.stage} tone-${f.tone}${selectedId === f.id ? ' is-selected' : ''}`}
-            style={
-              {
-                top: `${SKY_LANES[i % SKY_LANES.length]}%`,
-                left: `${f.progress}%`,
-                '--i': i,
-                '--n': clouds.length,
-              } as CSSProperties
-            }
-            onClick={(e) => {
-              e.stopPropagation();
-              setSelectedId((s) => (s === f.id ? null : f.id));
-            }}
-            title={`${f.name} · ${f.phase}`}
-          >
-            <span className="cloud-icon" aria-hidden>{stageIcon(f.stage)}</span>
-            <span className="cloud-name">{f.name}</span>
-          </button>
-        ))}
-
-        {flights.length > clouds.length && (
-          <span className="sky-more">+{flights.length - clouds.length} more</span>
+        {clouds.length > 0 && (
+          <div className="sky-clouds">
+            {clouds.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                className={`cloud tone-${f.tone}${selectedId === f.id ? ' is-selected' : ''}`}
+                onClick={() => setSelectedId((s) => (s === f.id ? null : f.id))}
+                title={`${f.name} · ${f.phase}`}
+              >
+                <span className="cloud-icon" aria-hidden>{stageIcon(f.stage)}</span>
+                <span className="cloud-text">
+                  <span className="cloud-name">{f.name}</span>
+                  <span className="cloud-meta">{f.phase} · {f.stat}</span>
+                </span>
+              </button>
+            ))}
+            {flights.length > clouds.length && (
+              <span className="sky-more">+{flights.length - clouds.length} more</span>
+            )}
+          </div>
         )}
       </div>
 
@@ -1185,6 +1238,24 @@ function clampCap(v: string): number {
   const n = Number(v);
   if (!Number.isFinite(n)) return 10;
   return Math.max(1, Math.min(100, Math.round(n)));
+}
+
+// "in 3h" / "in 12m" until a future timestamp (ms).
+function untilLabel(ms: number): string {
+  const mins = Math.round((ms - Date.now()) / 60000);
+  if (mins < 1) return 'moments';
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h`;
+  return `${Math.round(hrs / 24)}d`;
+}
+
+// 24h hour → "9am" / "5pm" / "12pm".
+function fmtHour(h: number): string {
+  const hr = ((h % 24) + 24) % 24;
+  const period = hr < 12 ? 'am' : 'pm';
+  const twelve = hr % 12 === 0 ? 12 : hr % 12;
+  return `${twelve}${period}`;
 }
 
 // ---------------------------------------------------------------------------

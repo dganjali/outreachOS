@@ -7939,28 +7939,27 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
    clickable, status-tagged cloud. Folds the old status deck in as an overlay. */
 .sky { display: flex; flex-direction: column; gap: var(--space-2); }
 .sky-scene {
-  position: relative; height: 212px; overflow: hidden;
+  position: relative; overflow: hidden; padding: var(--space-4);
+  display: flex; flex-direction: column; gap: var(--space-4);
   border: 1px solid var(--border); border-radius: var(--radius-lg);
   background:
-    radial-gradient(78% 100% at 0% 0%, color-mix(in srgb, var(--bg-elev) 70%, transparent), transparent 62%),
-    radial-gradient(150% 120% at 50% -30%, color-mix(in srgb, var(--info) 30%, transparent), transparent 58%),
-    radial-gradient(70% 90% at 84% 6%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 60%),
-    linear-gradient(180deg, color-mix(in srgb, var(--info) 16%, var(--bg-elev)) 0%, var(--bg-elev) 60%, var(--bg-soft) 100%);
+    radial-gradient(150% 120% at 50% -40%, color-mix(in srgb, var(--info) 28%, transparent), transparent 58%),
+    radial-gradient(60% 90% at 88% 4%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 60%),
+    linear-gradient(180deg, color-mix(in srgb, var(--info) 15%, var(--bg-elev)) 0%, var(--bg-elev) 64%, var(--bg-soft) 100%);
 }
-/* parallax background haze for depth */
+/* static background haze for depth */
 .sky-scene::before {
-  content: ''; position: absolute; inset: 0; pointer-events: none; opacity: 0.55;
+  content: ''; position: absolute; inset: 0; pointer-events: none; opacity: 0.5;
   background-repeat: repeat-x; background-size: 440px 100%;
   background-image:
-    radial-gradient(62px 30px at 80px 32%, color-mix(in srgb, var(--fg) 8%, transparent) 60%, transparent 76%),
-    radial-gradient(92px 42px at 270px 72%, color-mix(in srgb, var(--fg) 7%, transparent) 60%, transparent 76%),
-    radial-gradient(52px 26px at 370px 20%, color-mix(in srgb, var(--fg) 6%, transparent) 60%, transparent 76%);
-  animation: sky-drift-bg 70s linear infinite;
+    radial-gradient(62px 30px at 80px 30%, color-mix(in srgb, var(--fg) 7%, transparent) 60%, transparent 76%),
+    radial-gradient(92px 42px at 300px 68%, color-mix(in srgb, var(--fg) 6%, transparent) 60%, transparent 76%),
+    radial-gradient(52px 26px at 400px 18%, color-mix(in srgb, var(--fg) 5%, transparent) 60%, transparent 76%);
 }
-@keyframes sky-drift-bg { from { background-position-x: 0; } to { background-position-x: -440px; } }
 
-/* status overlay */
-.sky-status { position: absolute; top: 0; left: 0; z-index: 4; pointer-events: none; display: flex; flex-direction: column; gap: 2px; padding: var(--space-4); max-width: 64%; }
+/* head row: status (left) + the one hero plane (right) */
+.sky-head { position: relative; z-index: 2; display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); }
+.sky-status { display: flex; flex-direction: column; gap: 2px; }
 .sky-status-kicker { font-size: var(--text-xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent-2); }
 .sky-status-phase { font-size: var(--text-xl); font-weight: 650; letter-spacing: -0.012em; color: var(--fg); }
 .sky-status-cadence { font-size: var(--text-sm); color: var(--fg-muted); font-variant-numeric: tabular-nums; }
@@ -7970,43 +7969,43 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
 .sky-scene.phase-holding .sky-lamp { color: var(--warn); }
 .sky-scene.phase-holding .sky-lamp-dot { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
 
-/* hero plane */
-.sky-hero {
-  position: absolute; left: 52%; top: 58%; z-index: 1; transform: translate(-50%, -50%);
-  color: var(--accent-2); filter: drop-shadow(0 0 14px color-mix(in srgb, var(--accent-2) 55%, transparent));
-  animation: cockpit-float 5s var(--ease-in-out) infinite;
-}
+.sky-hero { position: relative; flex: 0 0 auto; color: var(--accent-2); filter: drop-shadow(0 0 14px color-mix(in srgb, var(--accent-2) 55%, transparent)); animation: cockpit-float 5s var(--ease-in-out) infinite; }
 .sky-hero svg { transform: rotate(45deg); display: block; }
-.sky-hero-trail { position: absolute; right: 64%; top: 50%; width: 140px; height: 2px; transform: translateY(-50%); border-radius: 2px; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent-2) 60%, transparent)); }
+.sky-hero-trail { position: absolute; right: 100%; top: 50%; width: 96px; height: 2px; transform: translateY(-50%); border-radius: 2px; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent-2) 65%, transparent)); }
 .sky-scene.phase-holding .sky-hero { color: var(--warn); filter: drop-shadow(0 0 14px color-mix(in srgb, var(--warn) 50%, transparent)); }
-.sky-scene.phase-holding .sky-hero-trail { background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--warn) 55%, transparent)); }
+.sky-scene.phase-holding .sky-hero-trail { background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--warn) 60%, transparent)); }
 
-/* company clouds */
+/* company clouds: static cards that flow-wrap, never overlap */
+.sky-clouds { position: relative; z-index: 2; display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: flex-start; }
 .cloud {
-  position: absolute; z-index: 2; display: inline-flex; align-items: center; gap: 6px;
-  padding: 5px 11px 5px 8px; font: inherit; cursor: pointer; white-space: nowrap; color: var(--fg);
+  display: inline-flex; align-items: center; gap: 9px; text-align: left;
+  padding: 9px 14px; font: inherit; cursor: pointer; color: var(--fg);
   --flight-color: var(--fg-subtle);
-  background: color-mix(in srgb, var(--bg-elev) 80%, transparent);
-  border: 1px solid color-mix(in srgb, var(--fg) 12%, transparent); border-radius: var(--radius-full);
-  box-shadow: 0 8px 20px -10px oklch(0.18 0.01 250 / 0.55), inset 0 1px 0 color-mix(in srgb, var(--fg) 14%, transparent);
-  transform: translate(-50%, -50%);
-  animation: cloud-drift var(--cloud-dur, 78s) linear infinite, cloud-bob 6s var(--ease-in-out) infinite;
-  animation-delay: calc(var(--cloud-dur, 78s) / var(--n, 1) * var(--i, 0) * -1), calc(var(--i, 0) * -0.7s);
-  will-change: left, transform;
-  transition: border-color var(--dur), box-shadow var(--dur);
+  background: color-mix(in srgb, var(--bg-elev) 82%, transparent);
+  border: 1px solid color-mix(in srgb, var(--fg) 13%, transparent); border-radius: var(--radius-lg);
+  box-shadow: 0 8px 20px -12px oklch(0.18 0.01 250 / 0.5), inset 0 1px 0 color-mix(in srgb, var(--fg) 12%, transparent);
+  transition: border-color var(--dur), box-shadow var(--dur), transform var(--dur);
 }
-.cloud:hover, .cloud.is-selected { animation-play-state: paused, paused; z-index: 5; border-color: color-mix(in srgb, var(--flight-color) 65%, transparent); }
-.cloud.is-selected { box-shadow: 0 0 0 2px color-mix(in srgb, var(--flight-color) 55%, transparent), 0 10px 24px -10px oklch(0.18 0.01 250 / 0.6); }
-.cloud-icon { display: inline-flex; color: var(--flight-color); }
-.cloud-name { font-size: var(--text-sm); font-weight: 600; max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+.cloud:hover { transform: translateY(-1px); border-color: color-mix(in srgb, var(--flight-color) 55%, transparent); }
+.cloud.is-selected { border-color: var(--flight-color); box-shadow: 0 0 0 2px color-mix(in srgb, var(--flight-color) 50%, transparent), 0 10px 24px -12px oklch(0.18 0.01 250 / 0.55); }
+.cloud-icon { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; flex: 0 0 auto; border-radius: 50%; color: var(--flight-color); background: color-mix(in srgb, var(--flight-color) 16%, transparent); }
+.cloud-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.cloud-name { font-size: var(--text-sm); font-weight: 650; color: var(--fg); max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cloud-meta { font-size: var(--text-xs); color: var(--flight-color); font-weight: 550; }
 .cloud.tone-climb  { --flight-color: var(--info); }
 .cloud.tone-cruise { --flight-color: var(--accent-2); }
 .cloud.tone-sent   { --flight-color: var(--info); }
 .cloud.tone-landed { --flight-color: var(--success); }
-@keyframes cloud-drift { from { left: 112%; } to { left: -14%; } }
-@keyframes cloud-bob { 0%, 100% { transform: translate(-50%, -50%); } 50% { transform: translate(-50%, calc(-50% - 5px)); } }
 
-.sky-more { position: absolute; right: var(--space-3); bottom: var(--space-2); z-index: 3; font-size: var(--text-xs); color: var(--fg-subtle); pointer-events: none; }
+.sky-more { align-self: center; font-size: var(--text-xs); color: var(--fg-subtle); padding: 0 var(--space-2); }
+
+/* flight plan: when Autopilot will source & send */
+.cockpit-plan { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-5); padding: var(--space-3) var(--space-4); background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); }
+.plan-item { display: inline-flex; align-items: center; gap: 7px; font-size: var(--text-sm); color: var(--fg); }
+.plan-item > svg { color: var(--fg-subtle); flex: 0 0 auto; }
+.plan-k { color: var(--fg-muted); }
+.plan-v { font-weight: 600; font-variant-numeric: tabular-nums; }
+.plan-v em { font-style: normal; color: var(--fg-muted); font-weight: 500; }
 
 /* selected flight detail */
 .flight-detail {
@@ -8074,16 +8073,13 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
   .tgt-aside { gap: var(--space-2); }
   .pc-head { flex-wrap: wrap; }
   .pc-actions { width: 100%; justify-content: flex-start; }
-  .sky-scene { height: 184px; }
-  .sky-status { max-width: 80%; padding: var(--space-3); }
   .sky-status-phase { font-size: var(--text-lg); }
-  .cloud-name { max-width: 104px; }
+  .cloud-name { max-width: 130px; }
+  .cockpit-plan { gap: var(--space-2) var(--space-4); }
 }
 
-/* Reduced motion: hold the sky still. Clouds sit at their progress position
-   (left was seeded inline) instead of drifting, and nothing bobs. */
+/* Reduced motion: the only motion left is the hero bob + lamp pulse. */
 @media (prefers-reduced-motion: reduce) {
-  .sky-scene::before { animation: none; }
   .sky-hero { animation: none; }
-  .cloud { animation: none; }
+  .sky-lamp-dot { animation: none; }
 }
