@@ -37,6 +37,11 @@ export interface AllowedFact {
   id: string;
   claim: string;
   source: string; // 'context_fact' | 'evidence' - provenance for the judge
+  /** Evidence-only: the signal type (funding/hiring/launch…) so the writer can
+   *  prefer high-value signals when choosing what to lead on. */
+  signal?: string;
+  /** Evidence-only: freeform recency ("2 weeks ago") so freshness is visible. */
+  recency?: string;
 }
 
 export interface DraftClaim {
@@ -163,10 +168,13 @@ const CRITIQUE_SCHEMA = {
 const DRAFT_SYSTEM = `You are the drafting engine for OutreachOS. You write one cold outreach email in the SENDER'S voice.
 
 Non-negotiable rules:
-- GROUNDING: You may only assert facts that appear in ALLOWED FACTS. Every factual claim in the email MUST be listed in "claims" with the exact id of the fact that supports it. If you cannot support a statement with an allowed fact, do not write it. Never invent metrics, names, dates, or events.
+- GROUNDING: You may only assert facts listed under SIGNALS or YOUR PROOF. Every factual claim in the email MUST be listed in "claims" with the exact id of the fact that supports it. If you cannot support a statement with a listed fact, do not write it. Never invent metrics, names, dates, or events.
+- TARGET FOCUS: This email is for ONE specific person. Open on the single strongest, freshest signal about the recipient or their company (from SIGNALS) and make it the spine of the email. The first sentence must reference something true and particular about THEM - a reader must not be able to swap in a different name or company without the email falling apart. If no SIGNALS are given, lead on why the offer is specifically relevant to their role; still never a generic opener.
+- BEST EVIDENCE, NOT ALL: Choose the 1-2 signals that most justify reaching out to THIS person; ignore the rest. Prefer recent, high-value signals (funding, launches, hiring, partnerships, leadership moves) over generic ones. Do not list facts - weave the chosen one into a reason to talk. YOUR PROOF is for credibility only, used sparingly, never as the opener.
 - VOICE: Match the sender's exemplars and style profile - imitate their rhythm, structure, and register. Do NOT regress to generic "professional email" voice.
 - SUBJECT: If the style profile specifies a SUBJECT-LINE STYLE, the subject MUST follow it exactly (length, casing, punctuation, pattern). Otherwise mirror the subject style of the sender's exemplars. Never default to a generic "Quick question" style subject.
 - NO SLOP: No "I hope this finds you well", no "I came across your company", no filler, no hedging, no flattery. Respect the sender's banned-phrase list absolutely.
+- ANGLE: "angle" is one sentence naming the specific signal you lead with and how it connects to the offer (e.g. "They just raised a Series B → scaling support, which my offer speeds up"). The body must deliver exactly that angle, not a kitchen-sink of every fact.
 - FORMAT: Initial email under the word target. Plain text. One specific, low-friction, time-boxed CTA.
 - SIGN-OFF: Always end the body with a short closing line (e.g. "Best,") followed by the sender's name on the next line. Use the SENDER name provided verbatim - NEVER leave a placeholder like "[Your Name]", "[Name]", or "{{name}}". The sign-off is part of the body, not the subject.
 
@@ -178,7 +186,7 @@ Check:
 - fabrication: any claim whose attributed fact does not actually support it, or any factual statement with no backing fact. severity 'block'.
 - banned_phrase: any phrase on the sender's banned list, or generic slop ("hope this finds you well", "came across", "circle back", "synergy", reflexive flattery). severity 'block'.
 - voice_mismatch: the draft does not sound like the sender's exemplars/style. severity 'warn'.
-- constraint: violates length/structure/CTA rules. severity 'warn'.
+- constraint: violates length/structure/CTA rules, OR the opener is generic - it could be sent to any recipient with no change because it does not reference a specific signal about them or their company, even though signals were provided. severity 'warn'.
 Set voiceMatchScore 0..1 (1 = indistinguishable from the exemplars). pass=true only if there are no 'block' violations.
 
 Output JSON only, matching the schema.`;
@@ -234,11 +242,24 @@ export function templateStrictnessDirective(strictness: number, hasExemplars: bo
   return `TEMPLATE STRICTNESS: ${s}/100. ${guidance}`;
 }
 
+/** Render one allowed fact, surfacing evidence signal/recency so the writer can
+ *  weigh freshness + signal strength when choosing what to lead on. */
+function renderFact(f: AllowedFact): string {
+  const meta = [f.signal, f.recency].filter((x) => x && x.trim()).join(' · ');
+  return `  [${f.id}]${meta ? ` (${meta})` : ''} ${f.claim}`;
+}
+
 /** Build the volatile user-message prompt (everything not in the frozen system). */
 export function buildDraftUserPrompt(ctx: AssembledContext): string {
-  const facts = ctx.allowedFacts.length
-    ? ctx.allowedFacts.map((f) => `  [${f.id}] (${f.source}) ${f.claim}`).join('\n')
-    : '  (none - do not assert any specific facts)';
+  // Split the grounding universe so the recipient's signals (what to LEAD on)
+  // are visually distinct from the sender's proof (credibility only). A flat,
+  // undifferentiated list is a big reason drafts read same-y and unfocused.
+  const recipientFacts = ctx.allowedFacts.filter((f) => f.source === 'evidence');
+  const senderFacts = ctx.allowedFacts.filter((f) => f.source !== 'evidence');
+  const signalsBlock = recipientFacts.length
+    ? recipientFacts.map(renderFact).join('\n')
+    : '  (none found - lead on why the offer is specifically relevant to their role; do NOT invent a signal)';
+  const proofBlock = senderFacts.length ? senderFacts.map(renderFact).join('\n') : '  (none)';
   const exemplars = ctx.exemplars.length
     ? ctx.exemplars
         .map((e, i) => `--- Exemplar ${i + 1} ---\n${e.subject ? `Subject: ${e.subject}\n` : ''}${e.body}`)
@@ -273,7 +294,11 @@ export function buildDraftUserPrompt(ctx: AssembledContext): string {
     '',
     `MISSION\nGoal / offer: ${ctx.missionGoal}\nAudience: ${ctx.audience}${ctx.whyNow ? `\nWhy now: ${ctx.whyNow}` : ''}`,
     '',
-    `ALLOWED FACTS (cite ids in "claims"; you may assert NOTHING else):\n${facts}`,
+    'GROUNDING CONTRACT: cite the id of every factual claim in "claims". You may assert ONLY the facts listed below - nothing else.',
+    '',
+    `SIGNALS ABOUT ${ctx.recipient.company || 'THE RECIPIENT'} (their world - LEAD with the single strongest, freshest one; ignore the rest):\n${signalsBlock}`,
+    '',
+    `YOUR PROOF (the sender's facts - credibility only, used sparingly, never the opener):\n${proofBlock}`,
     '',
     `SENDER STYLE PROFILE\n${styleProfileBlock(ctx.styleProfile)}`,
     '',
@@ -423,8 +448,11 @@ async function generateDraft(ctx: AssembledContext, extra = ''): Promise<DraftOu
 
 async function critiqueDraft(draft: DraftOutput, ctx: AssembledContext): Promise<CritiqueOutput> {
   const facts = ctx.allowedFacts.map((f) => `[${f.id}] ${f.claim}`).join('\n');
+  const signals = ctx.allowedFacts.filter((f) => f.source === 'evidence').map((f) => `- ${f.claim}`).join('\n');
   const exemplars = ctx.exemplars.map((e) => e.body).join('\n---\n');
   const user = [
+    `RECIPIENT: ${ctx.recipient.name}, ${ctx.recipient.role} at ${ctx.recipient.company}`,
+    `SIGNALS AVAILABLE ABOUT THE RECIPIENT (the opener should reference one of these if any exist):\n${signals || '(none - a role-relevant opener is acceptable)'}`,
     `ALLOWED FACTS:\n${facts || '(none)'}`,
     `BANNED PHRASES: ${ctx.styleProfile.bannedPhrases?.join(', ') || '(none)'}`,
     `EXEMPLARS (the target voice):\n${exemplars || '(none)'}`,

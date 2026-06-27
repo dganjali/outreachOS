@@ -941,11 +941,24 @@ function StyleStep({
         onChange={(e) => setBody(e.target.value)}
         placeholder="Paste a past email here…"
       />
-      <button type="button" className="pw-btn-add" onClick={add} disabled={!body.trim()}>
+      <button
+        type="button"
+        className={`pw-btn-add${body.trim() ? ' pw-btn-add-ready' : ''}`}
+        onClick={add}
+        disabled={!body.trim()}
+      >
         <Plus size={14} /> Add example
       </button>
       <div className="pw-ex-list">
-        {exemplars.length === 0 && <p className="pw-empty">No examples yet - optional, but they sharpen the voice a lot.</p>}
+        {exemplars.length === 0 && (
+          <div className="pw-ex-empty">
+            <Sparkles size={15} className="pw-ex-empty-icon" />
+            <p className="pw-ex-empty-text">
+              <strong>No examples yet.</strong> Optional — but even one real email sharpens the voice
+              far more than any setting. Paste one above and hit <em>Add example</em>.
+            </p>
+          </div>
+        )}
         {exemplars.map((e, i) => (
           <div key={i} className="pw-ex">
             <p className="pw-ex-body">
@@ -1061,6 +1074,10 @@ function CalibrateStep({
       setSubject(data.subject);
       setBody(data.body);
       setBodyVersion((v) => v + 1);
+      // A regenerated draft is a clean slate - the prior refine instructions were
+      // applied to the OLD draft and no longer hold, so clear the chips rather
+      // than leave stale "applied" tags hanging over a fresh draft.
+      setInstructions([]);
       // Remember the pristine generated draft so manual edits can be diffed.
       onGenerated({ subject: data.subject, body: data.body });
       setGenState('ready');
@@ -1070,7 +1087,7 @@ function CalibrateStep({
     } finally {
       setGenerating(false);
     }
-  }, [ensurePersona, setSubject, setBody, onGenerated]);
+  }, [ensurePersona, setSubject, setBody, setInstructions, onGenerated]);
 
   // Generate a draft on first entry (only if we don't already have one).
   const triedRef = useRef(false);
@@ -1240,12 +1257,15 @@ function CalibrateStep({
         </button>
       </div>
       {instructions.length > 0 && (
-        <div className="pw-chips">
-          {instructions.map((c, i) => (
-            <span key={i} className="pw-chip pw-chip-static">
-              {c}
-            </span>
-          ))}
+        <div className="pw-chips-block">
+          <span className="pw-chips-label">Applied to this draft · learned as your taste</span>
+          <div className="pw-chips">
+            {instructions.map((c, i) => (
+              <span key={i} className="pw-chip pw-chip-static">
+                {c}
+              </span>
+            ))}
+          </div>
         </div>
       )}
       {error && <p className="pw-error">{error}</p>}

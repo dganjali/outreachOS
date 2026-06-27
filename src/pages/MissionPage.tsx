@@ -711,7 +711,13 @@ export function MissionPage() {
                 )}
                 <CsvImport missionId={mission.id} onImported={loadTargets} />
                 {visibleTargets.length > 0 && (
-                  <button type="button" className="btn-secondary" disabled={busy === 'targeting'} onClick={findTargets}>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    disabled={busy === 'targeting'}
+                    onClick={findTargets}
+                    title="Sources additional companies and adds them to this list — your existing companies stay. Runs a fresh search that skips anything already here."
+                  >
                     {busy === 'targeting' ? 'Researching…' : 'Find more'}
                   </button>
                 )}
@@ -1477,7 +1483,17 @@ function TargetRow({
               <span className="tgt-sec-title">
                 People{contacts.length > 0 && <span className="tgt-sec-count">{contacts.length}</span>}
               </span>
-              <button type="button" className="btn-secondary small" disabled={contactsBusy} onClick={() => onFindContacts(t)}>
+              <button
+                type="button"
+                className="btn-secondary small"
+                disabled={contactsBusy}
+                onClick={() => onFindContacts(t)}
+                title={
+                  contacts.length > 0
+                    ? 'Looks for additional people at this company and adds them — your current contacts stay.'
+                    : 'Finds the decision-makers to reach at this company.'
+                }
+              >
                 {contactsBusy ? 'Searching…' : contacts.length > 0 ? 'Find more' : 'Find contacts'}
               </button>
             </div>
@@ -2137,13 +2153,14 @@ function MissionBriefCard({
       <section className="mission-overview-card is-editing">
         <div className="mission-overview-edit">
           <label className="email-field-label">Offer</label>
-          <textarea className="reply-body-input" rows={3} value={goal} onChange={(e) => setGoal(e.target.value)} />
+          <textarea className="reply-body-input" rows={3} value={goal} onChange={(e) => setGoal(e.target.value)} spellCheck />
           <label className="email-field-label">Audience</label>
           <textarea
             className="reply-body-input"
             rows={3}
             value={audience}
             onChange={(e) => setAudience(e.target.value)}
+            spellCheck
           />
           <label className="email-field-label">Location focus (optional)</label>
           <input

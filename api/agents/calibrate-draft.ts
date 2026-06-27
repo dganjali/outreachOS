@@ -40,19 +40,35 @@ export default async function handler(req: Request, res: Response) {
   const persona = await scope.collection<PersonaDoc>('personas').findById(persona_id);
   if (!persona) return res.status(404).json({ error: 'persona_not_found' });
 
-  // Most-recent contact we can fully resolve (contact→target→mission).
+  // Most-recent contact we can fully resolve (contact→target→mission) whose
+  // mission MATCHES the voice being calibrated. Without this match we'd draft
+  // from whatever the user's most-recent contact happens to be - e.g. building a
+  // BD voice would pull an unrelated Internship mission's offer/audience and
+  // write a co-op email. We only accept a contact when its mission is this
+  // persona's own mission, or (failing that) shares the persona's mode; anything
+  // else falls through to Path B, which drafts from the persona's own context.
   const contacts = await scope.collection<ContactDoc>('contacts').find({});
   contacts.sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0));
 
   let picked: { contact: ContactDoc; target: TargetDoc; mission: MissionDoc } | null = null;
+  let modeMatch: { contact: ContactDoc; target: TargetDoc; mission: MissionDoc } | null = null;
   for (const contact of contacts) {
     const target = await scope.collection<TargetDoc>('targets').findById(contact.targetId);
     if (!target) continue;
     const mission = await scope.collection<MissionDoc>('missions').findById(target.missionId);
     if (!mission) continue;
-    picked = { contact, target, mission };
-    break;
+    // Best: a contact under a mission that uses this exact voice.
+    if (mission.personaId && mission.personaId === persona._id) {
+      picked = { contact, target, mission };
+      break;
+    }
+    // Fallback: same outreach mode (e.g. any BD mission for a BD voice). Keep the
+    // most-recent one but keep scanning for an exact persona match.
+    if (!modeMatch && persona.mode && mission.mode === persona.mode) {
+      modeMatch = { contact, target, mission };
+    }
   }
+  if (!picked) picked = modeMatch;
 
   // ---- Path A: real contact → assemble + run engine on it. ----
   if (picked) {

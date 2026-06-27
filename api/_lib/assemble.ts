@@ -24,6 +24,95 @@ import type {
 // Caps keep the prompt bounded + cost predictable regardless of context-bank size.
 const MAX_FACTS = 12;
 const MAX_EXEMPLARS = 3;
+// A pack can hold up to 8 bullets; feeding all of them dilutes the draft and
+// invites generic picks. Keep only the strongest few so the writer leads on the
+// best signal rather than the first one.
+const MAX_EVIDENCE = 5;
+
+// Signal types worth leading an email on, ranked. Recent funding/launches/hiring
+// are far stronger outreach hooks than a stray blog post.
+const SIGNAL_WEIGHT: Record<string, number> = {
+  funding: 5,
+  launch: 5,
+  partnership: 4,
+  hiring: 4,
+  hire: 4,
+  leadership: 4,
+  press: 3,
+  sponsorship: 3,
+  talk: 2,
+  blog: 2,
+  other: 1,
+};
+
+function signalScore(signalType: string | null | undefined): number {
+  return SIGNAL_WEIGHT[(signalType ?? '').toLowerCase().trim()] ?? 1;
+}
+
+// Map a freeform recency string ("2 weeks ago", "Q3 2025", "last month") to a
+// freshness score. Relative terms dominate real packs, so key off those rather
+// than parsing absolute dates (which drift as "now" moves).
+function recencyScore(recency: string | null | undefined): number {
+  const s = (recency ?? '').toLowerCase();
+  if (!s) return 1.5;
+  if (/\b(today|yesterday|day|days|this week|last week|week|weeks|recent|just)\b/.test(s)) return 4;
+  if (/\b(month|months|last month|q[1-4]|quarter)\b/.test(s)) return 2.5;
+  return 1.5;
+}
+
+// Small nudge: does the bullet touch the recipient's own role/headline terms?
+function roleRelevanceScore(
+  fact: string,
+  recipient: { role?: string | null; headline?: string | null } | undefined
+): number {
+  if (!recipient) return 0;
+  const tokens = `${recipient.role ?? ''} ${recipient.headline ?? ''}`
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length > 3);
+  if (tokens.length === 0) return 0;
+  const hay = fact.toLowerCase();
+  const hits = new Set(tokens.filter((t) => hay.includes(t)));
+  return Math.min(hits.size, 3); // capped so relevance never dominates signal/recency
+}
+
+type EvidenceBullet = EvidencePackDoc['bullets'][number];
+
+/**
+ * Score + cap a pack's bullets to the strongest few. Each kept bullet retains
+ * its ORIGINAL index so the stable citation id (`evidence:<packId>:<index>`)
+ * still resolves in the grounding contract.
+ */
+function rankEvidenceBullets(
+  bullets: EvidenceBullet[],
+  recipient: { role?: string | null; headline?: string | null } | undefined
+): Array<{ bullet: EvidenceBullet; index: number }> {
+  return bullets
+    .map((bullet, index) => ({
+      bullet,
+      index,
+      score: signalScore(bullet.signalType) + recencyScore(bullet.recency) + roleRelevanceScore(bullet.fact, recipient),
+    }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, MAX_EVIDENCE);
+}
+
+/**
+ * The retrieval query that ranks the sender's context facts + voice exemplars.
+ * Keyed on the recipient (role + headline) on top of the mission goal so two
+ * different people in one mission pull DIFFERENT proof + voice anchors - the
+ * single biggest lever against every draft reading the same. When the recipient
+ * has no role/headline it degrades to just the goal, so the shared per-mission
+ * retrieval cache still applies.
+ */
+export function buildRetrievalQuery(args: {
+  missionGoal: string;
+  role?: string | null;
+  headline?: string | null;
+}): string {
+  const recip = [args.role?.trim(), args.headline?.trim()].filter(Boolean).join(', ');
+  return recip ? `${args.missionGoal}. Recipient: ${recip}.` : args.missionGoal;
+}
 
 type Scope = ReturnType<typeof forUser>;
 const CACHE_MARKER = Symbol('DraftContextCache');
@@ -93,10 +182,18 @@ export async function assembleDraftContext(
 ): Promise<AssembledBundle> {
   const { contact, target, mission, persona } = args;
 
-  const facts = await assembleAllowedFacts(scope, uid, persona?._id ?? null, target._id, mission.goal, {
+  // Rank facts + exemplars against THIS recipient, not just the mission, so
+  // drafts diverge per person and pull role-relevant proof + voice.
+  const retrievalQuery = buildRetrievalQuery({
+    missionGoal: mission.goal,
+    role: contact.role,
+    headline: contact.headline,
+  });
+  const facts = await assembleAllowedFacts(scope, uid, persona?._id ?? null, target._id, retrievalQuery, {
     excludedFactIds: persona?.excludedFactIds ?? [],
+    recipient: { role: contact.role, headline: contact.headline },
   }, cache);
-  const exemplarDocs = persona ? await fetchExemplars(scope, uid, persona._id, mission.goal, cache) : [];
+  const exemplarDocs = persona ? await fetchExemplars(scope, uid, persona._id, retrievalQuery, cache) : [];
   // Sender identity - anchors a real sign-off on every email (engine.ts).
   const profile = await fetchProfile(scope, cache);
 
@@ -144,8 +241,8 @@ export async function assembleAllowedFacts(
   uid: string,
   personaId: string | null,
   targetId: string,
-  missionGoal: string,
-  opts: { excludedFactIds?: string[] } = {},
+  query: string,
+  opts: { excludedFactIds?: string[]; recipient?: { role?: string | null; headline?: string | null } } = {},
   cache?: DraftContextCache
 ): Promise<AllowedFact[]> {
   const facts: AllowedFact[] = [];
@@ -153,7 +250,7 @@ export async function assembleAllowedFacts(
   // grounding so a cleared default never resurfaces in a generated email.
   const excluded = new Set(opts.excludedFactIds ?? []);
 
-  const contextFacts = await fetchContextAllowedFacts(scope, uid, personaId, missionGoal, excluded, cache);
+  const contextFacts = await fetchContextAllowedFacts(scope, uid, personaId, query, excluded, cache);
   for (const f of contextFacts) {
     facts.push(f);
   }
@@ -162,9 +259,18 @@ export async function assembleAllowedFacts(
   packs.sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0));
   const latestPack = packs[0];
   if (latestPack) {
-    latestPack.bullets.forEach((b, i) => {
-      facts.push({ id: `evidence:${latestPack._id}:${i}`, claim: b.fact, source: 'evidence' });
-    });
+    // Score + cap to the strongest signals (recency × signal type × role fit)
+    // instead of dumping every bullet, and carry signal/recency through so the
+    // writer can lead on the best one.
+    for (const { bullet, index } of rankEvidenceBullets(latestPack.bullets, opts.recipient)) {
+      facts.push({
+        id: `evidence:${latestPack._id}:${index}`,
+        claim: bullet.fact,
+        source: 'evidence',
+        signal: bullet.signalType ?? undefined,
+        recency: bullet.recency ?? undefined,
+      });
+    }
   }
 
   return facts;

@@ -28,6 +28,8 @@ interface HistoryProps {
   current: ProfileSnapshot;
   reloadKey: number;
   onRestore: (snapshot: ProfileSnapshot, fromVersionId: string) => Promise<void>;
+  /** Save the current context as a snapshot without leaving the History tab. */
+  onSaveSnapshot?: () => Promise<void>;
 }
 
 function relTime(iso: string): string {
@@ -64,13 +66,24 @@ function renderValue(v: string | string[]): string {
   return v;
 }
 
-export function History({ userId, current, reloadKey, onRestore }: HistoryProps) {
+export function History({ userId, current, reloadKey, onRestore, onSaveSnapshot }: HistoryProps) {
   const confirm = useConfirm();
   const [versions, setVersions] = useState<ProfileVersion[] | null>(null);
   const [outcomes, setOutcomes] = useState<Record<string, VersionOutcome>>({});
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [restoringId, setRestoringId] = useState<string | null>(null);
+  const [savingSnapshot, setSavingSnapshot] = useState(false);
+
+  async function saveSnapshot() {
+    if (!onSaveSnapshot) return;
+    setSavingSnapshot(true);
+    try {
+      await onSaveSnapshot();
+    } finally {
+      setSavingSnapshot(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -169,9 +182,19 @@ export function History({ userId, current, reloadKey, onRestore }: HistoryProps)
       <div className="me-history-empty">
         <h3>No history yet</h3>
         <p>
-          Save your profile from the Context tab. Each save creates a snapshot so you can compare
-          versions and roll back.
+          Each save creates a snapshot so you can compare versions and roll back. Save your current
+          context now, or edit it first on the Context tab.
         </p>
+        {onSaveSnapshot && (
+          <button
+            type="button"
+            className="me-history-save-cta"
+            onClick={saveSnapshot}
+            disabled={savingSnapshot}
+          >
+            {savingSnapshot ? 'Saving…' : 'Save current context snapshot'}
+          </button>
+        )}
       </div>
     );
   }

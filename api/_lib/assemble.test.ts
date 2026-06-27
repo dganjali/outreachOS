@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { assembleDraftContext, createDraftContextCache } from './assemble';
+import { assembleDraftContext, assembleAllowedFacts, buildRetrievalQuery, createDraftContextCache } from './assemble';
 import { emptyStyleProfile } from '../../shared/schemas';
 import type {
   ContactDoc,
@@ -163,4 +163,83 @@ test('draft-context cache reuses mission/persona lookups while keeping target ev
   assert.ok(!one.factIds.includes('evidence:pack2:0'));
   assert.ok(two.factIds.includes('evidence:pack2:0'));
   assert.ok(!two.factIds.includes('evidence:pack1:0'));
+});
+
+// ---------------------------------------------------------------------------
+// buildRetrievalQuery - per-recipient ranking key (diversity lever).
+// ---------------------------------------------------------------------------
+
+test('buildRetrievalQuery folds the recipient role + headline into the query', () => {
+  const q = buildRetrievalQuery({ missionGoal: 'Sell the offer', role: 'VP Engineering', headline: 'Scaling infra' });
+  assert.ok(q.includes('Sell the offer'));
+  assert.ok(q.includes('VP Engineering'));
+  assert.ok(q.includes('Scaling infra'));
+});
+
+test('buildRetrievalQuery degrades to the bare goal when the recipient is anonymous', () => {
+  assert.equal(buildRetrievalQuery({ missionGoal: 'Sell the offer' }), 'Sell the offer');
+  assert.equal(buildRetrievalQuery({ missionGoal: 'Sell the offer', role: '', headline: null }), 'Sell the offer');
+});
+
+// ---------------------------------------------------------------------------
+// Evidence ranking - keep the strongest few, not every bullet, and preserve the
+// original index so the citation id still resolves.
+// ---------------------------------------------------------------------------
+
+function evidenceOnlyScope(bullets: EvidencePackDoc['bullets']) {
+  const pack = {
+    _id: 'packX',
+    userId: 'u1',
+    createdAt: now(),
+    updatedAt: now(),
+    targetId: 'targetX',
+    missionId: 'missionX',
+    bullets,
+    citations: [],
+  } as EvidencePackDoc;
+  return {
+    collection(name: string) {
+      return {
+        find: async (filter: Record<string, unknown> = {}) => {
+          if (name === 'evidence_packs' && filter.targetId === 'targetX') return [pack];
+          return [];
+        },
+        findOne: async () => null,
+      };
+    },
+  };
+}
+
+const b = (fact: string, signalType: string, recency: string) => ({
+  fact,
+  sourceUrl: 'https://x.test',
+  sourceTitle: 'X',
+  signalType,
+  recency,
+});
+
+test('evidence ranking caps to the strongest five and keeps the best signal first', async () => {
+  const bullets = [
+    b('Posted a blog about culture', 'blog', 'last year'), // weak: idx 0
+    b('Raised a $30M Series B', 'funding', '2 weeks ago'), // strong: idx 1
+    b('Spoke at a meetup', 'talk', 'last year'), // weak: idx 2
+    b('Launched a new API', 'launch', 'this week'), // strong: idx 3
+    b('Hired a Head of Partnerships', 'hiring', 'last month'), // strong: idx 4
+    b('Updated their About page', 'other', 'last year'), // weakest: idx 5
+    b('Won a press award', 'press', 'last year'), // mid: idx 6
+  ] as EvidencePackDoc['bullets'];
+
+  const facts = await assembleAllowedFacts(evidenceOnlyScope(bullets) as never, 'u1', null, 'targetX', 'Sell the offer');
+  const evidence = facts.filter((f) => f.source === 'evidence');
+
+  // Capped to MAX_EVIDENCE (5), not all 7.
+  assert.equal(evidence.length, 5);
+  // A fresh, top-value signal leads (funding + launch tie on score; stable sort
+  // keeps the earlier index, funding, first); the stale "other" bullet is dropped.
+  assert.equal(evidence[0].id, 'evidence:packX:1'); // funding · 2 weeks ago
+  assert.ok(evidence.some((f) => f.id === 'evidence:packX:3')); // launch kept too
+  assert.ok(!evidence.some((f) => f.id === 'evidence:packX:5')); // dropped weakest ("other", last year)
+  // Signal + recency are carried through for the writer to weigh.
+  assert.equal(evidence[0].signal, 'funding');
+  assert.equal(evidence[0].recency, '2 weeks ago');
 });

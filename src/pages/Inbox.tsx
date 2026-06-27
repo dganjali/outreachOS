@@ -249,11 +249,16 @@ export function Inbox() {
               they&rsquo;re recorded.
             </p>
             <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => setFilter('all')}>
-                View handled replies
-              </Button>
-              <Button variant="ghost" size="sm" onClick={() => load()}>
+              <Button
+                size="sm"
+                onClick={() => load()}
+                className="btn-glow border-0 font-semibold text-primary-foreground"
+              >
+                <RefreshCw className="h-4 w-4" />
                 Refresh
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setFilter('all')}>
+                View handled replies
               </Button>
             </div>
           </div>

@@ -2885,6 +2885,22 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
   max-width: 44ch;
   font-size: 0.9375rem;
 }
+.me-history-save-cta {
+  margin-top: var(--space-4);
+  appearance: none;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--accent-fg);
+  background: var(--accent);
+  border: 0;
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background var(--dur) ease;
+}
+.me-history-save-cta:hover:not(:disabled) { background: var(--accent-hover); }
+.me-history-save-cta:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .me-history {
   list-style: none;
@@ -6963,6 +6979,15 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
 .pw-field-label { font-size: var(--text-sm); font-weight: 500; color: var(--fg); }
 .pw-field-label em { color: var(--fg-subtle); font-style: normal; font-weight: 400; }
 .pw-field-optional { color: var(--fg-subtle); font-weight: 400; }
+.pw-field-hint {
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  color: var(--fg-subtle);
+  /* .pw-field uppercases its labels; the hint is prose, so opt back out. */
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+}
 /* Inline required-field validation (#5): surfaced on a failed "Next" click. */
 .pw-field-error { font-size: var(--text-sm); color: var(--w-danger); }
 .pw-input.is-error { border-color: var(--w-danger-line); }
@@ -7046,6 +7071,8 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
 
 /* chips */
 .pw-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.pw-chips-block { display: flex; flex-direction: column; gap: 5px; }
+.pw-chips-label { font-size: var(--text-xs); font-weight: 500; color: var(--fg-subtle); }
 .pw-chip {
   display: inline-flex;
   align-items: center;
@@ -7206,6 +7233,23 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
 .pw-ex-x:hover { color: var(--w-danger); background: var(--w-danger-bg); }
 
 .pw-empty { margin: 0; font-size: var(--text-sm); font-style: italic; color: var(--fg-subtle); }
+/* Prominent empty-state well for writing samples (#3): examples drive quality,
+   so the prompt reads as a callout rather than a throwaway line of grey text. */
+.pw-ex-empty {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 0.7rem 0.85rem;
+  border: 1px dashed var(--w-bd-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.pw-ex-empty-icon { flex: none; margin-top: 1px; color: var(--accent); }
+.pw-ex-empty-text { margin: 0; font-size: var(--text-sm); line-height: 1.5; color: var(--fg-muted); }
+.pw-ex-empty-text strong { color: var(--fg); font-weight: 600; }
+.pw-ex-empty-text em { font-style: normal; font-weight: 600; color: var(--fg); }
+/* Once there's pasted text to add, the button reads as the clear next action. */
+.pw .pw-btn-add-ready { border-color: var(--accent); color: var(--fg); }
 
 /* substance: default-facts toolbar */
 .pw-facts-toolbar {

@@ -41,6 +41,7 @@ export function SettingsPage() {
   const [profileId, setProfileId] = useState<string | null>(null);
   const [suppressions, setSuppressions] = useState<Array<{ id: string; email: string; reason: string }>>([]);
   const [newEmail, setNewEmail] = useState('');
+  const [suppressError, setSuppressError] = useState<string | null>(null);
 
   async function loadSuppressions() {
     const { data } = await supabase.from('suppressions').select('*');
@@ -77,9 +78,24 @@ export function SettingsPage() {
   async function addSuppression(e: React.FormEvent) {
     e.preventDefault();
     const email = newEmail.trim().toLowerCase();
-    if (!email) return;
+    if (!email) {
+      setSuppressError('Enter an email address to suppress.');
+      return;
+    }
+    // Validate before hitting the DB - a malformed address was previously
+    // inserted (or silently rejected) with no feedback at all.
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setSuppressError(`"${newEmail.trim()}" isn't a valid email address.`);
+      return;
+    }
+    if (suppressions.some((s) => s.email.toLowerCase() === email)) {
+      setSuppressError(`${email} is already on the list.`);
+      return;
+    }
+    setSuppressError(null);
     const { error: err } = await supabase.from('suppressions').insert({ email, reason: 'manual', note: null });
     if (err) {
+      setSuppressError(`Could not suppress ${email}: ${err.message}`);
       toast.error(`Could not suppress ${email}: ${err.message}`);
       return;
     }
@@ -307,17 +323,29 @@ export function SettingsPage() {
         <p className="mt-1 text-sm text-muted-foreground">
           Addresses here are never emailed. Unsubscribes are added automatically.
         </p>
-        <form className="mt-3 flex gap-2" onSubmit={addSuppression}>
-          <Input
-            type="email"
-            placeholder="name@company.com"
-            value={newEmail}
-            onChange={(e) => setNewEmail(e.target.value)}
-            className="max-w-xs"
-          />
-          <Button type="submit" variant="outline" size="sm" disabled={!newEmail.trim()}>
-            Suppress
-          </Button>
+        <form className="mt-3 flex flex-col gap-1.5" onSubmit={addSuppression}>
+          <div className="flex gap-2">
+            <Input
+              type="email"
+              placeholder="name@company.com"
+              value={newEmail}
+              onChange={(e) => {
+                setNewEmail(e.target.value);
+                if (suppressError) setSuppressError(null);
+              }}
+              aria-invalid={!!suppressError}
+              aria-describedby={suppressError ? 'suppress-error' : undefined}
+              className="max-w-xs"
+            />
+            <Button type="submit" variant="outline" size="sm" disabled={!newEmail.trim()}>
+              Suppress
+            </Button>
+          </div>
+          {suppressError && (
+            <p id="suppress-error" role="alert" className="text-xs font-medium text-destructive">
+              {suppressError}
+            </p>
+          )}
         </form>
         {suppressions.length > 0 && (
           <ul className="mt-3 divide-y divide-border overflow-hidden rounded-lg border border-border">

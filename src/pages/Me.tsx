@@ -151,6 +151,18 @@ export function Me() {
     setHistoryReloadKey((k) => k + 1);
   }
 
+  /**
+   * Save the current context as a snapshot directly from the History tab, so the
+   * empty state isn't a dead end that only points back to the Context tab.
+   */
+  async function handleSaveSnapshot() {
+    if (!profile?.user_id) return;
+    await persistProfile(form);
+    await maybeSnapshot(form, 'manual', null);
+    await refreshProfile();
+    toast.success('Snapshot saved.');
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!profile?.user_id) return;
@@ -281,6 +293,7 @@ export function Me() {
           current={form}
           reloadKey={historyReloadKey}
           onRestore={handleRestore}
+          onSaveSnapshot={handleSaveSnapshot}
         />
       ) : null}
     </div>

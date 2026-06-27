@@ -261,6 +261,7 @@ export function MissionNew() {
                     onChange={(e) => setWhatSending(e.target.value)}
                     placeholder="Be specific. e.g. 'Sponsorship tiers $5k–25k for a 1,400-person developer conference (60% senior engineers).'"
                     aria-invalid={triedNext && missingOffer}
+                    spellCheck
                   />
                   {triedNext && missingOffer && <span className="pw-field-error">Describe what you're offering.</span>}
                 </label>
@@ -273,6 +274,7 @@ export function MissionNew() {
                     onChange={(e) => setWhoAndWhy(e.target.value)}
                     placeholder={AUDIENCE_COPY[findMode].placeholder}
                     aria-invalid={triedNext && missingAudience}
+                    spellCheck
                   />
                   {triedNext && missingAudience && <span className="pw-field-error">Describe who you want to reach.</span>}
                 </label>
@@ -284,8 +286,12 @@ export function MissionNew() {
                     className="pw-input"
                     value={geo}
                     onChange={(e) => setGeo(e.target.value)}
-                    placeholder="e.g. 'Toronto, Canada' - scopes contacts to a region"
+                    placeholder="e.g. 'Toronto, Canada'"
                   />
+                  <span className="pw-field-hint">
+                    Limits sourcing to companies with a presence here — e.g. “Toronto” only surfaces
+                    orgs hiring or operating in the region. Leave blank to search everywhere.
+                  </span>
                 </label>
               </div>
             )}
