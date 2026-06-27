@@ -567,15 +567,26 @@ export function MissionPage() {
   const sentToday =
     policy?.counter && policy.counter.date === new Date().toISOString().slice(0, 10) ? policy.counter.sent : 0;
 
-  // Drafts Autopilot wrote but is holding for the user (low confidence /
-  // unverified address, or review-first mode) - the one actionable list in the
-  // cockpit. Already-sent ones drop off.
+  // Drafts the cockpit holds for the user to clear. Two sources:
+  //  - Drafts Autopilot's gate already verdicted as 'ready' (passed but review-
+  //    first) or 'review' (low confidence / unverified address).
+  //  - Drafts the user generated MANUALLY before flipping Autopilot on. These
+  //    have no gate verdict yet (autopilot_state null) and the cron hasn't
+  //    processed them, so without this they'd silently vanish from the cockpit
+  //    until the next tick. In review-first mode every clean draft ends up
+  //    'ready' anyway, so surfacing them immediately is correct; in auto-send
+  //    mode we leave them for the cron, which is about to queue them.
+  // Already-sent / queued ones drop off either way.
+  const reviewFirst = !policy?.auto_send;
   const reviewItems: Array<{ target: Target; contact: Contact; sequence: EmailSequence }> = [];
   for (const t of visibleTargets) {
     for (const c of contactsByTarget[t.id] ?? []) {
       const seq = sequencesByContact[c.id];
       if (!seq) continue;
-      if ((seq.autopilot_state === 'ready' || seq.autopilot_state === 'review') && !initialSentSeqIds.has(seq.id)) {
+      if (initialSentSeqIds.has(seq.id)) continue;
+      const gateHeld = seq.autopilot_state === 'ready' || seq.autopilot_state === 'review';
+      const pendingGate = !seq.autopilot_state && seq.status === 'draft' && reviewFirst;
+      if (gateHeld || pendingGate) {
         reviewItems.push({ target: t, contact: c, sequence: seq });
       }
     }
@@ -751,6 +762,7 @@ export function MissionPage() {
                   <TargetRow
                     key={t.id}
                     target={t}
+                    isPeople={isPeople}
                     contacts={contactsByTarget[t.id] ?? []}
                     pack={packsByTarget[t.id]}
                     sequencesByContact={sequencesByContact}
@@ -1325,6 +1337,7 @@ function targetStage(
 
 function TargetRow({
   target: t,
+  isPeople,
   contacts,
   pack,
   sequencesByContact,
@@ -1347,6 +1360,7 @@ function TargetRow({
   onReloadSequence,
 }: {
   target: Target;
+  isPeople: boolean;
   contacts: Contact[];
   pack: EvidencePack | undefined;
   sequencesByContact: Record<string, EmailSequence | null | undefined>;
@@ -1395,13 +1409,24 @@ function TargetRow({
               {score}
             </span>
           )}
-          <span className="tgt-name">{t.company_name}</span>
+          {/* People mode: the person is what the user recognizes, so lead with
+              their name and carry the company alongside as context. Companies
+              mode keeps the company as the primary label. */}
+          {isPeople ? (
+            <>
+              <span className="tgt-name">{contacts[0]?.name ?? t.company_name}</span>
+              {contacts[0]?.role && <span className="tgt-domain">{contacts[0].role}</span>}
+              <span className="tgt-domain">{t.company_name}</span>
+            </>
+          ) : (
+            <span className="tgt-name">{t.company_name}</span>
+          )}
           {t.signal_type && (
             <span className="signal-pill" data-signal={t.signal_type}>
               {t.signal_type}
             </span>
           )}
-          {t.domain && <span className="tgt-domain">{t.domain}</span>}
+          {!isPeople && t.domain && <span className="tgt-domain">{t.domain}</span>}
         </button>
         <div className="tgt-aside">
           <span className={`tgt-stage stage-${stage.stage}`}>{stage.label}</span>
@@ -1410,6 +1435,17 @@ function TargetRow({
               {primaryBusy ? 'Working…' : stage.cta}
             </button>
           )}
+          {/* Always-visible remove, so a target can be dropped without first
+              expanding the row. Mirrors the × inside the expanded detail. */}
+          <button
+            type="button"
+            className="tgt-remove"
+            onClick={() => onDelete(t)}
+            title={isPeople ? `Remove ${contacts[0]?.name ?? t.company_name}` : `Remove ${t.company_name}`}
+            aria-label={isPeople ? `Remove ${contacts[0]?.name ?? t.company_name}` : `Remove ${t.company_name}`}
+          >
+            ×
+          </button>
         </div>
       </div>
 
