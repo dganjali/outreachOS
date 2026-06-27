@@ -149,7 +149,58 @@ export function buildPeopleQueries(spec: PeopleQuerySpec): string[] {
  * query throws (so the caller's web_search fallback still triggers).
  */
 export async function searchPeoplePool(spec: PeopleQuerySpec, numPerQuery = 8): Promise<SerperOrganicResult[]> {
-  const queries = buildPeopleQueries(spec);
+  return runQueryPool(buildPeopleQueries(spec), numPerQuery);
+}
+
+// ---------------------------------------------------------------------------
+// Company-LESS people discovery ("find people" mode). Same LinkedIn-scoped
+// approach as buildPeopleQueries, but with NO company clause: the person IS the
+// target, found by function/seniority/sector/geo across any company. The agent
+// then resolves each person's current company downstream.
+// ---------------------------------------------------------------------------
+
+export interface OpenPeopleQuerySpec {
+  functionKeywords: string[]; // ICP function synonyms - the primary signal
+  seniorityKeywords?: string[]; // optional; omitted ⇒ functions carry the query
+  sectorTerms?: string[]; // optional sector/industry bias
+  negativeTerms?: string[]; // e.g. ["student", "intern", "former"]
+  geo?: string | null; // location term appended on one variant
+}
+
+/** Build the focused, company-less query set from the open-people spec. */
+export function buildOpenPeopleQueries(spec: OpenPeopleQuerySpec): string[] {
+  const fns = spec.functionKeywords.slice(0, 6).map((t) => `"${t}"`);
+  const funcClause = fns.length ? ` (${fns.join(' OR ')})` : '';
+  // No seniority default here: open search trusts the function terms, so an
+  // empty list means "don't constrain seniority" (unlike the company variant).
+  const sen = (spec.seniorityKeywords ?? []).slice(0, 4).map((t) => `"${t}"`);
+  const senClause = sen.length ? ` (${sen.join(' OR ')})` : '';
+  const neg = (spec.negativeTerms ?? []).slice(0, 6).map((t) => `-${t}`).join(' ');
+  const negClause = neg ? ` ${neg}` : '';
+
+  const queries: string[] = [];
+  // 1. function (× seniority) - the precise profile query.
+  queries.push(`site:linkedin.com/in${funcClause}${senClause}${negClause}`.trim());
+  // 2. function × sector - bias toward where they work, when sectors are given.
+  if (spec.sectorTerms?.length) {
+    const sectors = spec.sectorTerms.slice(0, 4).map((t) => `"${t}"`).join(' OR ');
+    queries.push(`site:linkedin.com/in${funcClause} (${sectors})${negClause}`.trim());
+  }
+  // 3. geo variant of the precise query, when a location focus is set.
+  if (spec.geo && spec.geo.trim()) {
+    queries.push(`site:linkedin.com/in${funcClause}${senClause} "${spec.geo.trim()}"${negClause}`.trim());
+  }
+  return [...new Set(queries)];
+}
+
+/** Run the open-people query set and return a deduped, merged result pool. */
+export async function searchOpenPeoplePool(spec: OpenPeopleQuerySpec, numPerQuery = 10): Promise<SerperOrganicResult[]> {
+  return runQueryPool(buildOpenPeopleQueries(spec), numPerQuery);
+}
+
+/** Shared best-effort runner: merge + dedupe by profile URL; throw only if every
+ *  query fails (so the caller's web_search fallback still triggers). */
+async function runQueryPool(queries: string[], numPerQuery: number): Promise<SerperOrganicResult[]> {
   const settled = await Promise.allSettled(queries.map((q) => search(q, numPerQuery)));
   if (settled.every((s) => s.status === 'rejected')) {
     const first = settled.find((s) => s.status === 'rejected') as PromiseRejectedResult | undefined;

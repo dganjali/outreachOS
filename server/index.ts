@@ -6,6 +6,7 @@ import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
 
 import agentTarget from '../api/agents/target';
+import agentPeople from '../api/agents/people';
 import agentContacts from '../api/agents/contacts';
 import agentEvidence from '../api/agents/evidence';
 import agentSequence from '../api/agents/sequence';
@@ -127,6 +128,7 @@ app.get('/api/billing/me', wrap(billingMe));
 
 // agents
 app.post('/api/agents/target', wrap(agentTarget));
+app.post('/api/agents/people', wrap(agentPeople));
 app.post('/api/agents/contacts', wrap(agentContacts));
 app.post('/api/agents/evidence', wrap(agentEvidence));
 app.post('/api/agents/sequence', wrap(agentSequence));

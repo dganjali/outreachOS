@@ -3,6 +3,12 @@
 
 export type MissionMode = 'sponsorship' | 'bd' | 'internship' | 'recruiting' | 'sales';
 
+// What a mission hunts for. 'companies' (default) is the original flow: find
+// companies, then the right people inside each. 'people' finds specific people
+// directly, across any company - each person becomes a pipeline target and their
+// company is still researched so the draft can anchor on a real signal.
+export type FindMode = 'companies' | 'people';
+
 // ---------------------------------------------------------------------------
 // Contact Discovery Engine - see CONTACT_ENGINE.md. Defined in this
 // dependency-free module so both the api/ engine and the React client share one

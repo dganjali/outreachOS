@@ -40,6 +40,13 @@ export const agents = {
       mission_id,
       count,
     }),
+  // People mode: discover people directly. Each returned target carries the
+  // discovered person in `seedContact` (the contacts agent resolves their email).
+  people: (mission_id: string, count?: number) =>
+    authedFetch<{ run_id: string; targets: Target[]; source: 'people' }>('/api/agents/people', {
+      mission_id,
+      count,
+    }),
   contacts: (target_id: string, top_contacts = 1) =>
     authedFetch<{ run_id: string; contacts: Contact[]; source: 'serper' | 'web_search' }>(
       '/api/agents/contacts',

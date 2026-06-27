@@ -119,6 +119,37 @@ test('the run config sector filter reaches the targeting executor', async () => 
   assert.deepEqual(seen[0], ['fintech', 'developer tools']);
 });
 
+test('people mode: function/seniority filters reach the targeting executor', async () => {
+  // In people mode the targeting executor IS people discovery, so the WHO filters
+  // (function + seniority) must reach it to narrow the search, not just contacts.
+  const seen: Array<{ functions?: string[]; seniority?: string[] }> = [];
+  const exec = fakeExec({
+    targeting: async (_missionId, _count, _sectors, functions, seniority) => {
+      seen.push({ functions, seniority });
+      return [{ id: 'p1', name: 'Ada Investor', score: 0.9 }];
+    },
+  });
+  const end = await runPipeline(
+    baseRun({
+      config: {
+        targetCount: 8,
+        topN: 1,
+        topContacts: 1,
+        findMode: 'people',
+        selectedFunctions: ['venture capital'],
+        selectedSeniority: ['founder'],
+      },
+    }),
+    ctxFor(exec)
+  );
+  assert.deepEqual(seen[0].functions, ['venture capital']);
+  assert.deepEqual(seen[0].seniority, ['founder']);
+  // The graph is identical: the person-target runs through to done, and the run
+  // surfaces the PERSON's name (the executor maps it for us).
+  assert.equal(end.phase, 'done');
+  assert.deepEqual(end.targets.map((t) => t.name), ['Ada Investor']);
+});
+
 test('targeting selects top-N by score and processes them', async () => {
   const end = await runPipeline(baseRun({ config: { targetCount: 8, topN: 1, topContacts: 1 } }), ctxFor(fakeExec()));
   assert.equal(end.phase, 'done');

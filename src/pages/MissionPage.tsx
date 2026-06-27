@@ -68,6 +68,9 @@ export function MissionPage() {
   const confirm = useConfirm();
   const navigate = useNavigate();
   const [mission, setMission] = useState<Mission | null>(null);
+  // People mode: targets ARE people (their company carried as research context),
+  // so the cockpit's "company" copy and the manual discovery button speak "people".
+  const isPeople = mission?.find_mode === 'people';
   const [targets, setTargets] = useState<Target[]>([]);
   const [contactsByTarget, setContactsByTarget] = useState<Record<string, Contact[]>>({});
   const [packsByTarget, setPacksByTarget] = useState<Record<string, EvidencePack | undefined>>({});
@@ -314,7 +317,9 @@ export function MissionPage() {
 
   async function findTargets() {
     if (!mission) return;
-    const r = await runWith('targeting', () => agents.target(mission.id, 10));
+    const r = await runWith<{ run_id: string; targets: Target[] }>('targeting', () =>
+      mission.find_mode === 'people' ? agents.people(mission.id, 10) : agents.target(mission.id, 10)
+    );
     if (r) await loadTargets();
   }
 
@@ -628,7 +633,9 @@ export function MissionPage() {
         note = 'Researched — finding the right contacts.';
       }
       return {
-        id: t.id, name: t.company_name, signal: t.signal_type ?? null,
+        // People mode: the cloud is the person; their company rides along as the
+        // research context but the person's name is what the user recognizes.
+        id: t.id, name: isPeople ? (cs[0]?.name ?? t.company_name) : t.company_name, signal: t.signal_type ?? null,
         progress, phase, tone, stage, stat, note,
         contacts: cs.length, drafts: draftsN, sent: sentN, replied: repliedN,
       };
@@ -716,17 +723,18 @@ export function MissionPage() {
                 <div className="empty-illo-graphic" aria-hidden>
                   <Radar size={28} />
                 </div>
-                <h3>No companies yet</h3>
+                <h3>{isPeople ? 'No people yet' : 'No companies yet'}</h3>
                 <p>
-                  Run the pipeline to find companies, research them, surface the right people, and draft outreach —
-                  live, in one pass. Or drive each step yourself.
+                  {isPeople
+                    ? 'Run the pipeline to find people who match, research their company, and draft outreach — live, in one pass. Or drive each step yourself.'
+                    : 'Run the pipeline to find companies, research them, surface the right people, and draft outreach — live, in one pass. Or drive each step yourself.'}
                 </p>
                 <div className="empty-illo-actions">
                   <button type="button" className="btn-go" onClick={() => navigate(`/missions/${mission.id}/run`)}>
                     Run pipeline
                   </button>
                   <button type="button" className="btn-secondary" disabled={busy === 'targeting'} onClick={findTargets}>
-                    {busy === 'targeting' ? 'Researching…' : 'Find companies'}
+                    {busy === 'targeting' ? 'Researching…' : isPeople ? 'Find people' : 'Find companies'}
                   </button>
                 </div>
               </div>
@@ -847,6 +855,7 @@ function MissionTopbar({
           <h1>{mission.name}</h1>
           <div className="mtop-meta">
             <span className="mode-pill">{MODE_LABEL[mission.mode] ?? mission.mode}</span>
+            {mission.find_mode === 'people' && <span className="mode-pill">People</span>}
             <span className="mtop-stats">
               <span>{metrics.targets} targets</span>
               <span>{metrics.contacts} contacts</span>

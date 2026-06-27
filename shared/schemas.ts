@@ -16,7 +16,7 @@
 
 import type { EmbedInputType } from '../api/_lib/embeddings';
 import type { PlanId, PlanStatus } from './plans';
-import type { ContactIcp, SectorSuggestion, SeniorityLevel } from './types';
+import type { ContactIcp, FindMode, SectorSuggestion, SeniorityLevel } from './types';
 
 void ({} as EmbedInputType); // keep the import live for downstream consumers
 
@@ -214,6 +214,10 @@ export interface MissionDoc extends BaseDoc {
   goal: string;
   targetDescription: string;
   mode: 'sponsorship' | 'bd' | 'internship' | 'recruiting' | 'sales';
+  // What this mission hunts for. Absent ⇒ 'companies' (the original company-first
+  // flow). 'people' finds specific people directly and seeds one pipeline target
+  // per person (their company carried as context for research/drafting).
+  findMode?: FindMode | null;
   offerDetails: string | null;
   // Optional location focus (region/country/city) for contact discovery. null =
   // no geographic preference. See CONTACT_ENGINE.md §4.
@@ -248,6 +252,17 @@ export interface TargetDoc extends BaseDoc {
   industry: string | null;
   employeeCount: number | null;
   headquartersLocation: string | null;
+  // People-mode only: the specific person this target was discovered FOR. When
+  // present, the contacts agent skips fresh discovery and resolves THIS person's
+  // email instead. Absent on company-mode targets.
+  seedContact?: {
+    name: string;
+    role: string | null;
+    linkedinUrl: string | null;
+    location: string | null;
+    headline: string | null;
+    confidence: number | null;
+  } | null;
 }
 
 export interface ContactDoc extends BaseDoc {
@@ -476,6 +491,8 @@ export interface PipelineRunDoc extends BaseDoc {
     targetCount: number;
     topN: number;
     topContacts: number;
+    // Mirrors the mission's find mode at launch time. Absent ⇒ 'companies'.
+    findMode?: FindMode;
     // User-selected contact-type filters. Empty/absent ⇒ unfiltered ICP (the
     // AI-only default). Narrowed into the ICP at discovery time.
     selectedFunctions?: string[];

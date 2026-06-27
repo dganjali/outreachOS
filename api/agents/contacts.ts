@@ -106,8 +106,12 @@ export default async function handler(req: Request, res: Response) {
   const employeeCount = await getTargetSize(scope, target, domain);
   const sizeTier = sizeTierFromCount(employeeCount);
 
+  // People mode: this target was discovered FOR a specific person (target.ts'
+  // counterpart agent seeds it). Skip fresh discovery entirely and resolve THIS
+  // person's email - everything downstream (rank, resolve, fill) is unchanged.
+  const seeded = target.seedContact ?? null;
   const useSerper = serperEnabled() && !!domain;
-  const discoverySource = useSerper ? 'serper' : 'web_search';
+  const discoverySource = seeded ? 'seed' : useSerper ? 'serper' : 'web_search';
 
   const run = await startRun(scope, {
     agentType: 'contacts',
@@ -118,9 +122,11 @@ export default async function handler(req: Request, res: Response) {
 
   try {
     const discoveryArgs: DiscoveryArgs = { target: { ...target, domain }, mission, icp, sizeTier, profile };
-    const suggestions = useSerper
-      ? await runSerperDiscovery(discoveryArgs)
-      : await runWebSearchOnly(discoveryArgs);
+    const suggestions = seeded
+      ? [seedToSuggestion(seeded)]
+      : useSerper
+        ? await runSerperDiscovery(discoveryArgs)
+        : await runWebSearchOnly(discoveryArgs);
 
     const ranked = rankCandidates(suggestions, { icp, sizeTier, target, mission, profile });
 
@@ -294,6 +300,22 @@ interface DiscoveryArgs {
   icp: ContactIcp;
   sizeTier: SizeTier | null;
   profile: ProfileDoc | null;
+}
+
+/** People mode: turn the target's seeded person into the single discovery
+ *  candidate, so ranking + email resolution run on them as if just discovered. */
+export function seedToSuggestion(seed: NonNullable<TargetDoc['seedContact']>): ContactSuggestion {
+  return {
+    name: seed.name,
+    role: seed.role ?? '',
+    linkedin_url: seed.linkedinUrl ?? null,
+    location: seed.location ?? null,
+    headline: seed.headline ?? null,
+    email: null,
+    likely_email_pattern: null,
+    confidence: typeof seed.confidence === 'number' ? seed.confidence : 0.7,
+    reasoning: 'Matched directly in people search',
+  };
 }
 
 /** Compact ICP context block injected into the discovery prompts. */

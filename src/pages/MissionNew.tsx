@@ -12,7 +12,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Check, Plus, Rocket, Mic2 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
-import type { MissionMode, Persona } from '../types';
+import type { FindMode, MissionMode, Persona } from '../types';
 import { listPersonas, isPersonaCalibrated } from '../lib/personas';
 import { PersonaWizard } from '../components/persona/PersonaWizard';
 
@@ -23,6 +23,25 @@ const MODES: Array<{ value: MissionMode; label: string; hint: string }> = [
   { value: 'recruiting', label: 'Recruiting', hint: 'Source candidates for an open role' },
   { value: 'sales', label: 'Cold Sales', hint: 'Sell a product or service' },
 ];
+
+// What the mission hunts for. 'companies' is the original flow; 'people' finds
+// specific individuals directly (each becomes a target, their company researched).
+const FIND_MODES: Array<{ value: FindMode; label: string; hint: string }> = [
+  { value: 'companies', label: 'Companies', hint: 'Find companies, then the right people inside each' },
+  { value: 'people', label: 'People', hint: 'Find specific people directly, across any company' },
+];
+
+// The "who to reach" field reframes per find mode.
+const AUDIENCE_COPY: Record<FindMode, { label: string; placeholder: string }> = {
+  companies: {
+    label: 'Who you want to reach',
+    placeholder: "e.g. 'Dev-tools companies with active student programs and recent hackathon sponsorships in 2025.'",
+  },
+  people: {
+    label: 'Which people to find',
+    placeholder: "e.g. 'Angel investors & seed VCs who back dev-tools startups.'",
+  },
+};
 
 type Step = 1 | 2 | 3;
 const STEP_LABELS = ['Content', 'Personalization', 'Review'];
@@ -38,6 +57,7 @@ export function MissionNew() {
 
   // Step 1 - content
   const [name, setName] = useState('');
+  const [findMode, setFindMode] = useState<FindMode>('companies');
   const [mode, setMode] = useState<MissionMode>('sponsorship');
   const [whatSending, setWhatSending] = useState('');
   const [whoAndWhy, setWhoAndWhy] = useState('');
@@ -96,6 +116,7 @@ export function MissionNew() {
         user_id: user!.id,
         name: name.trim(),
         mode,
+        find_mode: findMode,
         goal: whatSending.trim(),
         target_description: whoAndWhy.trim(),
         geo: geo.trim() || null,
@@ -183,6 +204,30 @@ export function MissionNew() {
                   {triedNext && missingName && <span className="pw-field-error">Give your mission a name.</span>}
                 </label>
 
+                <div className="pw-field-label">Find</div>
+                <div className="pw-cards">
+                  {FIND_MODES.map((f) => {
+                    const on = findMode === f.value;
+                    return (
+                      <button
+                        key={f.value}
+                        type="button"
+                        className={`pw-card ${on ? 'is-on' : ''}`}
+                        onClick={() => setFindMode(f.value)}
+                        aria-pressed={on}
+                      >
+                        {on && (
+                          <span className="pw-card-check">
+                            <Check size={12} />
+                          </span>
+                        )}
+                        <span className="pw-card-title">{f.label}</span>
+                        <span className="pw-card-hint">{f.hint}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
                 <div className="pw-field-label">Mode</div>
                 <div className="pw-cards">
                   {MODES.map((m) => {
@@ -220,13 +265,13 @@ export function MissionNew() {
                   {triedNext && missingOffer && <span className="pw-field-error">Describe what you're offering.</span>}
                 </label>
                 <label className="pw-field">
-                  <span className="pw-field-label">Who you want to reach</span>
+                  <span className="pw-field-label">{AUDIENCE_COPY[findMode].label}</span>
                   <textarea
                     className={`pw-input pw-textarea${triedNext && missingAudience ? ' is-error' : ''}`}
                     rows={3}
                     value={whoAndWhy}
                     onChange={(e) => setWhoAndWhy(e.target.value)}
-                    placeholder="e.g. 'Dev-tools companies with active student programs and recent hackathon sponsorships in 2025.'"
+                    placeholder={AUDIENCE_COPY[findMode].placeholder}
                     aria-invalid={triedNext && missingAudience}
                   />
                   {triedNext && missingAudience && <span className="pw-field-error">Describe who you want to reach.</span>}
@@ -301,7 +346,10 @@ export function MissionNew() {
                   <div className="pw-ov-row-head">
                     <div className="pw-ov-row-titles">
                       <h3 className="pw-ov-title">{name || 'Untitled mission'}</h3>
-                      <span className="pw-ov-sub">{MODES.find((m) => m.value === mode)?.label}</span>
+                      <span className="pw-ov-sub">
+                        {findMode === 'people' ? 'Find people' : 'Find companies'} ·{' '}
+                        {MODES.find((m) => m.value === mode)?.label}
+                      </span>
                     </div>
                     <button type="button" className="pw-ov-edit" onClick={() => goto(1, 'back')}>
                       Edit

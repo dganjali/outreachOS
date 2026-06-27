@@ -1,5 +1,6 @@
 export type {
   MissionMode,
+  FindMode,
   TargetStatus,
   TargetSource,
   Target,
@@ -19,7 +20,7 @@ export type {
   ContactIcp,
   ContactIcpGeo,
 } from '../shared/types';
-import type { MissionMode } from '../shared/types';
+import type { MissionMode, FindMode } from '../shared/types';
 import type { PlanId, PlanStatus } from '../shared/plans';
 
 export type OnboardingStep = 1 | 2 | 3 | 4;
@@ -62,6 +63,8 @@ export interface Mission {
   goal: string;
   target_description: string;
   mode: MissionMode;
+  // What this mission hunts for. Absent ⇒ 'companies' (the original flow).
+  find_mode?: FindMode;
   offer_details: string | null;
   // Optional location focus (region/country/city) used to scope and rank
   // contact discovery. null = no geographic preference.

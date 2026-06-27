@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolvePoolWithBudget, fillWithDisplayOnly, rankCandidates, narrowIcpBySelection, type ResolvePoolDeps, type ContactSuggestion } from './contacts';
+import { resolvePoolWithBudget, fillWithDisplayOnly, rankCandidates, narrowIcpBySelection, seedToSuggestion, type ResolvePoolDeps, type ContactSuggestion } from './contacts';
 import { defaultContactIcp } from '../_lib/icp';
 import type { ResolvedEmail } from '../_lib/email-resolver';
 import type { ScrapeResult } from '../_lib/web-scrape';
@@ -298,5 +298,45 @@ describe('rankCandidates - never returns an empty target', () => {
     const result = rankCandidates(onFn, { icp, sizeTier: 'enterprise', target, mission, profile: null });
     assert.equal(result.rows.length, 1);
     assert.equal(result.usedFallback, false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// People mode: a target seeded with a specific person skips fresh discovery and
+// runs that ONE person through the same rank → resolve pipeline.
+// ---------------------------------------------------------------------------
+describe('seedToSuggestion - people mode seeds the contact pipeline', () => {
+  const seed = {
+    name: 'Ada Investor',
+    role: 'General Partner',
+    linkedinUrl: 'https://linkedin.com/in/adainvestor',
+    location: 'Toronto, CA',
+    headline: 'Backing dev-tools founders',
+    confidence: 0.82,
+  };
+
+  it('maps the seeded person onto a discovery candidate', () => {
+    const s = seedToSuggestion(seed);
+    assert.equal(s.name, 'Ada Investor');
+    assert.equal(s.role, 'General Partner');
+    assert.equal(s.linkedin_url, 'https://linkedin.com/in/adainvestor');
+    assert.equal(s.email, null); // resolution happens downstream
+    assert.equal(s.confidence, 0.82);
+  });
+
+  it('the seeded person survives ranking even when above the seniority cap', () => {
+    // A General Partner parses as "founder" (rank 11) - above an enterprise bd
+    // cap. People mode must NOT drop the very person we set out to reach: the
+    // fallback re-scores with allowAboveCap and keeps them.
+    const icp = defaultContactIcp('bd');
+    const result = rankCandidates([seedToSuggestion(seed)], {
+      icp,
+      sizeTier: 'enterprise',
+      target,
+      mission,
+      profile: null,
+    });
+    assert.equal(result.rows.length, 1);
+    assert.equal(result.rows[0].name, 'Ada Investor');
   });
 });

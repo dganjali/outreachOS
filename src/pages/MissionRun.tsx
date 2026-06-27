@@ -97,6 +97,10 @@ export function MissionRun() {
   const targets = targetsOf(run);
   const isLive = phase === 'targeting' || phase === 'running';
   const note = run?.note ?? '';
+  // People mode: each target IS a person (their company carried for research), so
+  // the launch copy, the count knob, and the progress list all speak "people".
+  const isPeople = mission?.find_mode === 'people';
+  const unitLabel = isPeople ? 'People to find' : 'Companies to pursue';
 
   // Load the mission, and rehydrate any run already in flight for it (so a
   // closed/reopened tab rejoins the live run instead of starting over).
@@ -315,14 +319,24 @@ export function MissionRun() {
             {mission ? `${priorRun ? 'Run' : 'Launch'} ${mission.name}${priorRun ? ' again' : ''}?` : 'Launch pipeline?'}
           </h1>
           <p className="run-ready-body">
-            The agent will find {companies} {companies === 1 ? 'company' : 'companies'}, research each,
-            surface the right {contacts === 1 ? 'contact' : `${contacts} contacts`}, and draft a personalized
-            email for {contacts === 1 ? 'them' : 'each'}. You review and send after.
+            {isPeople ? (
+              <>
+                The agent will find {companies} {companies === 1 ? 'person' : 'people'} who match, research
+                each one's company, and draft a personalized email to {companies === 1 ? 'them' : 'each'}. You
+                review and send after.
+              </>
+            ) : (
+              <>
+                The agent will find {companies} {companies === 1 ? 'company' : 'companies'}, research each,
+                surface the right {contacts === 1 ? 'contact' : `${contacts} contacts`}, and draft a personalized
+                email for {contacts === 1 ? 'them' : 'each'}. You review and send after.
+              </>
+            )}
           </p>
 
           <div className="run-config">
-            <label className="run-config-label" htmlFor="run-companies">Companies to pursue</label>
-            <div className="run-stepper" role="group" aria-label="Companies to pursue">
+            <label className="run-config-label" htmlFor="run-companies">{unitLabel}</label>
+            <div className="run-stepper" role="group" aria-label={unitLabel}>
               <button
                 type="button"
                 className="run-stepper-btn"
@@ -356,6 +370,7 @@ export function MissionRun() {
             </div>
           </div>
 
+          {!isPeople && (
           <div className="run-config">
             <label className="run-config-label" htmlFor="run-contacts">Contacts per company</label>
             <div className="run-stepper" role="group" aria-label="Contacts per company">
@@ -391,13 +406,18 @@ export function MissionRun() {
               </button>
             </div>
           </div>
+          )}
 
           {typeOpts && (typeOpts.functions.length > 0 || typeOpts.seniority.length > 0 || typeOpts.sectors.length > 0) && (
             <div className="run-targeting-controls">
               {(typeOpts.functions.length > 0 || typeOpts.seniority.length > 0) && (
                 <PickerPanel
                   title="Types of people"
-                  subtitle="Teams, roles, and seniority to prioritize inside each company."
+                  subtitle={
+                    isPeople
+                      ? 'Teams, roles, and seniority to prioritize.'
+                      : 'Teams, roles, and seniority to prioritize inside each company.'
+                  }
                 >
                   {typeOpts.functions.length > 0 && (
                     <ContactTypeGroup
@@ -419,8 +439,12 @@ export function MissionRun() {
               )}
               {typeOpts.sectors.length > 0 && (
                 <PickerPanel
-                  title="Types of companies"
-                  subtitle="Sectors to strongly bias company discovery toward."
+                  title={isPeople ? 'Where they work' : 'Types of companies'}
+                  subtitle={
+                    isPeople
+                      ? 'Sectors to bias the people search toward.'
+                      : 'Sectors to strongly bias company discovery toward.'
+                  }
                 >
                   <ContactTypeGroup
                     label="Sectors"
@@ -435,8 +459,8 @@ export function MissionRun() {
 
           {priorRun && (
             <p className="run-ready-note">
-              You've already run this mission. Running again finds <strong>new</strong> companies -
-              we skip ones already in this mission.
+              You've already run this mission. Running again finds <strong>new</strong>{' '}
+              {isPeople ? 'people' : 'companies'} - we skip ones already in this mission.
             </p>
           )}
 
@@ -533,7 +557,11 @@ export function MissionRun() {
       <div className="run-phase">
         <StepDot status={phase === 'targeting' ? 'running' : 'done'} />
         <span className="run-phase-label">
-          {targets.length > 0 ? `Found ${targets.length} companies to pursue` : 'Finding companies…'}
+          {targets.length > 0
+            ? `Found ${targets.length} ${isPeople ? 'people' : 'companies'} to pursue`
+            : isPeople
+              ? 'Finding people…'
+              : 'Finding companies…'}
         </span>
       </div>
 
@@ -549,7 +577,7 @@ export function MissionRun() {
                 </div>
                 <div className="run-target-steps">
                   <StepChip label="Evidence" status={t.evidence} />
-                  <StepChip label="Contacts" status={t.contacts} />
+                  <StepChip label={isPeople ? 'Email' : 'Contacts'} status={t.contacts} />
                   <StepChip label={draftLabel(t)} status={t.sequence} />
                 </div>
                 {t.sequence === 'done' && (

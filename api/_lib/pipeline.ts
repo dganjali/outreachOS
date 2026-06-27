@@ -29,15 +29,17 @@ import { getPlanLimits } from './runs';
 import { createDraftContextCache } from './assemble';
 import type {
   AgentRunDoc,
+  MissionDoc,
   PipelineRunDoc,
   PipelineRunMetrics,
   PipelineStepStatus,
   PipelineTargetState,
   TargetDoc,
 } from '../../shared/schemas';
-import type { ContactTypeFilter, SeniorityLevel } from '../../shared/types';
+import type { ContactTypeFilter, FindMode, SeniorityLevel } from '../../shared/types';
 
 import targetHandler from '../agents/target';
+import peopleHandler from '../agents/people';
 import evidenceHandler from '../agents/evidence';
 import contactsHandler from '../agents/contacts';
 import sequenceHandler from '../agents/sequence';
@@ -80,7 +82,16 @@ export class PipelineDailyLimitError extends Error {} // per-day: pause the run
 // existing agent handlers verbatim via in-process invocation; tests pass fakes.
 // ---------------------------------------------------------------------------
 export interface PipelineExecutors {
-  targeting(missionId: string, count: number, sectors?: string[]): Promise<Array<{ id: string; name: string; score: number | null }>>;
+  /** Discover the run's targets. In 'companies' mode this finds companies; in
+   *  'people' mode it finds people directly (each becomes a target). `functions`
+   *  and `seniority` only narrow people discovery (company mode ignores them). */
+  targeting(
+    missionId: string,
+    count: number,
+    sectors?: string[],
+    functions?: string[],
+    seniority?: SeniorityLevel[]
+  ): Promise<Array<{ id: string; name: string; score: number | null }>>;
   evidence(targetId: string): Promise<void>;
   contacts(targetId: string, filter?: ContactTypeFilter, topContacts?: number): Promise<Array<{ id: string; confidence: number | null }>>;
   sequence(contactId: string): Promise<void>;
@@ -108,7 +119,17 @@ function classify<T = Record<string, unknown>>(result: { status: number; body: u
 export function realExecutors(user: AuthedUser): PipelineExecutors {
   const draftContextCache = createDraftContextCache();
   return {
-    async targeting(missionId, count, sectors) {
+    async targeting(missionId, count, sectors, functions, seniority) {
+      const scope = forUser(user.id);
+      const mission = await scope.collection<MissionDoc>('missions').findById(missionId);
+      // People mode: find people directly. Each returned target carries the
+      // person in `seedContact`; show the PERSON's name in the run, not the firm.
+      if (mission?.findMode === 'people') {
+        const body = classify<{
+          targets?: Array<{ _id: string; companyName: string; score: number | null; seedContact?: { name?: string } | null }>;
+        }>(await invokeAgent(peopleHandler, { user, body: { mission_id: missionId, count, sectors, functions, seniority } }));
+        return (body.targets ?? []).map((t) => ({ id: t._id, name: t.seedContact?.name ?? t.companyName, score: t.score ?? null }));
+      }
       const body = classify<{ targets?: Array<{ _id: string; companyName: string; score: number | null }> }>(
         await invokeAgent(targetHandler, { user, body: { mission_id: missionId, count, sectors } })
       );
@@ -224,7 +245,12 @@ function targetTerminal(t: PipelineTargetState): boolean {
 function progressNote(r: PipelineRunDoc): string {
   const total = r.targets.length;
   const done = r.targets.filter(targetTerminal).length;
-  return `Researched ${done} of ${total} companies…`;
+  return `Researched ${done} of ${total} ${unitNoun(r)}…`;
+}
+
+/** "companies" / "people" for user-facing run copy, per the run's find mode. */
+function unitNoun(r: PipelineRunDoc): string {
+  return r.config.findMode === 'people' ? 'people' : 'companies';
 }
 
 function cloneRun(run: PipelineRunDoc): PipelineRunDoc {
@@ -494,7 +520,15 @@ async function appendReplacementTargets(
       // companies already targeted in this mission), then keep going.
       try {
         const found = await measureAgent(r, 'targeting', () =>
-          runStep(ctx, () => ctx.exec.targeting(r.missionId, r.config.targetCount, r.config.selectedSectors))
+          runStep(ctx, () =>
+            ctx.exec.targeting(
+              r.missionId,
+              r.config.targetCount,
+              r.config.selectedSectors,
+              r.config.selectedFunctions,
+              r.config.selectedSeniority
+            )
+          )
         );
         candidates = found.filter((f) => !have.has(f.id));
       } catch (e) {
@@ -514,7 +548,7 @@ async function appendReplacementTargets(
   const fresh = seedTargets(picks, picks.length);
   r.targets.push(...fresh);
   state.added += fresh.length;
-  r.note = 'Finding replacements for companies with no reachable contact…';
+  r.note = `Finding replacement ${unitNoun(r)} with no reachable contact…`;
   await ctx.persist(r);
   return fresh;
 }
@@ -616,7 +650,15 @@ export async function runPipeline(run: PipelineRunDoc, ctx: ProcContext): Promis
     try {
       const found = await measureMs(r, 'targetingMs', () =>
         measureAgent(r, 'targeting', () =>
-          runStep(ctx, () => ctx.exec.targeting(r.missionId, r.config.targetCount, r.config.selectedSectors))
+          runStep(ctx, () =>
+            ctx.exec.targeting(
+              r.missionId,
+              r.config.targetCount,
+              r.config.selectedSectors,
+              r.config.selectedFunctions,
+              r.config.selectedSeniority
+            )
+          )
         )
       );
       const targets = seedTargets(found, r.config.topN);
@@ -628,7 +670,7 @@ export async function runPipeline(run: PipelineRunDoc, ctx: ProcContext): Promis
       r.targets = targets;
       r.phase = 'processing';
       r.cursor = null;
-      r.note = `Researching ${targets.length} companies in parallel…`;
+      r.note = `Researching ${targets.length} ${unitNoun(r)} in parallel…`;
       await ctx.persistStatus(r);
     } catch (e) {
       if (e instanceof PipelineDailyLimitError) {
@@ -831,6 +873,13 @@ function sanitizeLevels(list?: SeniorityLevel[]): SeniorityLevel[] {
 export async function startPipeline(args: StartPipelineArgs): Promise<PipelineRunDoc> {
   const scope = forUser(args.user.id);
   const now = new Date();
+  // The find mode comes from the mission and shapes the run: people mode pursues
+  // exactly one person per target (topN = number of people), and the note copy
+  // reflects what's being hunted.
+  const mission = await scope.collection<MissionDoc>('missions').findById(args.missionId);
+  const findMode: FindMode = mission?.findMode === 'people' ? 'people' : 'companies';
+  const topContacts =
+    findMode === 'people' ? 1 : Math.min(Math.max(args.topContacts ?? DEFAULT_TOP_CONTACTS, 1), MAX_TOP_CONTACTS);
   const run = await scope.collection<PipelineRunDoc>(PIPELINE_RUNS).insertOne({
     _id: newId(),
     missionId: args.missionId,
@@ -839,14 +888,18 @@ export async function startPipeline(args: StartPipelineArgs): Promise<PipelineRu
     config: {
       targetCount: Math.min(Math.max(args.targetCount ?? DEFAULT_TARGET_COUNT, 1), 25),
       topN: Math.min(Math.max(args.topN ?? DEFAULT_TOP_N, 1), 15),
-      topContacts: Math.min(Math.max(args.topContacts ?? DEFAULT_TOP_CONTACTS, 1), MAX_TOP_CONTACTS),
+      topContacts,
+      findMode,
       selectedFunctions: sanitizeStrings(args.selectedFunctions),
       selectedSeniority: sanitizeLevels(args.selectedSeniority),
       selectedSectors: sanitizeStrings(args.selectedSectors),
     },
     targets: [],
     cursor: null,
-    note: 'Finding high-fit companies with a reason to reach out now…',
+    note:
+      findMode === 'people'
+        ? 'Finding people who match, across any company…'
+        : 'Finding high-fit companies with a reason to reach out now…',
     error: null,
     heartbeatAt: now,
     metrics: {},
