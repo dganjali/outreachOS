@@ -7979,69 +7979,143 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
    ============================================================ */
 .cockpit { display: flex; flex-direction: column; gap: var(--space-4); }
 
-/* Flight view — one hero plane in a calm sky; each company drifts past as a
-   clickable, status-tagged cloud. Folds the old status deck in as an overlay. */
-.sky { display: flex; flex-direction: column; gap: var(--space-2); }
-.sky-scene {
-  position: relative; overflow: hidden; padding: var(--space-4);
-  display: flex; flex-direction: column; gap: var(--space-4);
-  border: 1px solid var(--border); border-radius: var(--radius-lg);
-  background:
-    radial-gradient(150% 120% at 50% -40%, color-mix(in srgb, var(--info) 28%, transparent), transparent 58%),
-    radial-gradient(60% 90% at 88% 4%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 60%),
-    linear-gradient(180deg, color-mix(in srgb, var(--info) 15%, var(--bg-elev)) 0%, var(--bg-elev) 64%, var(--bg-soft) 100%);
+/* The live deck: one dark "instrument" panel (status + pipeline funnel) over a
+   light board of per-company rows. Crisp surfaces, hairline rules, tabular
+   numerals, one green accent. No gradients, no blur, no floating clouds. */
+.apdeck {
+  --ink:      oklch(0.205 0.016 256);
+  --ink-2:    oklch(0.255 0.016 256);
+  --ink-line: oklch(1 0 0 / 0.09);
+  --ink-fg:   oklch(0.965 0.004 250);
+  --ink-dim:  oklch(0.70 0.012 250);
+  position: relative; overflow: hidden;
+  border: 1px solid oklch(0.32 0.02 256); border-radius: var(--radius-lg);
+  background: var(--ink); color: var(--ink-fg);
+  box-shadow: 0 18px 44px -26px oklch(0.18 0.02 256 / 0.75);
 }
-/* static background haze for depth */
-.sky-scene::before {
-  content: ''; position: absolute; inset: 0; pointer-events: none; opacity: 0.5;
-  background-repeat: repeat-x; background-size: 440px 100%;
-  background-image:
-    radial-gradient(62px 30px at 80px 30%, color-mix(in srgb, var(--fg) 7%, transparent) 60%, transparent 76%),
-    radial-gradient(92px 42px at 300px 68%, color-mix(in srgb, var(--fg) 6%, transparent) 60%, transparent 76%),
-    radial-gradient(52px 26px at 400px 18%, color-mix(in srgb, var(--fg) 5%, transparent) 60%, transparent 76%);
+/* faint vertical instrument ruling — crisp 1px lines, never a blur */
+.apdeck::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background-image: repeating-linear-gradient(90deg, oklch(1 0 0 / 0.026) 0 1px, transparent 1px 72px);
 }
 
-/* head row: status (left) + the one hero plane (right) */
-.sky-head { position: relative; z-index: 2; display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); }
-.sky-status { display: flex; flex-direction: column; gap: 2px; }
-.sky-status-kicker { font-size: var(--text-xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent-2); }
-.sky-status-phase { font-size: var(--text-xl); font-weight: 650; letter-spacing: -0.012em; color: var(--fg); }
-.sky-status-cadence { font-size: var(--text-sm); color: var(--fg-muted); font-variant-numeric: tabular-nums; }
-.sky-lamp { display: inline-flex; align-items: center; gap: 6px; margin-top: 7px; font-size: var(--text-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--success); }
-.sky-lamp-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 3px var(--success-soft); animation: cockpit-pulse 2s var(--ease-in-out) infinite; }
-.sky-scene.phase-holding .sky-status-kicker { color: var(--warn); }
-.sky-scene.phase-holding .sky-lamp { color: var(--warn); }
-.sky-scene.phase-holding .sky-lamp-dot { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
-
-.sky-hero { position: relative; flex: 0 0 auto; color: var(--accent-2); filter: drop-shadow(0 0 14px color-mix(in srgb, var(--accent-2) 55%, transparent)); animation: cockpit-float 5s var(--ease-in-out) infinite; }
-.sky-hero svg { transform: rotate(45deg); display: block; }
-.sky-hero-trail { position: absolute; right: 100%; top: 50%; width: 96px; height: 2px; transform: translateY(-50%); border-radius: 2px; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent-2) 65%, transparent)); }
-.sky-scene.phase-holding .sky-hero { color: var(--warn); filter: drop-shadow(0 0 14px color-mix(in srgb, var(--warn) 50%, transparent)); }
-.sky-scene.phase-holding .sky-hero-trail { background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--warn) 60%, transparent)); }
-
-/* company clouds: static cards that flow-wrap, never overlap */
-.sky-clouds { position: relative; z-index: 2; display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: flex-start; }
-.cloud {
-  display: inline-flex; align-items: center; gap: 9px; text-align: left;
-  padding: 9px 14px; font: inherit; cursor: pointer; color: var(--fg);
-  --flight-color: var(--fg-subtle);
-  background: color-mix(in srgb, var(--bg-elev) 82%, transparent);
-  border: 1px solid color-mix(in srgb, var(--fg) 13%, transparent); border-radius: var(--radius-lg);
-  box-shadow: 0 8px 20px -12px oklch(0.18 0.01 250 / 0.5), inset 0 1px 0 color-mix(in srgb, var(--fg) 12%, transparent);
-  transition: border-color var(--dur), box-shadow var(--dur), transform var(--dur);
+.apdeck-status {
+  position: relative; z-index: 1;
+  display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4);
+  padding: var(--space-5) var(--space-5) var(--space-4);
 }
-.cloud:hover { transform: translateY(-1px); border-color: color-mix(in srgb, var(--flight-color) 55%, transparent); }
-.cloud.is-selected { border-color: var(--flight-color); box-shadow: 0 0 0 2px color-mix(in srgb, var(--flight-color) 50%, transparent), 0 10px 24px -12px oklch(0.18 0.01 250 / 0.55); }
-.cloud-icon { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; flex: 0 0 auto; border-radius: 50%; color: var(--flight-color); background: color-mix(in srgb, var(--flight-color) 16%, transparent); }
-.cloud-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.cloud-name { font-size: var(--text-sm); font-weight: 650; color: var(--fg); max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cloud-meta { font-size: var(--text-xs); color: var(--flight-color); font-weight: 550; }
-.cloud.tone-climb  { --flight-color: var(--info); }
-.cloud.tone-cruise { --flight-color: var(--accent-2); }
-.cloud.tone-sent   { --flight-color: var(--info); }
-.cloud.tone-landed { --flight-color: var(--success); }
+.apdeck-id { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.apdeck-kicker {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: var(--text-xs); font-weight: 650; letter-spacing: 0.12em; text-transform: uppercase;
+  color: oklch(0.76 0.045 154);
+}
+.apdeck-lamp {
+  width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; background: var(--accent-2);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-2) 26%, transparent);
+  animation: ap-lamp 2.2s var(--ease-in-out) infinite;
+}
+.apdeck-phase { font-size: var(--text-3xl); line-height: 1.04; font-weight: 600; letter-spacing: -0.026em; color: oklch(0.98 0.003 250); }
+.apdeck-cadence { font-size: var(--text-sm); color: var(--ink-dim); font-variant-numeric: tabular-nums; }
 
-.sky-more { align-self: center; font-size: var(--text-xs); color: var(--fg-subtle); padding: 0 var(--space-2); }
+.apdeck-side { display: flex; gap: var(--space-2); flex: 0 0 auto; }
+.apdeck-stat {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  min-width: 70px; padding: 8px 12px; border-radius: var(--radius);
+  background: oklch(1 0 0 / 0.05); border: 1px solid var(--ink-line);
+}
+.apdeck-stat-v { font-size: var(--text-xl); font-weight: 650; line-height: 1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: var(--ink-fg); }
+.apdeck-stat-k { font-size: var(--text-xs); color: var(--ink-dim); white-space: nowrap; }
+.apdeck-stat.is-alert { background: color-mix(in srgb, var(--warn) 24%, transparent); border-color: color-mix(in srgb, var(--warn) 50%, transparent); }
+.apdeck-stat.is-alert .apdeck-stat-v { color: oklch(0.90 0.10 76); }
+.apdeck-stat.is-alert .apdeck-stat-k { color: oklch(0.84 0.08 76); }
+
+.apdeck.phase-holding .apdeck-lamp { background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 26%, transparent); }
+.apdeck.phase-holding .apdeck-kicker { color: oklch(0.84 0.08 76); }
+.apdeck.phase-taxiing .apdeck-lamp { background: var(--info); animation: none; }
+.apdeck.phase-taxiing .apdeck-kicker { color: oklch(0.80 0.03 240); }
+
+/* pipeline funnel rail: one node per stage, connected by a hairline track that
+   fills green up to the furthest stage any company has reached */
+.aprail {
+  position: relative; z-index: 1;
+  display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;
+  padding: var(--space-4) var(--space-5) var(--space-5);
+  border-top: 1px solid var(--ink-line);
+}
+.rail-node { position: relative; display: flex; flex-direction: column; align-items: center; gap: 7px; }
+.rail-node::before {
+  content: ''; position: absolute; top: 14px; right: 50%; left: -50%; height: 2px;
+  background: oklch(1 0 0 / 0.10);
+}
+.rail-node:first-child::before { display: none; }
+.rail-node.is-live::before { background: color-mix(in srgb, var(--accent-2) 72%, transparent); }
+.rail-dot {
+  position: relative; z-index: 1; display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 50%; background: var(--ink-2);
+  border: 2px solid oklch(1 0 0 / 0.16); color: var(--ink-dim);
+  transition: box-shadow var(--dur);
+}
+.rail-node.is-live .rail-dot {
+  border-color: var(--accent-2); color: oklch(0.94 0.06 154);
+  background: color-mix(in srgb, var(--accent-2) 24%, var(--ink));
+}
+.rail-node.is-frontier .rail-dot { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent-2) 26%, transparent); }
+.rail-val { font-size: var(--text-lg); font-weight: 650; line-height: 1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: oklch(0.95 0.003 250); }
+.rail-node:not(.is-live) .rail-val { color: oklch(0.58 0.012 250); }
+.rail-label { font-size: var(--text-xs); color: var(--ink-dim); }
+
+/* company board (light): each row shows how far down the funnel it has come */
+.apboard { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-elev); overflow: hidden; }
+.apboard-head {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border-soft);
+  font-size: var(--text-xs); font-weight: 650; text-transform: uppercase; letter-spacing: 0.07em; color: var(--fg-subtle);
+}
+.apboard-count { color: var(--fg-faint); font-variant-numeric: tabular-nums; }
+.apboard-empty { padding: var(--space-6) var(--space-4); text-align: center; color: var(--fg-subtle); font-size: var(--text-sm); }
+.apboard-list { list-style: none; margin: 0; padding: 0; }
+.apboard-list > li + li { border-top: 1px solid var(--border-soft); }
+
+.aprow {
+  --tone: var(--fg-subtle);
+  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+  padding: var(--space-3) var(--space-4); font: inherit; text-align: left; cursor: pointer;
+  background: none; border: 0; border-left: 2px solid transparent;
+  transition: background var(--dur), border-color var(--dur);
+}
+.aprow:hover { background: var(--surface-2); }
+.aprow.is-open { background: var(--surface); border-left-color: var(--tone); }
+.aprow.tone-climb  { --tone: var(--info); }
+.aprow.tone-cruise { --tone: var(--accent); }
+.aprow.tone-sent   { --tone: var(--info); }
+.aprow.tone-landed { --tone: var(--success); }
+.aprow.tone-taxi   { --tone: var(--fg-subtle); }
+
+.aprow-main { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.aprow-name { font-size: var(--text-sm); font-weight: 600; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+.aprow-steps { display: inline-flex; gap: 3px; flex: 0 0 auto; }
+.aprow-steps i { width: 13px; height: 4px; border-radius: 2px; background: var(--surface-sunk); transition: background var(--dur); }
+.aprow-steps i.on { background: var(--tone); }
+.aprow-aside { display: flex; align-items: center; gap: var(--space-3); flex: 0 0 auto; }
+.aprow-stat { font-size: var(--text-xs); color: var(--fg-subtle); font-variant-numeric: tabular-nums; }
+.aprow-phase { min-width: 64px; text-align: right; font-size: var(--text-xs); font-weight: 600; color: var(--tone); }
+.aprow-chev { flex: 0 0 auto; color: var(--fg-faint); transition: transform var(--dur), color var(--dur); }
+.aprow:hover .aprow-chev { color: var(--fg-subtle); }
+.aprow.is-open .aprow-chev { transform: rotate(90deg); }
+
+.aprow-detail {
+  --tone: var(--fg-subtle);
+  display: flex; flex-direction: column; gap: var(--space-2);
+  padding: 2px var(--space-4) var(--space-4) calc(var(--space-4) + 2px);
+  background: var(--surface); border-left: 2px solid var(--tone);
+}
+.aprow-detail.tone-climb  { --tone: var(--info); }
+.aprow-detail.tone-cruise { --tone: var(--accent); }
+.aprow-detail.tone-sent   { --tone: var(--info); }
+.aprow-detail.tone-landed { --tone: var(--success); }
+.aprow-detail-note { margin: 0; font-size: var(--text-sm); color: var(--fg-muted); }
+.aprow-detail-stats { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); font-size: var(--text-xs); color: var(--fg-subtle); font-variant-numeric: tabular-nums; }
 
 /* flight plan: when Autopilot will source & send */
 .cockpit-plan { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-5); padding: var(--space-3) var(--space-4); background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); }
@@ -8051,38 +8125,7 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
 .plan-v { font-weight: 600; font-variant-numeric: tabular-nums; }
 .plan-v em { font-style: normal; color: var(--fg-muted); font-weight: 500; }
 
-/* selected flight detail */
-.flight-detail {
-  display: flex; align-items: flex-start; gap: var(--space-3); padding: var(--space-3) var(--space-4);
-  background: var(--bg-elev); border: 1px solid var(--border);
-  border-left: 2px solid var(--flight-color); border-radius: var(--radius);
-  --flight-color: var(--fg-subtle);
-}
-.flight-detail.tone-climb  { --flight-color: var(--info); }
-.flight-detail.tone-cruise { --flight-color: var(--accent-2); }
-.flight-detail.tone-sent   { --flight-color: var(--info); }
-.flight-detail.tone-landed { --flight-color: var(--success); }
-.flight-detail-icon { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; flex: 0 0 auto; margin-top: 1px; border-radius: var(--radius-sm); color: var(--flight-color); background: color-mix(in srgb, var(--flight-color) 15%, transparent); }
-.flight-detail-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.flight-detail-top { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
-.flight-detail-top strong { font-size: var(--text-md); font-weight: 650; color: var(--fg); }
-.flight-detail-phase { font-size: var(--text-xs); font-weight: 600; color: var(--flight-color); margin-left: auto; }
-.flight-detail-note { margin: 0; font-size: var(--text-sm); color: var(--fg-muted); }
-.flight-detail-stats { display: flex; gap: var(--space-3); font-size: var(--text-xs); color: var(--fg-subtle); font-variant-numeric: tabular-nums; flex-wrap: wrap; }
-.flight-detail-close { flex: 0 0 auto; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; color: var(--fg-faint); background: none; border: none; border-radius: var(--radius-sm); cursor: pointer; }
-.flight-detail-close:hover { color: var(--fg); background: var(--surface-2); }
-
-@keyframes cockpit-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
-@keyframes cockpit-pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
-
-.cockpit-gauges { display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: var(--space-2); }
-.gauge { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: var(--space-3); background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); }
-.gauge-icon { color: var(--fg-subtle); margin-bottom: 2px; display: inline-flex; }
-.gauge-val { font-size: var(--text-2xl); font-weight: 650; line-height: 1; font-variant-numeric: tabular-nums; color: var(--fg); letter-spacing: -0.02em; }
-.gauge-label { font-size: var(--text-xs); color: var(--fg-muted); }
-.gauge-sub { font-size: var(--text-xs); color: var(--fg-subtle); }
-.gauge.is-alert { border-color: var(--warn-line); background: var(--warn-soft); }
-.gauge.is-alert .gauge-icon, .gauge.is-alert .gauge-val, .gauge.is-alert .gauge-label { color: var(--warn); }
+@keyframes ap-lamp { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
 
 .cockpit-throttle { padding: var(--space-4); background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius-lg); display: flex; flex-direction: column; gap: var(--space-3); }
 .cockpit-throttle-label { font-size: var(--text-xs); font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; color: var(--fg-subtle); }
@@ -8117,13 +8160,18 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
   .tgt-aside { gap: var(--space-2); }
   .pc-head { flex-wrap: wrap; }
   .pc-actions { width: 100%; justify-content: flex-start; }
-  .sky-status-phase { font-size: var(--text-lg); }
-  .cloud-name { max-width: 130px; }
+  .apdeck-status { flex-direction: column; gap: var(--space-3); }
+  .apdeck-side { align-self: stretch; }
+  .apdeck-stat { flex: 1 1 0; }
+  .apdeck-phase { font-size: var(--text-2xl); }
+  .aprail { gap: 2px; }
+  .rail-label { display: none; }
+  .aprow-phase { display: none; }
+  .aprow-name { max-width: 150px; }
   .cockpit-plan { gap: var(--space-2) var(--space-4); }
 }
 
-/* Reduced motion: the only motion left is the hero bob + lamp pulse. */
+/* Reduced motion: the only motion left is the status lamp pulse. */
 @media (prefers-reduced-motion: reduce) {
-  .sky-hero { animation: none; }
-  .sky-lamp-dot { animation: none; }
+  .apdeck-lamp { animation: none; }
 }

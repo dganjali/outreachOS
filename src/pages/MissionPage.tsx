@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   Send, Sparkles, Lock, Undo2, Paperclip, Pencil,
-  Plane, PlaneTakeoff, Radar, Search, Users, PenLine, Clock, Eye, MessageSquare, Check, ChevronRight, X, Gauge as GaugeIcon,
+  Plane, PlaneTakeoff, Radar, Search, Users, PenLine, Clock, Eye, MessageSquare, Check, ChevronRight, Gauge as GaugeIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
@@ -675,6 +675,7 @@ export function MissionPage() {
           sentToday={sentToday}
           nextScheduledAt={nextScheduledAt}
           flights={flights}
+          entityLabel={isPeople ? 'People' : 'Companies'}
           reviewItems={reviewItems}
           refreshKey={refreshKey}
           aiEnabled={aiEnabled}
@@ -817,9 +818,10 @@ type Metrics = {
   review: number;
 };
 
-// One company in Autopilot's airspace — a cloud the user can click to see what
-// Autopilot is doing with it. `stage` picks the cloud's status icon; `stat` is
-// the at-a-glance metric shown on the cloud; `progress` orders them.
+// One company on Autopilot's board — a row the user can expand to see what
+// Autopilot is doing with it. `stage` is how far down the funnel it has come
+// (drives the row's progress segments); `stat` is the at-a-glance metric; `tone`
+// colors the row; `progress` orders them.
 type Flight = {
   id: string;
   name: string;
@@ -927,6 +929,7 @@ function AutopilotCockpit({
   sentToday,
   nextScheduledAt,
   flights,
+  entityLabel,
   reviewItems,
   refreshKey,
   aiEnabled,
@@ -940,6 +943,7 @@ function AutopilotCockpit({
   sentToday: number;
   nextScheduledAt: string | null;
   flights: Flight[];
+  entityLabel: string;
   reviewItems: Array<{ target: Target; contact: Contact; sequence: EmailSequence }>;
   refreshKey: number;
   aiEnabled: boolean;
@@ -975,7 +979,14 @@ function AutopilotCockpit({
 
   return (
     <div className="cockpit">
-      <Skyfield phase={phase} phaseLabel={phaseLabel} cadence={cadence} flights={flights} />
+      <RunDeck
+        phase={phase}
+        phaseLabel={phaseLabel}
+        cadence={cadence}
+        scheduled={metrics.scheduled}
+        review={metrics.review}
+        flights={flights}
+      />
 
       <div className="cockpit-plan">
         <span className="plan-item">
@@ -1012,15 +1023,7 @@ function AutopilotCockpit({
         )}
       </div>
 
-      <div className="cockpit-gauges">
-        <Gauge icon={<Radar size={15} />} label="Sourced" value={metrics.targets} />
-        <Gauge icon={<Users size={15} />} label="Contacts" value={metrics.contacts} />
-        <Gauge icon={<PenLine size={15} />} label="Drafted" value={metrics.drafts} />
-        <Gauge icon={<Send size={15} />} label="Sent" value={metrics.sent} sub={sentToday ? `${sentToday} today` : undefined} />
-        <Gauge icon={<Clock size={15} />} label="Scheduled" value={metrics.scheduled} />
-        <Gauge icon={<Eye size={15} />} label="To review" value={metrics.review} alert={metrics.review > 0} />
-        <Gauge icon={<MessageSquare size={15} />} label="Replies" value={metrics.replies} />
-      </div>
+      <CompanyBoard flights={flights} label={entityLabel} />
 
       <div className="cockpit-throttle">
         <div className="cockpit-throttle-label">When a draft is ready</div>
@@ -1108,96 +1111,137 @@ function AutopilotCockpit({
   );
 }
 
-// The flight view: one hero plane in a calm sky, with each company shown as a
-// cloud card (status icon + name + at-a-glance metric). Clicking a cloud opens a
-// detail card with what Autopilot is doing. Static — no drift; clouds flow-wrap
-// so they never overlap and the scene scales to any company count.
-function Skyfield({
+// The pipeline funnel, in order. Drives the deck rail (one node per stage) and
+// each company row's progress segments. `sourced` is implicit for everything.
+const FUNNEL: Array<{ key: Flight['stage']; label: string }> = [
+  { key: 'sourced', label: 'Sourced' },
+  { key: 'researched', label: 'Researched' },
+  { key: 'contacts', label: 'Contacts' },
+  { key: 'drafted', label: 'Drafted' },
+  { key: 'sent', label: 'Sent' },
+  { key: 'replied', label: 'Replied' },
+];
+const STAGE_INDEX: Record<Flight['stage'], number> = {
+  sourced: 0, researched: 1, contacts: 2, drafted: 3, sent: 4, replied: 5,
+};
+
+// The live deck: a dark instrument panel. A status block (phase + engaged lamp +
+// cadence, with scheduled / to-review counters) sits over a pipeline funnel that
+// fills green up to the furthest stage any company has reached.
+function RunDeck({
   phase,
   phaseLabel,
   cadence,
+  scheduled,
+  review,
   flights,
 }: {
   phase: 'holding' | 'taxiing' | 'cruising';
   phaseLabel: string;
   cadence: string;
+  scheduled: number;
+  review: number;
   flights: Flight[];
 }) {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const clouds = flights.slice(0, 14);
-  const selected = flights.find((f) => f.id === selectedId) ?? null;
+  // Per-stage count = companies that have reached at least that stage.
+  const counts = FUNNEL.map((_, i) => flights.filter((f) => STAGE_INDEX[f.stage] >= i).length);
+  const frontier = counts.reduce((acc, n, i) => (n > 0 ? i : acc), 0);
 
   return (
-    <div className="sky">
-      <div className={`sky-scene phase-${phase}`}>
-        <div className="sky-head">
-          <div className="sky-status">
-            <span className="sky-status-kicker">Autopilot</span>
-            <span className="sky-status-phase">{phaseLabel}</span>
-            <span className="sky-status-cadence">{cadence}</span>
-            <span className="sky-lamp">
-              <span className="sky-lamp-dot" aria-hidden />
-              Engaged
-            </span>
+    <section className={`apdeck phase-${phase}`}>
+      <header className="apdeck-status">
+        <div className="apdeck-id">
+          <span className="apdeck-kicker">
+            <span className="apdeck-lamp" aria-hidden />
+            Autopilot · Engaged
+          </span>
+          <span className="apdeck-phase">{phaseLabel}</span>
+          <span className="apdeck-cadence">{cadence}</span>
+        </div>
+        <div className="apdeck-side">
+          <div className="apdeck-stat">
+            <span className="apdeck-stat-v">{scheduled}</span>
+            <span className="apdeck-stat-k">scheduled</span>
           </div>
-          <div className="sky-hero" aria-hidden>
-            <span className="sky-hero-trail" />
-            <Plane size={34} />
+          <div className={`apdeck-stat${review > 0 ? ' is-alert' : ''}`}>
+            <span className="apdeck-stat-v">{review}</span>
+            <span className="apdeck-stat-k">to review</span>
           </div>
         </div>
+      </header>
 
-        {clouds.length > 0 && (
-          <div className="sky-clouds">
-            {clouds.map((f) => (
-              <button
-                key={f.id}
-                type="button"
-                className={`cloud tone-${f.tone}${selectedId === f.id ? ' is-selected' : ''}`}
-                onClick={() => setSelectedId((s) => (s === f.id ? null : f.id))}
-                title={`${f.name} · ${f.phase}`}
-              >
-                <span className="cloud-icon" aria-hidden>{stageIcon(f.stage)}</span>
-                <span className="cloud-text">
-                  <span className="cloud-name">{f.name}</span>
-                  <span className="cloud-meta">{f.phase} · {f.stat}</span>
-                </span>
-              </button>
-            ))}
-            {flights.length > clouds.length && (
-              <span className="sky-more">+{flights.length - clouds.length} more</span>
-            )}
+      <div className="aprail" role="img" aria-label={FUNNEL.map((s, i) => `${counts[i]} ${s.label.toLowerCase()}`).join(', ')}>
+        {FUNNEL.map((s, i) => (
+          <div
+            key={s.key}
+            className={`rail-node${counts[i] > 0 ? ' is-live' : ''}${i === frontier && counts[i] > 0 ? ' is-frontier' : ''}`}
+          >
+            <span className="rail-dot" aria-hidden>{stageIcon(s.key)}</span>
+            <span className="rail-val">{counts[i]}</span>
+            <span className="rail-label">{s.label}</span>
           </div>
-        )}
+        ))}
       </div>
-
-      {selected && <FlightDetail flight={selected} onClose={() => setSelectedId(null)} />}
-    </div>
+    </section>
   );
 }
 
-function FlightDetail({ flight, onClose }: { flight: Flight; onClose: () => void }) {
+// Per-company board: each row is a name + a 6-step progress strip showing how far
+// down the funnel Autopilot has carried it. Click a row to read what's happening.
+function CompanyBoard({ flights, label }: { flights: Flight[]; label: string }) {
+  const [openId, setOpenId] = useState<string | null>(null);
   return (
-    <div className={`flight-detail tone-${flight.tone}`}>
-      <span className="flight-detail-icon" aria-hidden>{stageIcon(flight.stage)}</span>
-      <div className="flight-detail-body">
-        <div className="flight-detail-top">
-          <strong>{flight.name}</strong>
-          {flight.signal && (
-            <span className="signal-pill" data-signal={flight.signal}>{flight.signal}</span>
-          )}
-          <span className="flight-detail-phase">{flight.phase}</span>
-        </div>
-        <p className="flight-detail-note">{flight.note}</p>
-        <div className="flight-detail-stats">
-          <span>{flight.contacts} contact{flight.contacts === 1 ? '' : 's'}</span>
-          <span>{flight.drafts} draft{flight.drafts === 1 ? '' : 's'}</span>
-          <span>{flight.sent} sent</span>
-          {flight.replied > 0 && <span>{flight.replied} replied</span>}
-        </div>
+    <div className="apboard">
+      <div className="apboard-head">
+        <span>{label}</span>
+        {flights.length > 0 && <span className="apboard-count">{flights.length}</span>}
       </div>
-      <button type="button" className="flight-detail-close" onClick={onClose} aria-label="Close">
-        <X size={15} />
-      </button>
+      {flights.length === 0 ? (
+        <p className="apboard-empty">Nothing in the pipeline yet — Autopilot sources a few new {label.toLowerCase()} each cycle.</p>
+      ) : (
+        <ul className="apboard-list">
+          {flights.map((f) => {
+            const reached = STAGE_INDEX[f.stage];
+            const open = openId === f.id;
+            return (
+              <li key={f.id}>
+                <button
+                  type="button"
+                  className={`aprow tone-${f.tone}${open ? ' is-open' : ''}`}
+                  onClick={() => setOpenId((s) => (s === f.id ? null : f.id))}
+                  aria-expanded={open}
+                >
+                  <span className="aprow-main">
+                    <span className="aprow-name">{f.name}</span>
+                    <span className="aprow-steps" aria-hidden>
+                      {FUNNEL.map((_, i) => (
+                        <i key={i} className={i <= reached ? 'on' : ''} />
+                      ))}
+                    </span>
+                  </span>
+                  <span className="aprow-aside">
+                    <span className="aprow-stat">{f.stat}</span>
+                    <span className="aprow-phase">{f.phase}</span>
+                    <ChevronRight className="aprow-chev" size={15} aria-hidden />
+                  </span>
+                </button>
+                {open && (
+                  <div className={`aprow-detail tone-${f.tone}`}>
+                    <p className="aprow-detail-note">{f.note}</p>
+                    <div className="aprow-detail-stats">
+                      {f.signal && <span className="signal-pill" data-signal={f.signal}>{f.signal}</span>}
+                      <span>{f.contacts} contact{f.contacts === 1 ? '' : 's'}</span>
+                      <span>{f.drafts} draft{f.drafts === 1 ? '' : 's'}</span>
+                      <span>{f.sent} sent</span>
+                      {f.replied > 0 && <span>{f.replied} replied</span>}
+                    </div>
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }
@@ -1213,30 +1257,6 @@ function stageIcon(stage: Flight['stage']): ReactNode {
   }
 }
 
-function Gauge({
-  icon,
-  label,
-  value,
-  sub,
-  alert,
-}: {
-  icon: ReactNode;
-  label: string;
-  value: number;
-  sub?: string;
-  alert?: boolean;
-}) {
-  return (
-    <div className={`gauge${alert ? ' is-alert' : ''}`}>
-      <span className="gauge-icon" aria-hidden>
-        {icon}
-      </span>
-      <span className="gauge-val">{value}</span>
-      <span className="gauge-label">{label}</span>
-      {sub && <span className="gauge-sub">{sub}</span>}
-    </div>
-  );
-}
 
 function relativeTime(iso: string): string {
   const then = new Date(iso).getTime();
