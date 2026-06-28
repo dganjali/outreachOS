@@ -8,6 +8,7 @@ import type {
   EvidencePack,
   EmailSequence,
   AgentRun,
+  AgentType,
   Integration,
   Profile,
   ReplyClassification,
@@ -266,6 +267,50 @@ export const pipeline = {
     ),
   cancel: (run_id: string) =>
     authedFetch<{ ok: boolean }>('/api/agents/pipeline/cancel', { run_id }),
+};
+
+// Agent-run analytics. Server aggregates over the agent_runs telemetry; keys
+// arrive snake-cased (authedFetch runs toFrontend on the payload). Data only
+// spans the agent_runs TTL, so windows are capped at 30 days server-side.
+export interface RunTypeStatView {
+  agent_type: AgentType;
+  runs: number;
+  completed: number;
+  failed: number;
+  running: number;
+  avg_ms: number;
+  p95_ms: number;
+  success_rate: number; // 0-1
+}
+export interface RunDayStatView {
+  day: string; // UTC 'YYYY-MM-DD'
+  runs: number;
+  completed: number;
+  failed: number;
+}
+export interface RunAnalyticsView {
+  window_days: number;
+  totals: {
+    runs: number;
+    completed: number;
+    failed: number;
+    running: number;
+    success_rate: number; // 0-1
+    avg_ms: number;
+    p50_ms: number;
+    p95_ms: number;
+  };
+  by_type: RunTypeStatView[];
+  by_day: RunDayStatView[];
+}
+
+export const analytics = {
+  runs: (days = 30) =>
+    authedFetch<{ data: RunAnalyticsView }>(
+      `/api/data/_analytics/agent-runs?days=${encodeURIComponent(days)}`,
+      null,
+      'GET'
+    ),
 };
 
 // Billing / monetization. Note: authedFetch() snake-cases response keys, so the

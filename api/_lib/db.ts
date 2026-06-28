@@ -123,6 +123,12 @@ export interface ScopedCollection<T extends Document = Document> {
   deleteById(id: string): Promise<number>;
   deleteMany(filter: Filter<T>): Promise<number>;
   countDocuments(filter?: Filter<T>): Promise<number>;
+  /**
+   * Run an aggregation pipeline scoped to this user. A `$match: { userId }`
+   * stage is prepended automatically so callers can never read across tenants
+   * (the rest of the pipeline still runs over only this user's documents).
+   */
+  aggregate<R extends Document = Document>(pipeline: Document[]): Promise<R[]>;
 }
 
 export interface UserScope {
@@ -230,6 +236,13 @@ function buildScoped<T extends Document>(uid: string, name: CollectionName): Sco
     async countDocuments(filter = {}) {
       const c = await col();
       return c.countDocuments(ownFilter(filter));
+    },
+    async aggregate<R extends Document = Document>(pipeline: Document[]): Promise<R[]> {
+      const c = await col();
+      // Prepend ownership so a pipeline can't read another user's data even if
+      // its own first stage forgot to filter. ownFilter() ANDs userId at the
+      // top level - exactly what a leading $match needs.
+      return c.aggregate<R>([{ $match: ownFilter() }, ...pipeline]).toArray();
     },
   };
 }

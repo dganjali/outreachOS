@@ -363,6 +363,7 @@ Your job: write a 3-touch outreach sequence (initial email + 2 follow-ups) for o
 
 Hard rules:
 - Initial email: under 110 words. Plain text. No marketing fluff. No "I hope this finds you well." No "I came across your company."
+- Never use em dashes or en dashes anywhere (subject or body). Write with commas, periods, colons, or parentheses instead.
 - Subject: under 50 chars, specific (reference a real signal), no clickbait, no emoji.
 - Every personalization must trace to an evidence bullet. Cite which bullet in "anchored_bullets".
 - Pick ONE primary angle from the available list. State it.

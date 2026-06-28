@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   Target,
   Inbox as InboxIcon,
+  Activity,
   User,
   Settings as SettingsIcon,
   Plus,
@@ -31,6 +32,7 @@ const NAV = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/missions', label: 'Missions', icon: Target },
   { to: '/inbox', label: 'Inbox', icon: InboxIcon },
+  { to: '/analytics', label: 'Analytics', icon: Activity },
   { to: '/me', label: 'Me', icon: User },
   { to: '/settings', label: 'Settings', icon: SettingsIcon },
 ];

@@ -146,6 +146,206 @@ export async function startRun(
   return doc as AgentRunDoc;
 }
 
+// --- Agent-run analytics -----------------------------------------------------
+//
+// Read-side rollups over the agent_runs telemetry the start/complete/fail
+// helpers above write. Everything is aggregated server-side (Mongo $facet) and
+// scoped to the caller by scope.aggregate()'s injected userId $match. Note the
+// data only goes back as far as the agent_runs TTL (30 days), so windows are
+// capped accordingly. Day bucketing is UTC.
+
+export interface RunTypeStat {
+  agentType: AgentType;
+  runs: number;
+  completed: number;
+  failed: number;
+  running: number;
+  /** Mean duration of completed runs, ms. 0 when none completed. */
+  avgMs: number;
+  /** 95th-percentile duration of completed runs, ms. */
+  p95Ms: number;
+  /** completed / (completed + failed), 0-1. Excludes still-running. */
+  successRate: number;
+}
+
+export interface RunDayStat {
+  /** UTC 'YYYY-MM-DD'. */
+  day: string;
+  runs: number;
+  completed: number;
+  failed: number;
+}
+
+export interface RunAnalytics {
+  windowDays: number;
+  totals: {
+    runs: number;
+    completed: number;
+    failed: number;
+    running: number;
+    successRate: number;
+    avgMs: number;
+    p50Ms: number;
+    p95Ms: number;
+  };
+  byType: RunTypeStat[];
+  byDay: RunDayStat[];
+}
+
+/** Nearest-rank percentile of a pre-sorted ascending array. Empty ⇒ 0. */
+function percentile(sortedAsc: number[], p: number): number {
+  if (sortedAsc.length === 0) return 0;
+  const rank = Math.ceil((p / 100) * sortedAsc.length);
+  const idx = Math.min(sortedAsc.length, Math.max(1, rank)) - 1;
+  return Math.round(sortedAsc[idx]);
+}
+
+function mean(nums: number[]): number {
+  if (nums.length === 0) return 0;
+  return Math.round(nums.reduce((a, b) => a + b, 0) / nums.length);
+}
+
+/** UTC 'YYYY-MM-DD' for a Date. */
+function dayKey(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+/** Every UTC day key from `since` (inclusive) to today, ascending. */
+function dayRange(since: Date): string[] {
+  const out: string[] = [];
+  const cur = new Date(Date.UTC(since.getUTCFullYear(), since.getUTCMonth(), since.getUTCDate()));
+  const today = new Date();
+  const end = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  while (cur.getTime() <= end) {
+    out.push(dayKey(cur));
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+  return out;
+}
+
+interface TypeFacetRow {
+  _id: AgentType;
+  runs: number;
+  completed: number;
+  failed: number;
+  running: number;
+  durations: (number | null)[];
+}
+interface DayFacetRow {
+  _id: string;
+  runs: number;
+  completed: number;
+  failed: number;
+}
+
+/**
+ * Rollup of the caller's agent runs over the last `windowDays` (1-30, clamped to
+ * the agent_runs TTL). One round trip: a $facet computes the per-type and
+ * per-day groupings; percentiles are finished in Node over the (single-user,
+ * bounded) duration arrays.
+ */
+export async function agentRunAnalytics(scope: UserScope, windowDays = 30): Promise<RunAnalytics> {
+  const days = Math.max(1, Math.min(30, Math.floor(windowDays) || 30));
+  const since = new Date(Date.now() - days * 86_400_000);
+
+  // Duration of a finished run, else null (still-running rows have no end).
+  const durationMs = {
+    $cond: [
+      { $ifNull: ['$completedAt', false] },
+      { $subtract: ['$completedAt', '$startedAt'] },
+      null,
+    ],
+  };
+  const countWhen = (status: string) => ({ $sum: { $cond: [{ $eq: ['$status', status] }, 1, 0] } });
+
+  const [facet] = await scope.collection<AgentRunDoc>('agent_runs').aggregate<{
+    byType: TypeFacetRow[];
+    byDay: DayFacetRow[];
+  }>([
+    { $match: { startedAt: { $gte: since } } },
+    { $addFields: { _durationMs: durationMs } },
+    {
+      $facet: {
+        byType: [
+          {
+            $group: {
+              _id: '$agentType',
+              runs: { $sum: 1 },
+              completed: countWhen('completed'),
+              failed: countWhen('failed'),
+              running: countWhen('running'),
+              durations: { $push: '$_durationMs' },
+            },
+          },
+        ],
+        byDay: [
+          {
+            $group: {
+              _id: { $dateToString: { format: '%Y-%m-%d', date: '$startedAt', timezone: 'UTC' } },
+              runs: { $sum: 1 },
+              completed: countWhen('completed'),
+              failed: countWhen('failed'),
+            },
+          },
+        ],
+      },
+    },
+  ]);
+
+  const typeRows = facet?.byType ?? [];
+  const dayRows = facet?.byDay ?? [];
+
+  // Per-type stats + a flat list of all completed-run durations for the totals.
+  const allDurations: number[] = [];
+  const byType: RunTypeStat[] = typeRows
+    .map((r): RunTypeStat => {
+      const durs = (r.durations ?? []).filter((d): d is number => typeof d === 'number' && d >= 0).sort((a, b) => a - b);
+      allDurations.push(...durs);
+      const settled = r.completed + r.failed;
+      return {
+        agentType: r._id,
+        runs: r.runs,
+        completed: r.completed,
+        failed: r.failed,
+        running: r.running,
+        avgMs: mean(durs),
+        p95Ms: percentile(durs, 95),
+        successRate: settled === 0 ? 0 : r.completed / settled,
+      };
+    })
+    .sort((a, b) => b.runs - a.runs);
+
+  allDurations.sort((a, b) => a - b);
+
+  const dayMap = new Map(dayRows.map((d) => [d._id, d]));
+  const byDay: RunDayStat[] = dayRange(since).map((day) => {
+    const d = dayMap.get(day);
+    return { day, runs: d?.runs ?? 0, completed: d?.completed ?? 0, failed: d?.failed ?? 0 };
+  });
+
+  const totalsRuns = byType.reduce((s, t) => s + t.runs, 0);
+  const totalsCompleted = byType.reduce((s, t) => s + t.completed, 0);
+  const totalsFailed = byType.reduce((s, t) => s + t.failed, 0);
+  const totalsRunning = byType.reduce((s, t) => s + t.running, 0);
+  const settledTotal = totalsCompleted + totalsFailed;
+
+  return {
+    windowDays: days,
+    totals: {
+      runs: totalsRuns,
+      completed: totalsCompleted,
+      failed: totalsFailed,
+      running: totalsRunning,
+      successRate: settledTotal === 0 ? 0 : totalsCompleted / settledTotal,
+      avgMs: mean(allDurations),
+      p50Ms: percentile(allDurations, 50),
+      p95Ms: percentile(allDurations, 95),
+    },
+    byType,
+    byDay,
+  };
+}
+
 export async function completeRun(scope: UserScope, id: string, output: Record<string, unknown>) {
   await scope.collection<AgentRunDoc>('agent_runs').updateById(id, {
     status: 'completed',

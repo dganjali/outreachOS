@@ -9,7 +9,7 @@ import { requireUser } from '../_lib/auth';
 import { forUser, newId, COL, type CollectionName } from '../_lib/db';
 import { signedUploadUrl, signedDownloadUrl, deleteObject } from '../_lib/storage';
 import { assertSafeWriteBody, UnsafePayloadError } from '../_lib/sanitize';
-import { checkMissionQuota, incrementMissionQuota } from '../_lib/runs';
+import { checkMissionQuota, incrementMissionQuota, agentRunAnalytics } from '../_lib/runs';
 
 // Module augmentation so `req.uid` is typed (set by the middleware below).
 declare module 'express-serve-static-core' {
@@ -83,6 +83,18 @@ router.post('/_storage/remove', async (req, res) => {
     }),
   );
   return res.json({ ok: failed === 0, removed, failed });
+});
+
+// ---- analytics rollups (must come before /:collection/... routes) ----
+// Read-side aggregation over the caller's agent_runs telemetry. Lives here
+// (not as a generic /:collection/query) because it needs a Mongo $facet that
+// the sanitized query route deliberately can't express. `_`-prefixed + scoped
+// via forUser(uid), like the storage helpers above.
+router.get('/_analytics/agent-runs', async (req, res) => {
+  const uid = uidOf(req);
+  const days = Number(req.query.days);
+  const data = await agentRunAnalytics(forUser(uid), Number.isFinite(days) ? days : 30);
+  res.json({ data });
 });
 
 // ---- mission delete with cascade ----

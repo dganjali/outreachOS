@@ -132,6 +132,9 @@ export interface EvidenceBullet {
   source_title: string;
   signal_type: string;
   recency: string;
+  // true = source link verified live; false = checked and dead (likely fake);
+  // undefined = unchecked (manual/legacy bullets).
+  link_ok?: boolean;
 }
 
 export interface EvidencePack {

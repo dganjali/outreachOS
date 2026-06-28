@@ -35,8 +35,8 @@ export function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Follow-ups + suppression
-  const [paused, setPaused] = useState(false);
+  // Follow-ups + suppression. Auto follow-ups are OFF by default.
+  const [autoOn, setAutoOn] = useState(false);
   const [pauseBusy, setPauseBusy] = useState(false);
   const [profileId, setProfileId] = useState<string | null>(null);
   const [suppressions, setSuppressions] = useState<Array<{ id: string; email: string; reason: string }>>([]);
@@ -56,20 +56,20 @@ export function SettingsPage() {
       toast.error('Profile still loading, try again in a second.');
       return;
     }
-    const next = !paused;
-    setPaused(next);
+    const next = !autoOn;
+    setAutoOn(next);
     setPauseBusy(true);
     try {
       const { error: err } = await supabase
         .from('profiles')
-        .update({ pause_followups: next })
+        .update({ auto_followups: next })
         .eq('id', profileId);
       if (err) {
-        setPaused(!next); // revert - server state did not change
-        toast.error(`Could not ${next ? 'pause' : 'resume'} follow-ups: ${err.message}`);
+        setAutoOn(!next); // revert - server state did not change
+        toast.error(`Could not ${next ? 'enable' : 'disable'} follow-ups: ${err.message}`);
         return;
       }
-      toast.success(next ? 'Follow-ups paused.' : 'Follow-ups resumed.');
+      toast.success(next ? 'Auto follow-ups on.' : 'Auto follow-ups off.');
     } finally {
       setPauseBusy(false);
     }
@@ -152,8 +152,8 @@ export function SettingsPage() {
       .single()
       .then(({ data }) => {
         if (data) {
-          const row = data as { id?: string; pause_followups?: boolean };
-          setPaused(!!row.pause_followups);
+          const row = data as { id?: string; auto_followups?: boolean };
+          setAutoOn(!!row.auto_followups);
           setProfileId(row.id ?? null);
         }
       });
@@ -302,20 +302,22 @@ export function SettingsPage() {
 
       <SettingsSection
         title="Follow-ups & sending"
-        hint="When you send an initial email, OutreachOS schedules its follow-ups and sends them on their cadence. Follow-ups stop for any contact you mark as replied in the inbox, and suppressed addresses are never emailed."
+        hint="Auto follow-ups are off by default. OutreachOS sends with a Gmail scope that can't read your inbox, so it can't tell when someone replies. With auto follow-ups off, only the initial email goes out and you send any follow-ups yourself. Turn it on and OutreachOS schedules the follow-up cadence on every send (mark a contact replied to stop theirs). Suppressed addresses are never emailed."
       >
         <div className="flex flex-wrap items-center gap-3">
           <Button
             type="button"
-            variant={paused ? 'default' : 'outline'}
+            variant={autoOn ? 'default' : 'outline'}
             size="sm"
             onClick={togglePause}
             disabled={pauseBusy}
           >
-            {paused ? 'Resume auto follow-ups' : 'Pause all follow-ups'}
+            {autoOn ? 'Turn off auto follow-ups' : 'Turn on auto follow-ups'}
           </Button>
           <span className="text-sm text-muted-foreground">
-            {paused ? 'Paused. Scheduled follow-ups will not send.' : 'Active. Follow-ups send on schedule.'}
+            {autoOn
+              ? 'On. Follow-ups schedule automatically when you send.'
+              : 'Off. Only the initial email sends; follow-ups are manual.'}
           </span>
         </div>
 

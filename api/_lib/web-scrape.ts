@@ -230,6 +230,53 @@ export async function isDomainLive(domain: string): Promise<boolean> {
   }
 }
 
+/**
+ * "Does this exact URL resolve to a live page?" Used to weed out fabricated
+ * evidence source links (the model sometimes invents a plausible-looking URL
+ * that 404s or points nowhere). Reuses the same SSRF guard + manual-redirect +
+ * timeout machinery as isDomainLive, but probes the full path rather than just
+ * the host. GET (we never read the body) because many hosts 405 a HEAD. Returns
+ * false on a bad scheme, blocked/unresolvable host, 4xx/5xx, or any error.
+ */
+export async function verifyUrlLive(url: string): Promise<boolean> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  try {
+    let current = url;
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      let parsed: URL;
+      try {
+        parsed = new URL(current);
+      } catch {
+        return false;
+      }
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+
+      const pinnedIp = await resolvePublicHost(parsed.hostname);
+      if (!pinnedIp) return false;
+
+      const res = await fetch(current, {
+        signal: ctrl.signal,
+        headers: { 'User-Agent': USER_AGENT, Accept: 'text/html,application/xhtml+xml' },
+        redirect: 'manual',
+      });
+
+      if (res.status >= 300 && res.status < 400) {
+        const loc = res.headers.get('location');
+        if (!loc) return false;
+        current = new URL(loc, current).toString();
+        continue;
+      }
+      return res.status < 400;
+    }
+    return false; // too many redirects
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function extractEmailsFromHtml(html: string, domain?: string): string[] {
   const found = new Set<string>();
 

@@ -37,8 +37,10 @@ export default async function handler(req: Request, res: Response) {
   let failed = 0;
   const errors: Array<{ id: string; error: string }> = [];
 
-  // Cache per-user pause + token so we don't refetch for every touch.
-  const pauseCache = new Map<string, boolean>();
+  // Cache per-user "auto follow-ups enabled" + token so we don't refetch for
+  // every touch. Auto follow-ups are opt-in (off by default) and a global pause
+  // overrides them.
+  const autoFollowupCache = new Map<string, boolean>();
   const tokenCache = new Map<string, { accessToken: string; email: string | null } | null>();
 
   for (const msg of due) {
@@ -52,16 +54,17 @@ export default async function handler(req: Request, res: Response) {
     };
 
     try {
-      // User paused follow-ups? The pause only governs the cold follow-up
-      // cadence - a scheduled *initial* (touchIndex 0) is an explicit user action
-      // and still goes out.
-      if (!pauseCache.has(uid)) {
+      // Auto follow-ups enabled for this user? This governs only the cold
+      // follow-up cadence (touchIndex > 0) - a scheduled *initial* (touchIndex 0)
+      // is an explicit user action and still goes out. Off by default, and a
+      // global pause forces it off, so queued follow-ups stay put and never send.
+      if (!autoFollowupCache.has(uid)) {
         const prof = await scope.collection<ProfileDoc>('profiles').findOne();
-        pauseCache.set(uid, prof?.pauseFollowups === true);
+        autoFollowupCache.set(uid, prof?.autoFollowups === true && prof?.pauseFollowups !== true);
       }
-      if (pauseCache.get(uid) && msg.touchIndex > 0) {
+      if (!autoFollowupCache.get(uid) && msg.touchIndex > 0) {
         skipped++;
-        continue; // leave queued; resume when they unpause
+        continue; // leave queued; sends only if the user enables auto follow-ups
       }
 
       // Sequence still active?
@@ -161,7 +164,7 @@ export default async function handler(req: Request, res: Response) {
         });
         await scope.collection<ContactDoc>('contacts').updateById(contact._id, { status: 'contacted' });
         await recordOutcome(uid, contact._id, 'sent');
-        if (!pauseCache.get(uid)) {
+        if (autoFollowupCache.get(uid)) {
           await scheduleFollowups({ scope, seq, toEmail: msg.toEmail, sentAt });
         }
       }

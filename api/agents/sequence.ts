@@ -12,7 +12,7 @@ import { forUser, newId, type InsertDoc } from '../_lib/db';
 import { generateJson, MODEL } from '../_lib/llm';
 import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
 import { embedOne } from '../_lib/embeddings';
-import { runDraftEngine, ensureSignOff } from '../_lib/engine';
+import { runDraftEngine, ensureSignOff, stripDashes } from '../_lib/engine';
 import { resolvePersona, assembleDraftContext, isDraftContextCache } from '../_lib/assemble';
 import type {
   ContactDoc,
@@ -48,7 +48,7 @@ const FOLLOWUPS_SCHEMA = {
   required: ['followups'],
 } as const;
 
-const FOLLOWUPS_SYSTEM = `You write 2 short follow-up emails for a cold outreach sequence. They reference the original lightly, add no new factual claims, stay in the sender's voice, and each end with one low-friction CTA. Each email MUST end with a short sign-off ("Best,") followed by the sender's name on the next line - use the sender name provided verbatim, never a placeholder like "[Your Name]". Keep each under 70 words. wait_days: first ~3, second ~6. Output JSON only.`;
+const FOLLOWUPS_SYSTEM = `You write 2 short follow-up emails for a cold outreach sequence. They reference the original lightly, add no new factual claims, stay in the sender's voice, and each end with one low-friction CTA. Each email MUST end with a short sign-off ("Best,") followed by the sender's name on the next line - use the sender name provided verbatim, never a placeholder like "[Your Name]". Never use em dashes or en dashes; write with commas, periods, or parentheses instead. Keep each under 70 words. wait_days: first ~3, second ~6. Output JSON only.`;
 
 // Pull evidence-bullet indices a draft actually cited, from "evidence:<pack>:<i>"
 // factIds - preserves the old anchoredBullets telemetry against the latest pack.
@@ -229,9 +229,10 @@ async function generateFollowups(
     if (!r.ok || !Array.isArray(r.data?.followups)) return [];
     return r.data.followups.slice(0, 2).map((f) => ({
       waitDays: typeof f.wait_days === 'number' ? f.wait_days : 3,
-      subject: f.subject,
+      // Same punctuation scrub as the initial email (no em/en dashes).
+      subject: stripDashes(f.subject),
       // Guarantee each follow-up is signed, same as the initial email.
-      body: ensureSignOff(f.body, senderName),
+      body: stripDashes(ensureSignOff(f.body, senderName)),
     }));
   } catch {
     return []; // follow-ups are non-critical; never fail the draft over them

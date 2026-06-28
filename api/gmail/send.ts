@@ -243,9 +243,12 @@ export default async function handler(req: Request, res: Response) {
       // reply-rate has a denominator. Best-effort.
       await recordOutcome(user.id, contact._id, 'sent');
 
-      // Auto-schedule the follow-up cadence unless the user paused it globally.
-      const paused = (profile as ProfileDoc | null)?.pauseFollowups === true;
-      if (!paused) {
+      // Auto-schedule the follow-up cadence ONLY when the user opted in. Off by
+      // default: without reply visibility (send-only scope) auto follow-ups would
+      // keep nudging people who already replied. A global pause also suppresses it.
+      const prof = profile as ProfileDoc | null;
+      const autoFollowups = prof?.autoFollowups === true && prof?.pauseFollowups !== true;
+      if (autoFollowups) {
         await scheduleFollowups({ scope, seq, toEmail, sentAt });
       }
     }

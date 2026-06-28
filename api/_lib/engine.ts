@@ -174,6 +174,7 @@ Non-negotiable rules:
 - VOICE: Match the sender's exemplars and style profile - imitate their rhythm, structure, and register. Do NOT regress to generic "professional email" voice.
 - SUBJECT: If the style profile specifies a SUBJECT-LINE STYLE, the subject MUST follow it exactly (length, casing, punctuation, pattern). Otherwise mirror the subject style of the sender's exemplars. Never default to a generic "Quick question" style subject.
 - NO SLOP: No "I hope this finds you well", no "I came across your company", no filler, no hedging, no flattery. Respect the sender's banned-phrase list absolutely.
+- PUNCTUATION: Never use em dashes or en dashes. Write with commas, periods, colons, or parentheses instead. A real person typing this email would not reach for a long dash.
 - ANGLE: "angle" is one sentence naming the specific signal you lead with and how it connects to the offer (e.g. "They just raised a Series B → scaling support, which my offer speeds up"). The body must deliver exactly that angle, not a kitchen-sink of every fact.
 - FORMAT: Initial email under the word target. Plain text. One specific, low-friction, time-boxed CTA.
 - SIGN-OFF: Always end the body with a short closing line (e.g. "Best,") followed by the sender's name on the next line. Use the SENDER name provided verbatim - NEVER leave a placeholder like "[Your Name]", "[Name]", or "{{name}}". The sign-off is part of the body, not the subject.
@@ -416,6 +417,23 @@ export function ensureSignOff(body: string, senderName: string | null | undefine
   return `${text}\n\n${closing}`;
 }
 
+// ---------------------------------------------------------------------------
+// Punctuation cleanup. Em/en dashes are a recognizable "AI wrote this" tell, so
+// every generated email is scrubbed of them deterministically (the prompt asks
+// the model to avoid them, but we never rely on the model). Numeric ranges
+// (9-5, 10-20) collapse to a hyphen; dashes used as punctuation become a comma.
+// ---------------------------------------------------------------------------
+export function stripDashes(text: string): string {
+  if (!text) return text;
+  return text
+    // 9–5, 10—20 → keep it a numeric range with a plain hyphen
+    .replace(/(\d)\s*[—–]\s*(\d)/g, '$1-$2')
+    // dash used as a clause break → comma
+    .replace(/\s*[—–]\s*/g, ', ')
+    // tidy any doubled comma the swap may have produced
+    .replace(/,\s*,/g, ',');
+}
+
 // Light CTA heuristic: a question, or a recognizable ask/next-step phrase.
 const CTA_PATTERNS =
   /\?|\b(worth|open to|free to|grab|book|set up|hop on|jump on|chat|call|meeting|connect|reply|let me know|interested|15 min|few minutes|next week|this week)\b/i;
@@ -509,8 +527,13 @@ export async function runDraftEngine(ctx: AssembledContext, tier: EngineTier): P
     if (!hasBlocker(all) || revisions >= maxRevisions) {
       // Guarantee a real sign-off on the final body (placeholders swapped,
       // closing appended if missing). Done after verification so the appended
-      // closing is never itself flagged.
-      const signed = { ...draft, body: ensureSignOff(draft.body, ctx.sender?.name) };
+      // closing is never itself flagged. Strip em/en dashes from the final text
+      // (subject + body) so no AI-tell punctuation survives to the recipient.
+      const signed = {
+        ...draft,
+        subject: stripDashes(draft.subject),
+        body: stripDashes(ensureSignOff(draft.body, ctx.sender?.name)),
+      };
       return {
         draft: signed,
         violations: all,

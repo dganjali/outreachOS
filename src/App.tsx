@@ -25,6 +25,7 @@ const MissionNew = lazy(() => import('./pages/MissionNew').then((m) => ({ defaul
 const MissionPage = lazy(() => import('./pages/MissionPage').then((m) => ({ default: m.MissionPage })));
 const MissionRun = lazy(() => import('./pages/MissionRun').then((m) => ({ default: m.MissionRun })));
 const Inbox = lazy(() => import('./pages/Inbox').then((m) => ({ default: m.Inbox })));
+const Analytics = lazy(() => import('./pages/Analytics').then((m) => ({ default: m.Analytics })));
 const Me = lazy(() => import('./pages/Me').then((m) => ({ default: m.Me })));
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })));
 const Privacy = lazy(() => import('./pages/Legal').then((m) => ({ default: m.Privacy })));
@@ -190,6 +191,7 @@ function App() {
                     <Route path="missions/:id" element={<MissionPage />} />
                     <Route path="missions/:id/run" element={<MissionRun />} />
                     <Route path="inbox" element={<Inbox />} />
+                    <Route path="analytics" element={<Analytics />} />
                     <Route path="me" element={<Me />} />
                     <Route path="profile" element={<Navigate to="/me" replace />} />
                     <Route path="settings" element={<SettingsPage />} />

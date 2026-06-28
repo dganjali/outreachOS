@@ -4,6 +4,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   Send, Sparkles, Lock, Undo2, Paperclip, Pencil,
   Plane, PlaneTakeoff, Radar, Search, Users, PenLine, Clock, Eye, MessageSquare, Check, ChevronRight, Gauge as GaugeIcon,
+  AlertTriangle, Plus, Trash2, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
@@ -18,6 +19,7 @@ import type {
   Target,
   Contact,
   EvidencePack,
+  EvidenceBullet,
   EmailSequence,
   SentMessage,
   Reply,
@@ -282,7 +284,7 @@ export function MissionPage() {
       const [sentRes, repRes] = await Promise.all([
         supabase
           .from('sent_messages')
-          .select('id, contact_id, touch_index, subject, status, scheduled_send_at, sent_at, created_at')
+          .select('id, sequence_id, contact_id, touch_index, subject, to_email, status, scheduled_send_at, sent_at, created_at')
           .in('contact_id', ids),
         supabase
           .from('replies')
@@ -544,6 +546,45 @@ export function MissionPage() {
     }
   }
 
+  // Send a queued email right now instead of waiting for its scheduled slot.
+  // gmail.send is idempotent on (sequence_id, touch_index), so it reuses the
+  // existing queued row and flips it to 'sent'.
+  async function sendQueuedNow(item: QueueItem) {
+    try {
+      await gmail.send(item.sequenceId, item.touchIndex, 'send');
+      toast.success(`Sent to ${item.toEmail}.`);
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not send');
+    }
+  }
+
+  // Pull a queued email back out of the send queue. We mark the send row failed
+  // (so the cron never sends it, and so Autopilot's idempotency check never
+  // re-queues it) and return the draft to review, where the user can edit or
+  // delete it. Nothing leaves the account.
+  async function cancelQueued(item: QueueItem) {
+    const ok = await confirm({
+      title: 'Don’t send this email?',
+      description: 'It comes out of the send queue and goes back to review. You can edit or delete it there.',
+      confirmText: 'Don’t send',
+      destructive: true,
+    });
+    if (!ok) return;
+    try {
+      const { error } = await supabase
+        .from('sent_messages')
+        .update({ status: 'failed', failed_reason: 'canceled_by_user' })
+        .eq('id', item.id);
+      if (error) throw new Error(error.message);
+      await supabase.from('email_sequences').update({ autopilot_state: 'review' }).eq('id', item.sequenceId);
+      toast.success('Removed from the send queue.');
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not update the queue');
+    }
+  }
+
   if (!mission) {
     return <p style={{ color: 'var(--text-muted)' }}>Loading…</p>;
   }
@@ -621,7 +662,7 @@ export function MissionPage() {
       let tone = 'taxi';
       let stage: Flight['stage'] = 'sourced';
       let stat = 'researching';
-      let note = 'Sourced — researching the company next.';
+      let note = 'Sourced. Researching the company next.';
       if (repliedN > 0) {
         progress = 100; phase = 'Landed'; tone = 'landed'; stage = 'replied';
         stat = `${repliedN} repl${repliedN === 1 ? 'y' : 'ies'}`;
@@ -629,19 +670,19 @@ export function MissionPage() {
       } else if (sentN > 0) {
         progress = 86; phase = 'Descending'; tone = 'sent'; stage = 'sent';
         stat = `${sentN} sent`;
-        note = `${sentN} email${sentN === 1 ? '' : 's'} sent — awaiting a reply.`;
+        note = `${sentN} email${sentN === 1 ? '' : 's'} sent, awaiting a reply.`;
       } else if (draftsN > 0) {
         progress = 66; phase = 'Cruising'; tone = 'cruise'; stage = 'drafted';
         stat = `${draftsN} draft${draftsN === 1 ? '' : 's'} ready`;
-        note = `${draftsN} draft${draftsN === 1 ? '' : 's'} ready — queued for the next send window.`;
+        note = `${draftsN} draft${draftsN === 1 ? '' : 's'} ready, queued for the next send window.`;
       } else if (cs.length) {
         progress = 46; phase = 'Climbing'; tone = 'climb'; stage = 'contacts';
         stat = `${cs.length} contact${cs.length === 1 ? '' : 's'}`;
-        note = `${cs.length} contact${cs.length === 1 ? '' : 's'} found — drafting outreach.`;
+        note = `${cs.length} contact${cs.length === 1 ? '' : 's'} found, drafting outreach.`;
       } else if (pack) {
         progress = 30; phase = 'Climbing'; tone = 'climb'; stage = 'researched';
         stat = 'finding contacts';
-        note = 'Researched — finding the right contacts.';
+        note = 'Researched. Finding the right contacts.';
       }
       return {
         // People mode: the cloud is the person; their company rides along as the
@@ -659,6 +700,33 @@ export function MissionPage() {
     .map((m) => m.scheduled_send_at as string)
     .sort();
   const nextScheduledAt = upcomingSends.find((iso) => new Date(iso).getTime() > Date.now()) ?? upcomingSends[0] ?? null;
+
+  // The REAL send queue: actual queued send rows (verified, gated, scheduled),
+  // joined with their recipient for display. These are emails about to leave the
+  // account, so they get explicit Send-now / Don't-send controls. Held and
+  // unverified drafts are NOT here - they live in the separate review section.
+  const contactLookup = new Map<string, { contact: Contact; target: Target }>();
+  for (const t of visibleTargets) {
+    for (const c of contactsByTarget[t.id] ?? []) contactLookup.set(c.id, { contact: c, target: t });
+  }
+  const sendQueue: QueueItem[] = allSent
+    .filter((m) => m.status === 'queued')
+    .map((m) => {
+      const found = contactLookup.get(m.contact_id);
+      return {
+        id: m.id,
+        sequenceId: m.sequence_id,
+        contactId: m.contact_id,
+        touchIndex: m.touch_index,
+        subject: m.subject,
+        toEmail: m.to_email,
+        scheduledSendAt: m.scheduled_send_at,
+        recipientName: found?.contact.name ?? null,
+        company: found ? (isPeople ? found.contact.name : found.target.company_name) : null,
+        isFollowup: m.touch_index > 0,
+      };
+    })
+    .sort((a, b) => (a.scheduledSendAt ?? '').localeCompare(b.scheduledSendAt ?? ''));
 
   return (
     <div className="mx">
@@ -688,12 +756,15 @@ export function MissionPage() {
           flights={flights}
           entityLabel={isPeople ? 'People' : 'Companies'}
           reviewItems={reviewItems}
+          sendQueue={sendQueue}
           refreshKey={refreshKey}
           aiEnabled={aiEnabled}
           hasResume={hasResume}
           onSaveField={saveAutopilotField}
           onReloadContacts={loadContactsForTarget}
           onReloadSequence={loadSequencesForContact}
+          onSendNow={sendQueuedNow}
+          onCancelQueued={cancelQueued}
         />
       ) : (
         <>
@@ -783,6 +854,7 @@ export function MissionPage() {
                     onToggleSelected={toggleContactSelected}
                     onReloadContacts={loadContactsForTarget}
                     onReloadSequence={loadSequencesForContact}
+                    onReloadEvidence={loadEvidenceForTarget}
                   />
                 ))}
               </ul>
@@ -828,6 +900,22 @@ type Metrics = {
   scheduled: number;
   replies: number;
   review: number;
+};
+
+// One verified email sitting in the live send queue (a queued sent_messages row),
+// flattened with its recipient for the cockpit's queue list + Send-now / Don't-send
+// controls.
+type QueueItem = {
+  id: string;
+  sequenceId: string;
+  contactId: string;
+  touchIndex: number;
+  subject: string;
+  toEmail: string;
+  scheduledSendAt: string | null;
+  recipientName: string | null;
+  company: string | null;
+  isFollowup: boolean;
 };
 
 // One company on Autopilot's board — a row the user can expand to see what
@@ -943,12 +1031,15 @@ function AutopilotCockpit({
   flights,
   entityLabel,
   reviewItems,
+  sendQueue,
   refreshKey,
   aiEnabled,
   hasResume,
   onSaveField,
   onReloadContacts,
   onReloadSequence,
+  onSendNow,
+  onCancelQueued,
 }: {
   policy: CampaignPolicy;
   metrics: Metrics;
@@ -957,12 +1048,15 @@ function AutopilotCockpit({
   flights: Flight[];
   entityLabel: string;
   reviewItems: Array<{ target: Target; contact: Contact; sequence: EmailSequence }>;
+  sendQueue: QueueItem[];
   refreshKey: number;
   aiEnabled: boolean;
   hasResume: boolean;
   onSaveField: (patch: Partial<CampaignPolicy>) => void | Promise<void>;
   onReloadContacts: (targetId: string) => void | Promise<void>;
   onReloadSequence: (contactId: string) => void | Promise<void>;
+  onSendNow: (item: QueueItem) => void | Promise<void>;
+  onCancelQueued: (item: QueueItem) => void | Promise<void>;
 }) {
   const [capDraft, setCapDraft] = useState(String(policy.daily_send_cap));
 
@@ -1037,6 +1131,8 @@ function AutopilotCockpit({
 
       <CompanyBoard flights={flights} label={entityLabel} />
 
+      <SendQueuePanel queue={sendQueue} onSendNow={onSendNow} onCancel={onCancelQueued} />
+
       <div className="cockpit-throttle">
         <div className="cockpit-throttle-label">When a draft is ready</div>
         <div className="ap-choices">
@@ -1089,9 +1185,12 @@ function AutopilotCockpit({
         <section className="cockpit-review">
           <div className="cockpit-review-head">
             <Eye size={15} aria-hidden />
-            <span>Awaiting your clearance</span>
+            <span>Held for review</span>
             <span className="console-count">{reviewItems.length}</span>
           </div>
+          <p className="cockpit-review-sub">
+            Drafts waiting on your approval, plus anything held back for an unverified address or low confidence. Nothing here enters the send queue until you approve it.
+          </p>
           <div className="cockpit-review-list">
             {reviewItems.map(({ target, contact, sequence }) => (
               <div key={sequence.id} className="cockpit-review-item">
@@ -1209,7 +1308,7 @@ function CompanyBoard({ flights, label }: { flights: Flight[]; label: string }) 
         {flights.length > 0 && <span className="apboard-count">{flights.length}</span>}
       </div>
       {flights.length === 0 ? (
-        <p className="apboard-empty">Nothing in the pipeline yet — Autopilot sources a few new {label.toLowerCase()} each cycle.</p>
+        <p className="apboard-empty">Nothing in the pipeline yet. Autopilot sources a few new {label.toLowerCase()} each cycle.</p>
       ) : (
         <ul className="apboard-list">
           {flights.map((f) => {
@@ -1255,6 +1354,85 @@ function CompanyBoard({ flights, label }: { flights: Flight[]; label: string }) 
         </ul>
       )}
     </div>
+  );
+}
+
+// The live send queue: verified, gated emails that have a scheduled slot, each
+// with an explicit Send-now / Don't-send control. Only real queued send rows
+// appear here, so nothing unverified is ever mixed in (those stay in "Held for
+// review"). This is the "what is about to leave my account" surface.
+function SendQueuePanel({
+  queue,
+  onSendNow,
+  onCancel,
+}: {
+  queue: QueueItem[];
+  onSendNow: (item: QueueItem) => void | Promise<void>;
+  onCancel: (item: QueueItem) => void | Promise<void>;
+}) {
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  async function act(item: QueueItem, fn: (i: QueueItem) => void | Promise<void>) {
+    setBusyId(item.id);
+    try {
+      await fn(item);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <section className="sendq">
+      <div className="sendq-head">
+        <Send size={15} aria-hidden />
+        <span>Send queue</span>
+        <span className="console-count">{queue.length}</span>
+        <span className="sendq-head-hint">verified addresses only</span>
+      </div>
+      {queue.length === 0 ? (
+        <p className="sendq-empty">
+          Nothing queued to send. Verified, high-confidence drafts land here before they go out, so you always get the last word.
+        </p>
+      ) : (
+        <ul className="sendq-list">
+          {queue.map((item) => (
+            <li key={item.id} className="sendq-item">
+              <div className="sendq-id">
+                <strong>{item.recipientName ?? item.toEmail}</strong>
+                {item.company && <span className="sendq-co">{item.company}</span>}
+                {item.isFollowup && <span className="sendq-tag">follow-up</span>}
+              </div>
+              <div className="sendq-subj">{item.subject}</div>
+              <div className="sendq-foot">
+                <span className="sendq-when">
+                  <Clock size={12} aria-hidden />{' '}
+                  {item.scheduledSendAt ? formatScheduleStamp(item.scheduledSendAt) : 'next window'}
+                </span>
+                <span className="sendq-to">{item.toEmail}</span>
+              </div>
+              <div className="sendq-actions">
+                <button
+                  type="button"
+                  className="btn-send small"
+                  disabled={busyId === item.id}
+                  onClick={() => act(item, onSendNow)}
+                >
+                  <Send size={13} aria-hidden /> Send now
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary small sendq-cancel"
+                  disabled={busyId === item.id}
+                  onClick={() => act(item, onCancel)}
+                >
+                  <X size={13} aria-hidden /> Don’t send
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -1335,6 +1513,146 @@ function targetStage(
   return { stage: 'done', label: 'Contacted', cta: null };
 }
 
+// Inline editor for a target's evidence pack. The engine grounds every draft in
+// these bullets (assemble.ts reads the latest pack), so editing them here changes
+// what each email is allowed to claim. The read view flags any source link that
+// failed verification (link_ok === false) so a fabricated "source" never reads as
+// real; the edit view lets the user fix a fact, correct or drop a link, remove a
+// bad bullet, or add their own.
+function EvidenceEditor({ pack, onSaved }: { pack: EvidencePack; onSaved: () => void | Promise<void> }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<EvidenceBullet[]>(pack.bullets);
+  const [saving, setSaving] = useState(false);
+
+  // Re-sync when the underlying pack changes (e.g. a fresh research run), unless
+  // the user is mid-edit and we'd clobber their changes.
+  useEffect(() => {
+    if (!editing) setDraft(pack.bullets);
+  }, [pack, editing]);
+
+  function update(i: number, patch: Partial<EvidenceBullet>) {
+    setDraft((rows) => rows.map((b, idx) => (idx === i ? { ...b, ...patch } : b)));
+  }
+  function remove(i: number) {
+    setDraft((rows) => rows.filter((_, idx) => idx !== i));
+  }
+  function add() {
+    setDraft((rows) => [...rows, { fact: '', source_url: '', source_title: '', signal_type: '', recency: '' }]);
+  }
+
+  async function save() {
+    const cleaned = draft
+      .map((b) => ({ ...b, fact: b.fact.trim(), source_url: b.source_url.trim() }))
+      .filter((b) => b.fact.length > 0);
+    if (cleaned.length === 0) {
+      toast.error('Keep at least one fact, or refresh the research instead.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const { error } = await supabase.from('evidence_packs').update({ bullets: cleaned }).eq('id', pack.id);
+      if (error) throw new Error(error.message);
+      await onSaved();
+      setEditing(false);
+      toast.success('Evidence updated. New drafts will use it.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not save evidence');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <div className="ev-edit">
+        {draft.map((b, i) => (
+          <div key={i} className="ev-edit-row">
+            <textarea
+              className="ev-edit-fact"
+              rows={2}
+              value={b.fact}
+              placeholder="A specific, citable fact about this company"
+              onChange={(e) => update(i, { fact: e.target.value })}
+              spellCheck
+            />
+            <div className="ev-edit-meta">
+              <input
+                className="ev-edit-url"
+                value={b.source_url}
+                placeholder="https:// source link (optional)"
+                onChange={(e) => update(i, { source_url: e.target.value, link_ok: undefined })}
+              />
+              <button type="button" className="ev-edit-del" onClick={() => remove(i)} aria-label="Remove fact">
+                <Trash2 size={14} />
+              </button>
+            </div>
+          </div>
+        ))}
+        <div className="ev-edit-actions">
+          <button type="button" className="link-button" onClick={add}>
+            <Plus size={13} aria-hidden /> Add fact
+          </button>
+          <div className="ev-edit-save">
+            <button type="button" className="btn-send small" onClick={save} disabled={saving}>
+              {saving ? 'Saving…' : 'Save evidence'}
+            </button>
+            <button
+              type="button"
+              className="link-button"
+              onClick={() => {
+                setEditing(false);
+                setDraft(pack.bullets);
+              }}
+              disabled={saving}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="ev-view">
+      <ol className="ev-list">
+        {pack.bullets.map((b, i) => (
+          <li key={i}>
+            <span className="ev-fact">{b.fact}</span>
+            <span className="ev-meta">
+              {b.signal_type && (
+                <span className="signal-pill" data-signal={b.signal_type}>
+                  {b.signal_type}
+                </span>
+              )}
+              {b.recency && <span> · {b.recency}</span>}
+              {b.source_url ? (
+                <>
+                  {' · '}
+                  <a href={b.source_url} target="_blank" rel="noreferrer">
+                    {b.source_title || 'source'} ↗
+                  </a>
+                </>
+              ) : b.link_ok === false ? (
+                <span
+                  className="ev-link-bad"
+                  title="The model's source link did not resolve and was removed. The fact may still be true, but verify it before relying on it."
+                >
+                  {' · '}
+                  <AlertTriangle size={12} aria-hidden /> unverified source
+                </span>
+              ) : null}
+            </span>
+          </li>
+        ))}
+      </ol>
+      <button type="button" className="link-button ev-edit-toggle" onClick={() => setEditing(true)}>
+        <Pencil size={12} aria-hidden /> Edit evidence
+      </button>
+    </div>
+  );
+}
+
 function TargetRow({
   target: t,
   isPeople,
@@ -1358,6 +1676,7 @@ function TargetRow({
   onToggleSelected,
   onReloadContacts,
   onReloadSequence,
+  onReloadEvidence,
 }: {
   target: Target;
   isPeople: boolean;
@@ -1381,6 +1700,7 @@ function TargetRow({
   onToggleSelected: (id: string) => void;
   onReloadContacts: (targetId: string) => void | Promise<void>;
   onReloadSequence: (contactId: string) => void | Promise<void>;
+  onReloadEvidence: (targetId: string) => void | Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
   const score = asScore(t.score);
@@ -1505,29 +1825,7 @@ function TargetRow({
               </button>
             </div>
             {pack && pack.bullets.length > 0 ? (
-              <ol className="ev-list">
-                {pack.bullets.map((b, i) => (
-                  <li key={i}>
-                    <span className="ev-fact">{b.fact}</span>
-                    <span className="ev-meta">
-                      {b.signal_type && (
-                        <span className="signal-pill" data-signal={b.signal_type}>
-                          {b.signal_type}
-                        </span>
-                      )}
-                      {b.recency && <span> · {b.recency}</span>}
-                      {b.source_url && (
-                        <>
-                          {' · '}
-                          <a href={b.source_url} target="_blank" rel="noreferrer">
-                            {b.source_title || 'source'} ↗
-                          </a>
-                        </>
-                      )}
-                    </span>
-                  </li>
-                ))}
-              </ol>
+              <EvidenceEditor pack={pack} onSaved={() => onReloadEvidence(t.id)} />
             ) : (
               <p className="tgt-sec-empty">No evidence yet. Research the company to personalize every email.</p>
             )}

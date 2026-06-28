@@ -52,7 +52,13 @@ export interface ProfileDoc extends BaseDoc {
   linkedinSource: 'web_search' | null;
   onboardingStep: number;
   onboardingCompletedAt: Date | null;
-  // When true, the follow-up sweeper skips this user's scheduled touches.
+  // Auto follow-up cadence. OFF by default: with send-only Gmail scope the app
+  // can't see replies, so auto-sending follow-ups would keep nudging people who
+  // already replied. Sending an initial email only schedules its follow-ups when
+  // this is explicitly true; otherwise follow-ups are the user's manual choice.
+  autoFollowups?: boolean;
+  // Hard kill-switch: when true, the follow-up sweeper skips this user's
+  // scheduled touches regardless of autoFollowups (legacy "pause" control).
   pauseFollowups?: boolean;
 
   // --- Billing / monetization (Stripe). All optional; absence == free tier. ---
@@ -295,6 +301,10 @@ export interface EvidencePackDoc extends BaseDoc {
     sourceTitle: string;
     signalType: string;
     recency: string;
+    // Whether sourceUrl was confirmed to resolve to a live page at build time.
+    // true = verified live; false = checked and dead/unreachable (likely a
+    // fabricated link); undefined = not checked (legacy/manual bullets).
+    linkOk?: boolean;
   }>;
   citations: Array<{ url: string; title?: string }>;
   // Vector field - concatenated bullets, embedded with Voyage.

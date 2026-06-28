@@ -8,6 +8,7 @@ import { MODEL, WEB_SEARCH_TOOL, generateJsonWithSearch } from '../_lib/llm';
 import { EVIDENCE_SYSTEM, type MissionMode } from '../_lib/prompts';
 import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
 import { embedOne } from '../_lib/embeddings';
+import { verifyUrlLive } from '../_lib/web-scrape';
 import type { EvidencePackDoc, MissionDoc, TargetDoc } from '../../shared/schemas';
 
 interface EvidenceBullet {
@@ -63,13 +64,28 @@ export default async function handler(req: Request, res: Response) {
       return res.status(502).json({ error: 'parse_failed', raw: parsed.raw.slice(0, 500) });
     }
 
-    const bullets = parsed.data.bullets.slice(0, 8).map((b) => ({
+    const rawBullets = parsed.data.bullets.slice(0, 8).map((b) => ({
       fact: b.fact,
       sourceUrl: b.source_url,
       sourceTitle: b.source_title,
       signalType: b.signal_type,
       recency: b.recency,
     }));
+
+    // Fabricated source links are a real failure mode: the model often invents a
+    // plausible-looking URL that 404s. Probe each one (in parallel, SSRF-guarded)
+    // so the UI and downstream grounding can flag the dead links instead of
+    // showing the user a broken "source". A confirmed-dead link is blanked so it
+    // can never render as a clickable source; the fact itself is kept (it may
+    // still be true) but marked unverified.
+    const bullets = await Promise.all(
+      rawBullets.map(async (b) => {
+        const url = (b.sourceUrl ?? '').trim();
+        if (!url) return { ...b, linkOk: undefined as boolean | undefined };
+        const linkOk = await verifyUrlLive(url);
+        return { ...b, sourceUrl: linkOk ? url : '', linkOk };
+      }),
+    );
 
     const pack = await scope.collection<EvidencePackDoc>('evidence_packs').insertOne({
       _id: newId(),
