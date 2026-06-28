@@ -649,10 +649,11 @@ function emptyResolverCounts(): Record<ResolverName, number> {
 
 // Walk the ranked candidate pool resolving a trustworthy email for each via the
 // cascade (emailfinder.dev → verifier gate → real scraped email → none). Keeps a
-// row only when it yields a deliverable email ('verified'/'likely'); a 'none'
-// candidate is dropped and we try the next one. Stops at `count` kept
-// or RESOLVE_ATTEMPT_CAP attempts (the per-target cost ceiling). Scrapes the
-// company site once up front and reuses it. Never ships an unverified guess.
+// row only when the address is confirmed deliverable (emailStatus 'verified');
+// 'likely' (catch-all/pattern-match) and 'none' are dropped and we try the next
+// candidate. Stops at `count` kept or RESOLVE_ATTEMPT_CAP attempts (the per-target
+// cost ceiling). Scrapes the company site once up front and reuses it. Never
+// ships an unverified address.
 export async function resolvePoolWithBudget(
   rows: ContactRow[],
   domain: string | null,
@@ -703,23 +704,25 @@ export async function resolvePoolWithBudget(
       )
     );
 
-    // Verify ONLY the candidates that resolved a deliverable email - we never
-    // spend a verification on someone we can't reach. Runs concurrently within
-    // the batch (it is the slow, paid step); a null entry means "not verified"
-    // (no gate, or no email to gate).
+    // Verify ONLY the candidates with a VERIFIED email - we never spend a
+    // verification on someone we won't keep (unverified address) or can't reach.
+    // Runs concurrently within the batch (it is the slow, paid step); a null
+    // entry means "not verified" (no gate, or nothing to gate).
     const verifications = await Promise.all(
       batch.map((row, j) =>
-        deps.verify && resolved[j].email ? deps.verify(row) : Promise.resolve(null)
+        deps.verify && resolved[j].emailStatus === 'verified' ? deps.verify(row) : Promise.resolve(null)
       )
     );
 
     // Keep deliverable rows in their ranked (batch) order; never exceed the cap.
-    // A reachable candidate the gate marks a clear mismatch is dropped (and the
-    // walk continues to the next), exactly like an unreachable one.
+    // We ship ONLY confirmed-deliverable addresses: a 'likely' result (finder hit
+    // on a catch-all domain, or a scraped pattern match) is dropped and the walk
+    // continues, same as an unreachable one. A reachable candidate the recipient
+    // gate marks a clear mismatch is likewise dropped.
     for (let j = 0; j < batch.length; j++) {
       const res = resolved[j];
       resolverCounts[res.resolver] += 1; // telemetry: where each attempt landed
-      if (!res.email) continue;
+      if (res.emailStatus !== 'verified') continue;
       const verification = verifications[j];
       if (verification && !verdictAccepted(verification)) {
         verifiedDropped += 1;

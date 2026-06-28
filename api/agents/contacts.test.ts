@@ -108,6 +108,33 @@ describe('resolvePoolWithBudget', () => {
     assert.equal(calls(), 0, 'no domain → no resolver calls');
   });
 
+  it("drops 'likely' (unverified) addresses and walks on to a verified one", async () => {
+    const deps: ResolvePoolDeps = {
+      scrape: async () => emptyScrape,
+      resolve: async (name, domain): Promise<ResolvedEmail> =>
+        name === 'A'
+          ? { email: `a@${domain}`, emailStatus: 'likely', likelyEmailPattern: null, resolver: 'verifier' }
+          : { email: `${name.toLowerCase()}@${domain}`, emailStatus: 'verified', likelyEmailPattern: null, resolver: 'verifier' },
+    };
+    const out = await resolvePoolWithBudget(['A', 'B'].map(row), 'acme.co', 't1', 1, deps);
+    assert.deepEqual(out.rows.map((r) => r.name), ['B'], 'the likely A is skipped, verified B is kept');
+    assert.equal(out.rows[0].emailStatus, 'verified');
+  });
+
+  it('returns empty when every reachable address is only likely (not verified)', async () => {
+    const deps: ResolvePoolDeps = {
+      scrape: async () => emptyScrape,
+      resolve: async (name, domain): Promise<ResolvedEmail> => ({
+        email: `${name.toLowerCase()}@${domain}`,
+        emailStatus: 'likely',
+        likelyEmailPattern: null,
+        resolver: 'verifier',
+      }),
+    };
+    const out = await resolvePoolWithBudget(['A', 'B', 'C'].map(row), 'acme.co', 't1', 2, deps);
+    assert.equal(out.rows.length, 0, 'never ships an unverified address');
+  });
+
   it('resolves a batch concurrently rather than one-at-a-time', async () => {
     // Gate every resolve on a barrier that only releases once the requested count
     // of calls are in flight - this only completes if the walk fans them out.
