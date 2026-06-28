@@ -151,11 +151,26 @@ export default async function handler(req: Request, res: Response) {
             out.reviewed++;
             continue;
           }
-          // Skip one already sent/queued (idempotent).
+          // Skip one already sent/queued for THIS sequence (idempotent).
           const existing = await scope
             .collection<SentMessageDoc>('sent_messages')
             .findOne({ sequenceId: seq._id, touchIndex: 0 });
           if (existing) {
+            await setState(scope, seq._id, 'queued');
+            continue;
+          }
+          // Recipient-level dedup: never queue a second initial email to an
+          // address already contacted (sent or queued) under this mission, even
+          // when re-sourcing routed it through a fresh contact/sequence.
+          const contacted = await scope
+            .collection<SentMessageDoc>('sent_messages')
+            .findOne({
+              missionId: seq.missionId,
+              toEmail,
+              touchIndex: 0,
+              status: { $in: ['queued', 'sent'] } as never,
+            });
+          if (contacted) {
             await setState(scope, seq._id, 'queued');
             continue;
           }

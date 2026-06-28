@@ -81,6 +81,24 @@ export default async function handler(req: Request, res: Response) {
         continue;
       }
 
+      // Recipient-level dedup backstop: never send a second INITIAL email to an
+      // address already contacted under this mission. Re-sourcing can mint a
+      // fresh contact -> sequence -> queued row for someone already emailed; this
+      // drops it before it reaches the inbox. (touchIndex > 0 is a follow-up on
+      // the same thread and is expected to reuse the address.)
+      if (msg.touchIndex === 0) {
+        const already = await sentCol.findOne({
+          missionId: msg.missionId,
+          toEmail: msg.toEmail,
+          touchIndex: 0,
+          status: 'sent',
+        });
+        if (already) {
+          await cancel('already_contacted');
+          continue;
+        }
+      }
+
       // Gmail connected?
       if (!tokenCache.has(uid)) {
         const tok = await getActiveAccessToken(uid);

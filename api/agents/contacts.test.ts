@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolvePoolWithBudget, fillWithDisplayOnly, rankCandidates, narrowIcpBySelection, seedToSuggestion, type ResolvePoolDeps, type ContactSuggestion } from './contacts';
+import { resolvePoolWithBudget, fillWithDisplayOnly, rankCandidates, narrowIcpBySelection, seedToSuggestion, dedupeAgainstMission, type ResolvePoolDeps, type ContactSuggestion } from './contacts';
 import { defaultContactIcp } from '../_lib/icp';
 import type { ResolvedEmail } from '../_lib/email-resolver';
 import type { ScrapeResult } from '../_lib/web-scrape';
@@ -457,5 +457,27 @@ describe('seedToSuggestion - people mode seeds the contact pipeline', () => {
     });
     assert.equal(result.rows.length, 1);
     assert.equal(result.rows[0].name, 'Ada Investor');
+  });
+});
+
+describe('dedupeAgainstMission', () => {
+  const withEmail = (name: string, email: string | null): ContactRow => ({ ...row(name), email, emailStatus: email ? 'verified' : 'none' });
+
+  it('drops a candidate whose email already exists in the mission (case-insensitive)', () => {
+    const prior = [{ email: 'Ada@Acme.co', linkedinUrl: null, name: 'Someone Else' }];
+    const fresh = dedupeAgainstMission([withEmail('Ada Lovelace', 'ada@acme.co'), withEmail('New Person', 'new@acme.co')], prior);
+    assert.deepEqual(fresh.map((r) => r.name), ['New Person']);
+  });
+
+  it('drops an email-less candidate matching an existing linkedin/name key', () => {
+    const prior = [{ email: null, linkedinUrl: 'https://linkedin.com/in/ada', name: 'Ada Lovelace' }];
+    const dupe: ContactRow = { ...row('Ada Lovelace'), linkedinUrl: 'https://linkedin.com/in/ada' };
+    const fresh = dedupeAgainstMission([dupe, row('Brand New')], prior);
+    assert.deepEqual(fresh.map((r) => r.name), ['Brand New']);
+  });
+
+  it('keeps everyone when the mission has no prior contacts', () => {
+    const fresh = dedupeAgainstMission([withEmail('A', 'a@x.co'), withEmail('B', 'b@x.co')], []);
+    assert.equal(fresh.length, 2);
   });
 });

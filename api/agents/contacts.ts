@@ -212,11 +212,36 @@ export default async function handler(req: Request, res: Response) {
       return res.status(502).json({ error: 'no_contacts_found' });
     }
 
+    // Recipient-level dedup across the WHOLE mission: a person enters a mission
+    // exactly once. Re-sourcing (autopilot) rediscovers the same companies and
+    // people; without this they'd become fresh contact docs -> fresh drafts ->
+    // duplicate sends to someone already emailed. Drop any candidate whose
+    // verified email - or LinkedIn/name when there's no email yet - already
+    // belongs to a contact in this mission.
+    const priorContacts = await scope.collection<ContactDoc>('contacts').find({ missionId: mission._id });
+    const fresh = dedupeAgainstMission(rows, priorContacts);
+
+    if (fresh.length === 0) {
+      // Everyone discovered is already in the mission - not a failure, just
+      // nothing new to add. Complete the run cleanly so the pipeline moves on.
+      await completeRun(scope, run._id, {
+        count: 0,
+        withEmail: 0,
+        displayOnly: 0,
+        source: discoverySource,
+        allDuplicates: true,
+        sizeTier: sizeTier ?? 'unknown',
+        candidates: suggestions.length,
+        kept: ranked.rows.length,
+      });
+      return res.status(200).json({ run_id: run._id, contacts: [], source: discoverySource });
+    }
+
     const inserted = await scope
       .collection<ContactDoc>('contacts')
-      .insertMany(rows.map((r) => ({ ...r, _id: newId() })) as InsertDoc<ContactDoc>[]);
+      .insertMany(fresh.map((r) => ({ ...r, _id: newId() })) as InsertDoc<ContactDoc>[]);
 
-    const withEmail = rows.filter((r) => !!r.email).length;
+    const withEmail = fresh.filter((r) => !!r.email).length;
     await completeRun(scope, run._id, {
       count: inserted.length,
       // Split the deliverable rows from the display-only (no verified email) ones
@@ -604,6 +629,23 @@ export function fillWithDisplayOnly(
 
 function contactKey(r: ContactRow): string {
   return `${(r.linkedinUrl ?? '').trim().toLowerCase()}|${r.name.trim().toLowerCase()}`;
+}
+
+/**
+ * Recipient-level dedup across a whole mission: keep only candidates not already
+ * present as a contact in the mission. A person matches an existing contact by
+ * verified email (case-insensitive) - or, when there's no email yet, by the
+ * LinkedIn/name key. This is what stops re-sourcing from re-adding someone we've
+ * already drafted/emailed and producing duplicate sends.
+ */
+export function dedupeAgainstMission(rows: ContactRow[], prior: Pick<ContactDoc, 'email' | 'linkedinUrl' | 'name'>[]): ContactRow[] {
+  const seenEmails = new Set(prior.map((c) => c.email?.trim().toLowerCase()).filter(Boolean) as string[]);
+  const seenKeys = new Set(prior.map((c) => contactKey(c as ContactRow)));
+  return rows.filter((r) => {
+    const email = r.email?.trim().toLowerCase();
+    if (email && seenEmails.has(email)) return false;
+    return !seenKeys.has(contactKey(r));
+  });
 }
 
 // ---------------------------------------------------------------------------
