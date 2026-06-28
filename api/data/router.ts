@@ -137,12 +137,16 @@ router.delete('/missions/:id', async (req, res) => {
 
 // ---- target delete with cascade ----
 // A target (company) owns contacts, evidence, sequences, and agent runs (all
-// carry a denormalized targetId), plus the sent_messages/replies hanging off
-// its contacts. Autopilot + send-due-touches key queued work off missionId and
-// status (not targetId), so deleting only the target doc would leave its
-// contacts' queued sends to go out anyway. Hard-delete the dependents first so
-// removing a target actually stops outreach to that company. Registered before
-// the generic '/:collection/:id' DELETE so it wins for targets.
+// carry a denormalized targetId). Autopilot + send-due-touches key queued work
+// off missionId and status (not targetId), so deleting only the target doc
+// leaves its contacts' queued sends to go out anyway. So we hard-delete the
+// pipeline dependents to stop future outreach - but we deliberately PRESERVE
+// sent history: any sent_messages that already went out (status 'sent'/'bounced')
+// and all replies stay, so the Inbox conversation record survives (it reads
+// replies + sent_messages by id, never joining contacts/targets). Only the
+// still-pending sends (queued/draft) are purged, since those are exactly what
+// must not fire after the target is gone. Registered before the generic
+// '/:collection/:id' DELETE so it wins for targets.
 router.delete('/targets/:id', async (req, res) => {
   const uid = uidOf(req);
   const scope = forUser(uid);
@@ -151,18 +155,17 @@ router.delete('/targets/:id', async (req, res) => {
   const target = await scope.collection(COL.targets).findById(targetId);
   if (!target) return res.status(404).json({ error: 'not_found' });
 
-  // sent_messages + replies hang off the target's contacts (no targetId of their
-  // own), so resolve the contact ids first, then delete by contactId.
+  // sent_messages have no targetId, so resolve the contact ids first. Purge only
+  // the pending rows (queued/draft) - sent/bounced history is kept untouched.
   const contacts = await scope.collection(COL.contacts).find({ targetId } as any);
   const contactIds = contacts.map((c) => c._id);
-  const [sentN, repliesN] = await Promise.all([
-    scope.collection(COL.sentMessages).deleteMany({ contactId: { $in: contactIds } } as any),
-    scope.collection(COL.replies).deleteMany({ contactId: { $in: contactIds } } as any),
-  ]);
+  const purgedSends = await scope
+    .collection(COL.sentMessages)
+    .deleteMany({ contactId: { $in: contactIds }, status: { $in: ['queued', 'draft'] } } as any);
 
   const byTarget: CollectionName[] = [COL.contacts, COL.evidencePacks, COL.emailSequences, COL.agentRuns];
   const counts = await Promise.all(byTarget.map((child) => scope.collection(child).deleteMany({ targetId } as any)));
-  const deleted: Record<string, number> = { [COL.sentMessages]: sentN, [COL.replies]: repliesN };
+  const deleted: Record<string, number> = { pending_sends: purgedSends };
   byTarget.forEach((child, i) => {
     deleted[child] = counts[i];
   });
