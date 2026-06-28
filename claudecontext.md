@@ -27,7 +27,7 @@ The standing guide for how Claude Code should work in this repo. Read it first. 
 ```
 npm run build && npx firebase-tools deploy --only hosting
 ```
-Hosting URL: https://outreachos-495414.web.app — bare `firebase` is not on PATH, use `npx firebase-tools`.
+Primary domain (live site): **https://outreach-os.ca** — this is the canonical URL now. Firebase default URL https://outreachos-495414.web.app still serves the same hosting. Bare `firebase` is not on PATH, use `npx firebase-tools`.
 
 **Backend** (Cloud Run service `outreachos-api`, us-central1):
 ```
