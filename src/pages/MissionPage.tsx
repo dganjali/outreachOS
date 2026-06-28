@@ -1110,7 +1110,12 @@ function AutopilotCockpit({
             <span className="plan-item">
               <GaugeIcon size={14} aria-hidden />
               <span className="plan-k">Today</span>
-              <span className="plan-v">{sentToday} / {policy.daily_send_cap} sent</span>
+              <span className="plan-v">
+                {sentToday} / {policy.daily_send_cap} sent
+                {sentToday >= policy.daily_send_cap && (
+                  <em> · cap reached, resets {formatSendCapReset()}</em>
+                )}
+              </span>
             </span>
           </>
         ) : (
@@ -2421,6 +2426,16 @@ function formatScheduleStamp(iso: string): string {
     hour: 'numeric',
     minute: '2-digit',
   });
+}
+
+/** The daily send counter is keyed on the UTC calendar day (policy.counter.date),
+ *  so it resets at the next UTC midnight. Render that instant in the user's local
+ *  clock: "today at 7:00 PM" / "tomorrow at 7:00 PM". */
+function formatSendCapReset(now: Date = new Date()): string {
+  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
+  const time = next.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  const sameLocalDay = next.toDateString() === now.toDateString();
+  return `${sameLocalDay ? 'today' : 'tomorrow'} at ${time}`;
 }
 
 function suggestEmail(contact: Contact): string {

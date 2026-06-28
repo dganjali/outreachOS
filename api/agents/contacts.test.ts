@@ -4,6 +4,7 @@ import { resolvePoolWithBudget, fillWithDisplayOnly, rankCandidates, narrowIcpBy
 import { defaultContactIcp } from '../_lib/icp';
 import type { ResolvedEmail } from '../_lib/email-resolver';
 import type { ScrapeResult } from '../_lib/web-scrape';
+import type { ContactVerification, Verdict } from '../_lib/contact-verify';
 import type { ContactDoc, MissionDoc, TargetDoc } from '../../shared/schemas';
 import type { ContactIcp } from '../../shared/types';
 
@@ -128,6 +129,97 @@ describe('resolvePoolWithBudget', () => {
     const out = await resolvePoolWithBudget(['A', 'B', 'C'].map(row), 'acme.co', 't1', 3, deps);
     assert.equal(out.rows.length, 3);
     assert.equal(maxInFlight, 3, 'the three needed candidates resolve in parallel');
+  });
+});
+
+// A resolver where everyone is deliverable, plus a verify dep driven by a
+// name→verdict map (anyone unlisted defaults to 'match'). Counts verify calls so
+// we can assert it only runs on reachable people.
+function depsWithVerify(verdicts: Record<string, Verdict>): { deps: ResolvePoolDeps; verifyCalls: () => number } {
+  let verifyCalls = 0;
+  const deps: ResolvePoolDeps = {
+    scrape: async () => emptyScrape,
+    resolve: async (name, domain): Promise<ResolvedEmail> => ({
+      email: `${name.toLowerCase()}@${domain}`,
+      emailStatus: 'verified',
+      likelyEmailPattern: null,
+      resolver: 'verifier',
+    }),
+    verify: async (row): Promise<ContactVerification> => {
+      verifyCalls++;
+      const verdict = verdicts[row.name] ?? 'match';
+      return {
+        verdict,
+        confidence: verdict === 'match' ? 0.9 : 0.2,
+        reason: `${row.name} is a ${verdict}`,
+        research: verdict === 'mismatch' ? [] : [{ fact: `${row.name} ships things`, sourceUrl: 'https://x.co', sourceTitle: 'X' }],
+      };
+    },
+  };
+  return { deps, verifyCalls: () => verifyCalls };
+}
+
+describe('resolvePoolWithBudget - recipient verification gate', () => {
+  it('drops a mismatch and pulls the next candidate', async () => {
+    const pool = ['A', 'B', 'C'].map(row);
+    const { deps } = depsWithVerify({ A: 'mismatch', B: 'match' });
+    const out = await resolvePoolWithBudget(pool, 'acme.co', 't1', 1, deps);
+    assert.deepEqual(out.rows.map((r) => r.name), ['B'], 'A is rejected, B is kept');
+    assert.equal(out.verifiedDropped, 1);
+  });
+
+  it('returns empty (company dropped/replaced) when everyone reachable is a mismatch', async () => {
+    const pool = ['A', 'B', 'C'].map(row);
+    const { deps } = depsWithVerify({ A: 'mismatch', B: 'mismatch', C: 'mismatch' });
+    const out = await resolvePoolWithBudget(pool, 'acme.co', 't1', 1, deps);
+    assert.equal(out.rows.length, 0);
+    assert.equal(out.verifiedDropped, 3);
+  });
+
+  it('keeps weak verdicts (only clear mismatches are dropped)', async () => {
+    const pool = ['A'].map(row);
+    const { deps } = depsWithVerify({ A: 'weak' });
+    const out = await resolvePoolWithBudget(pool, 'acme.co', 't1', 1, deps);
+    assert.deepEqual(out.rows.map((r) => r.name), ['A']);
+    assert.equal(out.rows[0].verification?.verdict, 'weak');
+  });
+
+  it('annotates kept rows with the verdict and person research', async () => {
+    const pool = ['A'].map(row);
+    const { deps } = depsWithVerify({ A: 'match' });
+    const out = await resolvePoolWithBudget(pool, 'acme.co', 't1', 1, deps);
+    const kept = out.rows[0];
+    assert.equal(kept.verification?.verdict, 'match');
+    assert.ok((kept.verification?.confidence ?? 0) > 0.5);
+    assert.ok(kept.verification?.checkedAt instanceof Date);
+    assert.equal(kept.personResearch?.[0].fact, 'A ships things');
+  });
+
+  it('only verifies people who resolved an email', async () => {
+    // A and C resolve, B does not; verify must run on A and C only.
+    let verifyCalls = 0;
+    const deps: ResolvePoolDeps = {
+      scrape: async () => emptyScrape,
+      resolve: async (name, domain): Promise<ResolvedEmail> =>
+        name === 'B'
+          ? { email: null, emailStatus: 'none', likelyEmailPattern: null, resolver: 'none' }
+          : { email: `${name}@${domain}`, emailStatus: 'verified', likelyEmailPattern: null, resolver: 'verifier' },
+      verify: async (): Promise<ContactVerification> => {
+        verifyCalls++;
+        return { verdict: 'match', confidence: 0.9, reason: 'ok', research: [] };
+      },
+    };
+    const out = await resolvePoolWithBudget(['A', 'B', 'C'].map(row), 'acme.co', 't1', 2, deps);
+    assert.deepEqual(out.rows.map((r) => r.name), ['A', 'C']);
+    assert.equal(verifyCalls, 2, 'unreachable B is never verified');
+  });
+
+  it('no verify dep ⇒ unchanged behavior, verifiedDropped is 0', async () => {
+    const { deps } = depsFor(new Set(['A', 'B']));
+    const out = await resolvePoolWithBudget(['A', 'B'].map(row), 'acme.co', 't1', 2, deps);
+    assert.deepEqual(out.rows.map((r) => r.name), ['A', 'B']);
+    assert.equal(out.verifiedDropped, 0);
+    assert.equal(out.rows[0].verification, undefined);
   });
 });
 

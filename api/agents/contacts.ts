@@ -14,6 +14,8 @@ import { resolveCompanyDomain, enrichCompanySize } from '../_lib/company-enrich'
 import { serperEnabled, searchPeoplePool, type PeopleQuerySpec } from '../_lib/serper';
 import { resolveEmail, type ContactEmailFields, type ResolvedEmail } from '../_lib/email-resolver';
 import { scrapeCompanyEmails, type ScrapeResult } from '../_lib/web-scrape';
+import { verifyContactFit, verdictAccepted, type ContactVerification } from '../_lib/contact-verify';
+import { env } from '../_lib/env';
 import {
   isExcludedName,
   normalizeDomain,
@@ -130,7 +132,37 @@ export default async function handler(req: Request, res: Response) {
 
     const ranked = rankCandidates(suggestions, { icp, sizeTier, target, mission, profile });
 
-    const resolved = await resolvePoolWithBudget(ranked.rows, domain, target._id, wanted);
+    // The recipient-verification gate: research each reachable candidate and drop
+    // the ones who don't actually fit the mission (wrong person, former
+    // affiliation, wrong team). Runs inside the resolve walk so it only spends a
+    // web_search on people we could actually email, and a dropped mismatch makes
+    // the walk pull the next candidate - exactly like an unreachable email.
+    const verify = env.CONTACT_VERIFY_ENABLED()
+      ? (row: ContactRow): Promise<ContactVerification> =>
+          verifyContactFit({
+            person: {
+              name: row.name,
+              role: row.role,
+              headline: row.headline,
+              linkedinUrl: row.linkedinUrl,
+              location: row.location,
+            },
+            company: target.companyName,
+            domain,
+            mission: {
+              mode,
+              goal: mission.goal,
+              offerDetails: mission.offerDetails,
+              targetDescription: mission.targetDescription,
+            },
+            icp,
+          })
+      : undefined;
+
+    const resolved = await resolvePoolWithBudget(ranked.rows, domain, target._id, wanted, {
+      ...DEFAULT_RESOLVE_DEPS,
+      verify,
+    });
 
     // Start with the deliverable (verified/likely email) rows, then - if we still
     // haven't reached `wanted` - top up with the best email-less people discovery
@@ -138,7 +170,14 @@ export default async function handler(req: Request, res: Response) {
     // address is far more useful shown (with their LinkedIn / likely pattern) than
     // dropped: the user can still reach them. Only a company where discovery found
     // nobody at all comes back empty.
-    const rows = fillWithDisplayOnly(resolved.rows, ranked.rows, wanted);
+    //
+    // EXCEPTION: when the recipient-verification gate is active we deliberately do
+    // NOT surface display-only people. Those candidates were never verified (the
+    // gate only runs on reachable ones), and the whole point of the gate is that
+    // we only ever put VERIFIED people in front of the user. An unverified,
+    // unreachable contact is exactly the noise this feature exists to remove; the
+    // pipeline's replacement loop backfills the count from the bench instead.
+    const rows = verify ? resolved.rows : fillWithDisplayOnly(resolved.rows, ranked.rows, wanted);
 
     if (rows.length === 0) {
       // Categorize WHERE the company was lost so a "No contacts" drop is
@@ -150,7 +189,12 @@ export default async function handler(req: Request, res: Response) {
           ? 'no_candidates'
           : ranked.rows.length === 0
             ? 'no_candidates_kept'
-            : 'no_email_resolved';
+            : // Everyone reachable failed verification ⇒ the candidates existed but
+              // none actually fit the mission (the "wrong people" case this gate
+              // is for). Distinct from "couldn't find an email" so tuning is clear.
+              resolved.verifiedDropped > 0 && resolved.rows.length === 0
+              ? 'all_unverified'
+              : 'no_email_resolved';
       await failRun(scope, run._id, 'no_contacts_found', {
         dropStage,
         source: discoverySource,
@@ -163,6 +207,7 @@ export default async function handler(req: Request, res: Response) {
         usedAboveCapFallback: ranked.usedFallback,
         attempts: resolved.attempts,
         resolverCounts: resolved.resolverCounts,
+        verifiedDropped: resolved.verifiedDropped,
       });
       return res.status(502).json({ error: 'no_contacts_found' });
     }
@@ -189,6 +234,9 @@ export default async function handler(req: Request, res: Response) {
       usedAboveCapFallback: ranked.usedFallback,
       attempts: resolved.attempts,
       resolverCounts: resolved.resolverCounts,
+      // How many reachable people the recipient-verification gate dropped as a
+      // clear mismatch. A high count means discovery is finding wrong-fit people.
+      verifiedDropped: resolved.verifiedDropped,
     });
     return res.status(200).json({
       run_id: run._id,
@@ -567,6 +615,11 @@ function contactKey(r: ContactRow): string {
 export interface ResolvePoolDeps {
   scrape: (domain: string) => Promise<ScrapeResult>;
   resolve: (name: string, domain: string, existing: ContactEmailFields, scraped: ScrapeResult) => Promise<ResolvedEmail>;
+  /** Recipient-verification gate. Optional: when omitted (unit tests, or the
+   *  feature flag off) the walk keeps every deliverable row exactly as before.
+   *  When present it runs ONLY on candidates that resolved an email, and a
+   *  'mismatch' verdict drops the row so the walk pulls the next candidate. */
+  verify?: (row: ContactRow) => Promise<ContactVerification>;
 }
 
 const DEFAULT_RESOLVE_DEPS: ResolvePoolDeps = {
@@ -584,6 +637,10 @@ export interface ResolvePoolResult {
   rows: ContactRow[];
   attempts: number;
   resolverCounts: Record<ResolverName, number>;
+  // How many reachable candidates the verification gate dropped as a clear
+  // mismatch. 0 when the gate is off. Surfaced via run telemetry so a company
+  // lost to "all wrong people" is distinguishable from "no email found".
+  verifiedDropped: number;
 }
 
 function emptyResolverCounts(): Record<ResolverName, number> {
@@ -605,10 +662,11 @@ export async function resolvePoolWithBudget(
 ): Promise<ResolvePoolResult> {
   const want = Math.max(1, count);
   const resolverCounts = emptyResolverCounts();
-  if (rows.length === 0) return { rows, attempts: 0, resolverCounts };
+  let verifiedDropped = 0;
+  if (rows.length === 0) return { rows, attempts: 0, resolverCounts, verifiedDropped };
   // No domain → can't resolve emails, so we can't ship a deliverable contact.
   // Return empty so the caller drops/replaces this company (no email guesses).
-  if (!domain) return { rows: [], attempts: 0, resolverCounts };
+  if (!domain) return { rows: [], attempts: 0, resolverCounts, verifiedDropped };
 
   let scraped: ScrapeResult;
   try {
@@ -645,26 +703,54 @@ export async function resolvePoolWithBudget(
       )
     );
 
+    // Verify ONLY the candidates that resolved a deliverable email - we never
+    // spend a verification on someone we can't reach. Runs concurrently within
+    // the batch (it is the slow, paid step); a null entry means "not verified"
+    // (no gate, or no email to gate).
+    const verifications = await Promise.all(
+      batch.map((row, j) =>
+        deps.verify && resolved[j].email ? deps.verify(row) : Promise.resolve(null)
+      )
+    );
+
     // Keep deliverable rows in their ranked (batch) order; never exceed the cap.
-    batch.forEach((row, j) => {
+    // A reachable candidate the gate marks a clear mismatch is dropped (and the
+    // walk continues to the next), exactly like an unreachable one.
+    for (let j = 0; j < batch.length; j++) {
       const res = resolved[j];
       resolverCounts[res.resolver] += 1; // telemetry: where each attempt landed
-      if (res.email && kept.length < want) {
-        kept.push({
-          ...row,
-          email: res.email,
-          emailStatus: res.emailStatus,
-          likelyEmailPattern: res.likelyEmailPattern,
-          emailResolver: res.resolver,
-        });
+      if (!res.email) continue;
+      const verification = verifications[j];
+      if (verification && !verdictAccepted(verification)) {
+        verifiedDropped += 1;
+        continue;
       }
-    });
+      if (kept.length >= want) continue;
+      kept.push({
+        ...batch[j],
+        email: res.email,
+        emailStatus: res.emailStatus,
+        likelyEmailPattern: res.likelyEmailPattern,
+        emailResolver: res.resolver,
+        ...(verification
+          ? {
+              verification: {
+                verdict: verification.verdict,
+                confidence: verification.confidence,
+                reason: verification.reason,
+                checkedAt: new Date(),
+              },
+              personResearch: verification.research.length ? verification.research : null,
+            }
+          : {}),
+      });
+    }
   }
 
   // `kept` empty → caller drops/replaces this company (we never ship display-only
-  // rows with no verified email). `attempts`/`resolverCounts` ride along so the
-  // run telemetry can show WHY it came back empty.
-  return { rows: kept, attempts, resolverCounts };
+  // rows with no verified email). `attempts`/`resolverCounts`/`verifiedDropped`
+  // ride along so the run telemetry can show WHY it came back empty.
+  return { rows: kept, attempts, resolverCounts, verifiedDropped };
 }
 
 function clamp01(n: number) {

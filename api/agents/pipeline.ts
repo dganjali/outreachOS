@@ -132,5 +132,6 @@ function serialize(run: PipelineRunDoc) {
     targets: run.targets,
     started_at: run.startedAt,
     completed_at: run.completedAt,
+    daily_reset_at: run.dailyResetAt ?? null,
   };
 }

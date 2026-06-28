@@ -229,6 +229,9 @@ export interface PipelineRunView {
   targets: PipelineTargetView[];
   started_at: string;
   completed_at: string | null;
+  // When paused on the daily cap: ISO time the rolling 24h window frees up, so
+  // the UI can show a specific local resume time. Null when not paused on it.
+  daily_reset_at?: string | null;
 }
 
 export const pipeline = {

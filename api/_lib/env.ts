@@ -58,6 +58,12 @@ export const env = {
   // built-in web_search grounding.
   SERPER_API_KEY: () => process.env.SERPER_API_KEY || null,
 
+  // Recipient verification (api/_lib/contact-verify.ts). The per-person gate that
+  // researches each contact and drops clear mismatches (wrong person, former
+  // affiliation, wrong team) before drafting. On by default; set to '0'/'false'
+  // to disable (skips the extra web_search + LLM call per kept contact).
+  CONTACT_VERIFY_ENABLED: () => !/^(0|false|off)$/i.test(process.env.CONTACT_VERIFY_ENABLED ?? ''),
+
   // emailfinder.dev (optional) - SMTP-verified email resolution. When set, the
   // contacts agent resolves a real, deliverable email instead of guessing.
   EMAILFINDER_API_KEY: () => process.env.EMAILFINDER_API_KEY || null,

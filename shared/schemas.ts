@@ -290,6 +290,26 @@ export interface ContactDoc extends BaseDoc {
   seniority: string | null;
   headline: string | null;
   location: string | null;
+  // Per-recipient verification (api/_lib/contact-verify.ts). Confirms THIS
+  // specific person actually matches the mission's hard requirement (current
+  // affiliation, the right role, not a former/graduated/wrong-team person)
+  // BEFORE we draft and send. A 'mismatch' contact is dropped, never surfaced -
+  // so this only ever rides on contacts we kept. unset/null ⇒ not verified
+  // (legacy docs, or verification disabled).
+  verification?: {
+    verdict: 'match' | 'weak' | 'mismatch';
+    confidence: number; // 0..1
+    reason: string;
+    checkedAt: Date;
+  } | null;
+  // Individualized research about THIS person, gathered during verification and
+  // surfaced to the draft as recipient signals (assemble.ts) so the email
+  // references the human, not just their employer. Sourced facts only.
+  personResearch?: Array<{
+    fact: string;
+    sourceUrl: string | null;
+    sourceTitle: string | null;
+  }> | null;
 }
 
 export interface EvidencePackDoc extends BaseDoc {
@@ -519,6 +539,10 @@ export interface PipelineRunDoc extends BaseDoc {
   cursor: { targetIndex: number; step: 'research' | 'evidence' | 'contacts' | 'sequence'; contactIndex?: number } | null;
   note: string | null;
   error: string | null;
+  // When status is 'paused' on the daily agent-run cap: the moment that rolling
+  // 24h window frees up enough to resume (runs.ts:dailyResetAt). Null otherwise.
+  // The client renders it in the user's local time instead of a vague "tomorrow".
+  dailyResetAt?: Date | null;
   // Bumped on every persisted step; a stale heartbeat means the driver died and
   // the run is safe to resume.
   heartbeatAt: Date;

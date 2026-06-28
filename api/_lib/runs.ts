@@ -23,10 +23,37 @@ export async function getPlanLimits(scope: UserScope): Promise<PlanLimits> {
  * guard. Both scale with the user's plan. A 'daily' code in the response lets
  * the client distinguish "wait a minute" from "you're out for the day → upgrade".
  */
+const DAY_MS = 86_400_000;
+
+/**
+ * When the daily agent-run cap will free up enough for one more call. The cap is
+ * a SLIDING 24h window (not a midnight reset), so capacity returns as the oldest
+ * runs age out. This is the moment the rolling count drops back below the plan
+ * limit: the run that must expire is the `(perDay - limit + 1)`-th oldest still
+ * inside the window, and capacity returns 24h after it started. Returns null when
+ * the caller isn't actually over the cap or the window is unexpectedly empty.
+ */
+export async function dailyResetAt(
+  scope: UserScope,
+  limit: number,
+  perDay: number,
+  now: number = Date.now()
+): Promise<Date | null> {
+  if (perDay < limit) return null;
+  const ageOutCount = perDay - limit + 1; // runs that must expire to get back under cap
+  const oldest = await scope.collection<AgentRunDoc>('agent_runs').find(
+    { startedAt: { $gte: new Date(now - DAY_MS) } },
+    { sort: { startedAt: 1 }, limit: ageOutCount }
+  );
+  const pivot = oldest[oldest.length - 1];
+  if (!pivot?.startedAt) return null;
+  return new Date(new Date(pivot.startedAt).getTime() + DAY_MS);
+}
+
 export async function checkRateLimit(scope: UserScope, res: Response): Promise<boolean> {
   const now = Date.now();
   const minuteAgo = new Date(now - 60_000);
-  const dayAgo = new Date(now - 86_400_000);
+  const dayAgo = new Date(now - DAY_MS);
 
   const runs = scope.collection<AgentRunDoc>('agent_runs');
   const [limits, perMinute, perDay] = await Promise.all([
@@ -44,10 +71,16 @@ export async function checkRateLimit(scope: UserScope, res: Response): Promise<b
     return false;
   }
   if (perDay >= limits.agentRunsPerDay) {
+    const resetAt = await dailyResetAt(scope, limits.agentRunsPerDay, perDay, now);
     res.status(429).json({
       error: 'rate_limit_exceeded',
       scope: 'daily',
-      detail: `Daily agent-run limit reached (${limits.agentRunsPerDay}/day on your plan). Upgrade for more.`,
+      // Keep the word "daily" so callers (pipeline classify) can detect it.
+      detail: `Daily agent-run limit reached (${limits.agentRunsPerDay}/day on your plan).${
+        resetAt ? ` Resets ${resetAt.toISOString()}.` : ''
+      } Upgrade for more.`,
+      // ISO timestamp so the client can render it in the user's local time.
+      resetAt: resetAt ? resetAt.toISOString() : null,
     });
     return false;
   }

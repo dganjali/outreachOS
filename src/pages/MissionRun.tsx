@@ -97,6 +97,9 @@ export function MissionRun() {
   const targets = targetsOf(run);
   const isLive = phase === 'targeting' || phase === 'running';
   const note = run?.note ?? '';
+  // Specific reset time for the daily cap (rolling 24h window), rendered in the
+  // user's local time. Falls back to "tomorrow" only if the server didn't send one.
+  const resetLabel = formatResetTime(run?.daily_reset_at ?? null);
   // People mode: each target IS a person (their company carried for research), so
   // the launch copy, the count knob, and the progress list all speak "people".
   const isPeople = mission?.find_mode === 'people';
@@ -513,7 +516,7 @@ export function MissionRun() {
             {phase === 'done'
               ? 'Pipeline complete.'
               : phase === 'paused'
-                ? 'Paused, daily limit reached.'
+                ? `Paused, daily limit reached. Resumes ${resetLabel}.`
                 : phase === 'canceled'
                   ? 'Stopped. Finished targets are saved.'
                   : phase === 'error'
@@ -542,7 +545,7 @@ export function MissionRun() {
       {phase === 'paused' && (
         <div className="run-banner warn">
           You've hit your daily agent-run limit. The finished targets below are ready to use; the rest
-          resume tomorrow. <Link to={`/missions/${id}`}>Go to mission</Link>
+          resume {resetLabel}. <Link to={`/missions/${id}`}>Go to mission</Link>
         </div>
       )}
       {phase === 'error' && (
@@ -690,4 +693,19 @@ function fmt(s: number): string {
   const m = Math.floor(s / 60);
   const sec = s % 60;
   return `${m}:${sec.toString().padStart(2, '0')}`;
+}
+
+/** Render the daily-cap reset time in the user's local clock: "today at 3:42 PM",
+ *  "tomorrow at 9:15 AM", or "on Jul 2 at 9:15 AM" for anything further out.
+ *  Falls back to "tomorrow" when the server didn't supply a timestamp. */
+function formatResetTime(iso: string | null): string {
+  if (!iso) return 'tomorrow';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return 'tomorrow';
+  const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  const startOfDay = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const dayDiff = Math.round((startOfDay(d) - startOfDay(new Date())) / 86_400_000);
+  if (dayDiff <= 0) return `today at ${time}`;
+  if (dayDiff === 1) return `tomorrow at ${time}`;
+  return `on ${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} at ${time}`;
 }

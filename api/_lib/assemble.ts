@@ -192,6 +192,10 @@ export async function assembleDraftContext(
   const facts = await assembleAllowedFacts(scope, uid, persona?._id ?? null, target._id, retrievalQuery, {
     excludedFactIds: persona?.excludedFactIds ?? [],
     recipient: { role: contact.role, headline: contact.headline },
+    // Individualized research from the verification gate - facts about THIS
+    // person, so the draft can reference the human, not just their employer.
+    personResearch: contact.personResearch ?? null,
+    contactId: contact._id,
   }, cache);
   const exemplarDocs = persona ? await fetchExemplars(scope, uid, persona._id, retrievalQuery, cache) : [];
   // Sender identity - anchors a real sign-off on every email (engine.ts).
@@ -242,7 +246,12 @@ export async function assembleAllowedFacts(
   personaId: string | null,
   targetId: string,
   query: string,
-  opts: { excludedFactIds?: string[]; recipient?: { role?: string | null; headline?: string | null } } = {},
+  opts: {
+    excludedFactIds?: string[];
+    recipient?: { role?: string | null; headline?: string | null };
+    personResearch?: ContactDoc['personResearch'];
+    contactId?: string;
+  } = {},
   cache?: DraftContextCache
 ): Promise<AllowedFact[]> {
   const facts: AllowedFact[] = [];
@@ -253,6 +262,19 @@ export async function assembleAllowedFacts(
   const contextFacts = await fetchContextAllowedFacts(scope, uid, personaId, query, excluded, cache);
   for (const f of contextFacts) {
     facts.push(f);
+  }
+
+  // Recipient-specific research from the verification gate. Tagged source
+  // 'evidence' so the engine groups it with the recipient's signals (what to
+  // LEAD on), not the sender's proof. A stable id keeps it citable/groundable.
+  for (const [i, r] of (opts.personResearch ?? []).entries()) {
+    if (!r?.fact?.trim()) continue;
+    facts.push({
+      id: `person:${opts.contactId ?? targetId}:${i}`,
+      claim: r.fact,
+      source: 'evidence',
+      signal: 'recipient',
+    });
   }
 
   const packs = await scope.collection<EvidencePackDoc>('evidence_packs').find({ targetId });

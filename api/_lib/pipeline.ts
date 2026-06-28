@@ -75,7 +75,15 @@ export const STALE_HEARTBEAT_MS = 90_000; // older than this ⇒ driver is dead
 // Typed errors so a step can tell "wait a minute" from "stop for today".
 // ---------------------------------------------------------------------------
 export class PipelineRateLimitError extends Error {} // per-minute: retryable
-export class PipelineDailyLimitError extends Error {} // per-day: pause the run
+export class PipelineDailyLimitError extends Error {
+  // ISO timestamp when the rolling daily window frees up, surfaced from the 429
+  // body so the paused run can tell the user a specific resume time.
+  resetAt: string | null;
+  constructor(message: string, resetAt: string | null = null) {
+    super(message);
+    this.resetAt = resetAt;
+  }
+} // per-day: pause the run
 
 // ---------------------------------------------------------------------------
 // Executors - the side-effecting calls the driver runs. Real ones reuse the
@@ -107,7 +115,10 @@ function classify<T = Record<string, unknown>>(result: { status: number; body: u
   const body = (result.body ?? {}) as Record<string, unknown>;
   if (result.status === 429) {
     const detail = String(body.detail ?? body.error ?? '');
-    if (/daily/i.test(detail)) throw new PipelineDailyLimitError(detail || 'daily_limit');
+    if (/daily/i.test(detail)) {
+      const resetAt = typeof body.resetAt === 'string' ? body.resetAt : null;
+      throw new PipelineDailyLimitError(detail || 'daily_limit', resetAt);
+    }
     throw new PipelineRateLimitError(detail || 'rate_limit');
   }
   if (result.status >= 400) {
@@ -188,6 +199,9 @@ export interface ProcContext {
   minuteRetryWaitMs?: number;
   /** Set true when any step hits the per-day cap; stops new work. */
   paused: boolean;
+  /** ISO time the rolling daily window frees up, captured from the daily-limit
+   *  error so the paused run can show a specific resume time. */
+  dailyResetAt?: string | null;
   /** Set true when an external cancel is observed; stops new work. */
   canceled: boolean;
   /** Persist target/note progress (never status) - safe to race with cancel. */
@@ -224,16 +238,30 @@ function finishProcessing(r: PipelineRunDoc): PipelineRunDoc {
   r.status = 'done';
   r.cursor = null;
   r.note = null;
+  r.dailyResetAt = null; // cleared: a finished run has no pending reset
   r.completedAt = new Date();
   markTotalMs(r);
   return r;
 }
 
-function pauseForDaily(r: PipelineRunDoc): PipelineRunDoc {
+function pauseForDaily(r: PipelineRunDoc, ctx?: ProcContext): PipelineRunDoc {
   r.status = 'paused';
   r.cursor = null;
-  r.note = 'Daily agent-run limit reached - finished targets are ready; the rest resume tomorrow.';
+  // The rolling-window reset time (when known) so the client can show a specific
+  // resume time instead of a vague "tomorrow".
+  const resetAt = ctx?.dailyResetAt ?? null;
+  r.dailyResetAt = resetAt ? new Date(resetAt) : null;
+  r.note = resetAt
+    ? 'Daily agent-run limit reached - finished targets are ready; the rest resume automatically once your limit resets.'
+    : 'Daily agent-run limit reached - finished targets are ready; the rest resume when your limit resets.';
   return r; // per-target statuses preserved so a later run resumes exactly here
+}
+
+/** Record a per-day pause: stop new work and capture the reset time (if the
+ *  error carried one) so the run can report a specific resume time. */
+function recordDailyPause(ctx: ProcContext, e: PipelineDailyLimitError): void {
+  ctx.paused = true;
+  if (e.resetAt) ctx.dailyResetAt = e.resetAt;
 }
 
 /** A target is finished once its aggregate draft status is terminal; every
@@ -348,7 +376,7 @@ async function runEvidence(r: PipelineRunDoc, t: PipelineTargetState, ctx: ProcC
     step(t, 'evidence', 'done');
   } catch (e) {
     if (e instanceof PipelineDailyLimitError) {
-      ctx.paused = true;
+      recordDailyPause(ctx, e);
       step(t, 'evidence', 'queued'); // revert so resume re-runs only this sub-step
       return;
     }
@@ -370,7 +398,7 @@ async function runContacts(r: PipelineRunDoc, t: PipelineTargetState, ctx: ProcC
     selectContacts(t, contacts, r.config.topContacts);
   } catch (e) {
     if (e instanceof PipelineDailyLimitError) {
-      ctx.paused = true;
+      recordDailyPause(ctx, e);
       step(t, 'contacts', 'queued');
       return;
     }
@@ -440,7 +468,7 @@ async function processTarget(
         markFirstDraft(r);
       } catch (e) {
         if (e instanceof PipelineDailyLimitError) {
-          ctx.paused = true;
+          recordDailyPause(ctx, e);
           t.sequences[i] = 'queued';
           await ctx.persist(r);
           return;
@@ -532,7 +560,7 @@ async function appendReplacementTargets(
         );
         candidates = found.filter((f) => !have.has(f.id));
       } catch (e) {
-        if (e instanceof PipelineDailyLimitError) ctx.paused = true;
+        if (e instanceof PipelineDailyLimitError) recordDailyPause(ctx, e);
         candidates = [];
       }
     }
@@ -674,7 +702,8 @@ export async function runPipeline(run: PipelineRunDoc, ctx: ProcContext): Promis
       await ctx.persistStatus(r);
     } catch (e) {
       if (e instanceof PipelineDailyLimitError) {
-        pauseForDaily(r);
+        recordDailyPause(ctx, e);
+        pauseForDaily(r, ctx);
         await ctx.persistStatus(r);
         return r;
       }
@@ -698,7 +727,7 @@ export async function runPipeline(run: PipelineRunDoc, ctx: ProcContext): Promis
 
   if (ctx.canceled) return r; // cancelPipeline already wrote status='canceled'
   if (ctx.paused) {
-    pauseForDaily(r);
+    pauseForDaily(r, ctx);
     await ctx.persistStatus(r);
     return r;
   }
@@ -725,6 +754,7 @@ function statusFields(r: PipelineRunDoc) {
     cursor: r.cursor,
     note: r.note,
     error: r.error,
+    dailyResetAt: r.dailyResetAt ?? null,
     metrics: r.metrics,
     completedAt: r.completedAt,
     heartbeatAt: new Date(),
