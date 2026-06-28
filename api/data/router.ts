@@ -135,6 +135,42 @@ router.delete('/missions/:id', async (req, res) => {
   res.json({ ok: true, deleted });
 });
 
+// ---- target delete with cascade ----
+// A target (company) owns contacts, evidence, sequences, and agent runs (all
+// carry a denormalized targetId), plus the sent_messages/replies hanging off
+// its contacts. Autopilot + send-due-touches key queued work off missionId and
+// status (not targetId), so deleting only the target doc would leave its
+// contacts' queued sends to go out anyway. Hard-delete the dependents first so
+// removing a target actually stops outreach to that company. Registered before
+// the generic '/:collection/:id' DELETE so it wins for targets.
+router.delete('/targets/:id', async (req, res) => {
+  const uid = uidOf(req);
+  const scope = forUser(uid);
+  const targetId = req.params.id;
+
+  const target = await scope.collection(COL.targets).findById(targetId);
+  if (!target) return res.status(404).json({ error: 'not_found' });
+
+  // sent_messages + replies hang off the target's contacts (no targetId of their
+  // own), so resolve the contact ids first, then delete by contactId.
+  const contacts = await scope.collection(COL.contacts).find({ targetId } as any);
+  const contactIds = contacts.map((c) => c._id);
+  const [sentN, repliesN] = await Promise.all([
+    scope.collection(COL.sentMessages).deleteMany({ contactId: { $in: contactIds } } as any),
+    scope.collection(COL.replies).deleteMany({ contactId: { $in: contactIds } } as any),
+  ]);
+
+  const byTarget: CollectionName[] = [COL.contacts, COL.evidencePacks, COL.emailSequences, COL.agentRuns];
+  const counts = await Promise.all(byTarget.map((child) => scope.collection(child).deleteMany({ targetId } as any)));
+  const deleted: Record<string, number> = { [COL.sentMessages]: sentN, [COL.replies]: repliesN };
+  byTarget.forEach((child, i) => {
+    deleted[child] = counts[i];
+  });
+  await scope.collection(COL.targets).deleteById(targetId);
+
+  res.json({ ok: true, deleted });
+});
+
 // ---- list with filter/order/limit ----
 router.post('/:collection/query', async (req, res) => {
   const collection = req.params.collection;
