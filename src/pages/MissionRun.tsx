@@ -28,6 +28,11 @@ const DEFAULT_CONTACTS = 1;
 const MIN_CONTACTS = 1;
 const MAX_CONTACTS = 5;
 const POLL_MS = 2000;
+// A run paused on the daily cap resumes server-side (the resume sweeper re-drives
+// it once the rolling window frees or the user upgrades). We keep polling so the
+// UI picks that up without a manual refresh, but slowly - a resume is minutes
+// away at best, so 2s polling for a possibly-hours-long pause is pure waste.
+const PAUSED_POLL_MS = 30_000;
 
 // The launch screen exposes one knob - how many companies to pursue (= top_n,
 // the ones we research, find contacts for, and draft). We discover a larger
@@ -219,9 +224,12 @@ export function MissionRun() {
   // this UI and the Cloud Run driver the poll keeps warm (the driver only gets
   // CPU while a request is in flight). Worker timers aren't throttled, so the
   // run keeps advancing while the tab is backgrounded - as long as it stays open.
-  const liveStatus = run?.status === 'pending' || run?.status === 'running';
+  // Poll while the run is live OR paused: a paused run resumes server-side, and
+  // the client must keep watching to reflect it (slowly - see PAUSED_POLL_MS).
+  const pollStatus = run?.status; // 'pending' | 'running' | 'paused' | terminal
+  const shouldPoll = pollStatus === 'pending' || pollStatus === 'running' || pollStatus === 'paused';
   useEffect(() => {
-    if (!liveStatus) return;
+    if (!shouldPoll) return;
     let cancelled = false;
 
     const poll = async () => {
@@ -237,7 +245,7 @@ export function MissionRun() {
 
     const worker = new Worker(new URL('../workers/poll-timer.ts', import.meta.url), { type: 'module' });
     worker.onmessage = () => void poll();
-    worker.postMessage({ type: 'start', intervalMs: POLL_MS });
+    worker.postMessage({ type: 'start', intervalMs: pollStatus === 'paused' ? PAUSED_POLL_MS : POLL_MS });
 
     // Snap to the latest state the instant the tab is refocused, rather than
     // waiting for the next tick.
@@ -254,7 +262,7 @@ export function MissionRun() {
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('focus', onVisible);
     };
-  }, [liveStatus]);
+  }, [shouldPoll, pollStatus]);
 
   const launch = useCallback(async () => {
     if (!mission) return;

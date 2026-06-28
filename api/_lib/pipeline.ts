@@ -940,6 +940,32 @@ export async function startPipeline(args: StartPipelineArgs): Promise<PipelineRu
   return run as PipelineRunDoc;
 }
 
+/**
+ * Resume a run that paused on the daily agent-run cap. Flips it back to
+ * `pending` (clearing the captured reset time) and drives it. We re-drive
+ * rather than just unblock because nothing else ever moves a `paused` run:
+ * `runPipeline`/`driveLoop` early-return on any HALTED status, and both
+ * `resumeIfStale` and the resume sweeper otherwise only act on pending/running
+ * runs - so without this a paused run is orphaned forever.
+ *
+ * The next agent call re-checks the caller's CURRENT daily limit, so this is
+ * correct for both ways a paused run should free up: the rolling 24h window
+ * draining, and a plan upgrade raising the cap. If the caller is still over,
+ * the run simply re-pauses with a fresh reset time. Idempotent via `active`.
+ */
+export async function resumePausedRun(user: AuthedUser, runId: string): Promise<boolean> {
+  if (active.has(runId)) return false;
+  const scope = forUser(user.id);
+  const run = await loadRun(scope, runId);
+  if (!run || run.status !== 'paused') return false;
+  await scope.collection<PipelineRunDoc>(PIPELINE_RUNS).updateById(runId, {
+    status: 'pending',
+    dailyResetAt: null,
+    heartbeatAt: new Date(),
+  } as never);
+  return driveStaleRun(user, runId);
+}
+
 /** If a run claims to be live but its driver has gone silent, re-drive it. */
 export function resumeIfStale(user: AuthedUser, run: PipelineRunDoc): void {
   if (run.status !== 'pending' && run.status !== 'running') return;

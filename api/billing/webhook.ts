@@ -9,8 +9,9 @@ import type { Request, Response } from 'express';
 import type Stripe from 'stripe';
 import { adminDb, COL } from '../_lib/db';
 import { env } from '../_lib/env';
-import type { ProfileDoc } from '../../shared/schemas';
+import type { ProfileDoc, PipelineRunDoc } from '../../shared/schemas';
 import type { PlanId, PlanStatus } from '../../shared/plans';
+import { resolvePlan } from '../../shared/plans';
 import { getStripe, planForPriceId, BillingNotConfiguredError } from './stripe';
 
 export default async function handler(req: Request, res: Response) {
@@ -127,6 +128,33 @@ async function applySubscription(sub: Stripe.Subscription) {
     stripeSubscriptionId: sub.id,
     planRenewsAt: renewsAt,
   });
+
+  // A run paused on the daily agent-run cap stores the reset time computed under
+  // the OLD plan's limit, so it would otherwise stay paused until that (possibly
+  // ~24h away) instant even though the upgrade just gave the user fresh headroom.
+  // Clear that reset time when the new plan grants paid access so the resume
+  // sweeper picks the run up on its next pass and re-checks the new, higher cap.
+  if (resolvePlan(plan, status) !== 'free') {
+    const userId = sub.metadata?.userId ?? (await userIdForCustomer(customerId));
+    if (userId) await clearDailyPauseForUser(userId);
+  }
+}
+
+/** Resolve our internal user id from a Stripe customer id via the profile. */
+async function userIdForCustomer(customerId: string): Promise<string | null> {
+  const db = await adminDb();
+  const profile = await db
+    .collection<ProfileDoc>(COL.profiles)
+    .findOne({ stripeCustomerId: customerId }, { projection: { userId: 1 } });
+  return profile?.userId ?? null;
+}
+
+/** Make this user's daily-cap-paused runs eligible for immediate resume. */
+async function clearDailyPauseForUser(userId: string): Promise<void> {
+  const db = await adminDb();
+  await db
+    .collection<PipelineRunDoc>(COL.pipelineRuns)
+    .updateMany({ userId, status: 'paused' }, { $set: { dailyResetAt: null } });
 }
 
 async function updateBillingByCustomerId(customerId: string, fields: BillingFields) {

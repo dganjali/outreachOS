@@ -13,7 +13,7 @@
 import type { Request, Response } from 'express';
 import { adminDb } from '../_lib/db';
 import { requireCronSecret } from '../_lib/auth';
-import { driveStaleRun, STALE_HEARTBEAT_MS } from '../_lib/pipeline';
+import { driveStaleRun, resumePausedRun, STALE_HEARTBEAT_MS } from '../_lib/pipeline';
 import type { PipelineRunDoc } from '../../shared/schemas';
 
 // Bounded per tick. Runs are driven concurrently (independent users), so wall
@@ -26,10 +26,23 @@ export default async function handler(req: Request, res: Response) {
   if (!requireCronSecret(req, res)) return;
 
   const db = await adminDb();
-  const cutoff = new Date(Date.now() - STALE_HEARTBEAT_MS);
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - STALE_HEARTBEAT_MS);
   const stale = await db
     .collection<PipelineRunDoc>('pipeline_runs')
-    .find({ status: { $in: ['pending', 'running'] }, heartbeatAt: { $lt: cutoff } })
+    .find({
+      $or: [
+        // Live runs whose in-process driver has gone silent (tab closed, instance
+        // recycled) - the original job of this sweep.
+        { status: { $in: ['pending', 'running'] }, heartbeatAt: { $lt: cutoff } },
+        // Runs paused on the daily agent-run cap whose rolling 24h window has since
+        // freed up (reset time passed, or never captured). Without this they never
+        // resume - the pause is permanent. A plan upgrade also frees these: the
+        // billing webhook clears dailyResetAt on the user's paused runs so they
+        // match here on the next sweep, and the re-drive re-checks the new cap.
+        { status: 'paused', $or: [{ dailyResetAt: { $lte: now } }, { dailyResetAt: null }] },
+      ],
+    })
     .sort({ heartbeatAt: 1 })
     .limit(BATCH)
     .toArray();
@@ -43,7 +56,14 @@ export default async function handler(req: Request, res: Response) {
       slice.map(async (run) => {
         const uid = (run as PipelineRunDoc & { userId: string }).userId;
         try {
-          if (await driveStaleRun({ id: uid, email: null }, run._id)) resumed++;
+          // A paused run must first be flipped back to a live status (driveStaleRun
+          // would otherwise bail on its HALTED status); a stale live run re-drives
+          // from where it stopped.
+          const driven =
+            run.status === 'paused'
+              ? await resumePausedRun({ id: uid, email: null }, run._id)
+              : await driveStaleRun({ id: uid, email: null }, run._id);
+          if (driven) resumed++;
         } catch (err) {
           errors.push({ id: run._id, error: err instanceof Error ? err.message : 'resume_failed' });
         }
