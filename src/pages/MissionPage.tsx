@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
@@ -14,6 +14,9 @@ import { agents, gmail } from '../lib/api';
 import { isPaidPlan } from '../../shared/plans';
 import { asScore } from '../lib/score';
 import { CsvImport } from '../components/CsvImport';
+import { PersonaWizard } from '../components/persona/PersonaWizard';
+import { listContextFacts, addContextFact, deleteContextFact } from '../lib/personas';
+import { uploadAsset, MAX_ASSET_BYTES } from '../lib/profileAssets';
 import type {
   Mission,
   Target,
@@ -24,6 +27,7 @@ import type {
   SentMessage,
   Reply,
   CampaignPolicy,
+  ContextFact,
 } from '../types';
 
 const MODE_LABEL: Record<string, string> = {
@@ -740,6 +744,8 @@ export function MissionPage() {
       />
 
       <MissionBriefCard mission={mission} onSaved={loadMission} />
+
+      {user?.id && <MissionMemoryCard mission={mission} userId={user.id} />}
 
       {error && (
         <div className="banner-error" role="alert">
@@ -2586,6 +2592,163 @@ function MissionBriefCard({
           </div>
         )}
       </div>
+    </section>
+  );
+}
+
+// Mission memory: the campaign-specific substance the drafts can cite (facts +
+// an info-packet like a sponsorship deck or rate card), plus a way to tune the
+// mission's voice against THIS mission's real offer/audience. Durable proof
+// about you lives in the Memory bank (ME → Memory bank), not here.
+function MissionMemoryCard({ mission, userId }: { mission: Mission; userId: string }) {
+  const [facts, setFacts] = useState<ContextFact[]>([]);
+  const [newFact, setNewFact] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [tuning, setTuning] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const reload = useCallback(async () => {
+    const all = await listContextFacts(userId, mission.id);
+    setFacts(all.filter((f) => f.scope === 'mission' && f.mission_id === mission.id));
+  }, [userId, mission.id]);
+
+  useEffect(() => {
+    reload().catch((e) => setErr(e instanceof Error ? e.message : 'Could not load mission memory'));
+  }, [reload]);
+
+  async function addFact() {
+    const claim = newFact.trim();
+    if (!claim) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await addContextFact(userId, { claim, scope: 'mission', missionId: mission.id, provenance: 'manual' });
+      setNewFact('');
+      await reload();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not add that fact');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeFact(id: string) {
+    setBusy(true);
+    try {
+      await deleteContextFact(id);
+      await reload();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not remove that fact');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > MAX_ASSET_BYTES) {
+      setErr(`File too large. Max ${(MAX_ASSET_BYTES / 1024 / 1024).toFixed(0)}MB.`);
+      return;
+    }
+    setUploading(true);
+    setErr(null);
+    try {
+      const asset = await uploadAsset({ userId, kind: 'context_dump', file, scope: 'mission', missionId: mission.id });
+      // Auto-route: an offer/pitch doc lands on the mission; a personal doc
+      // (resume/bio) lands in the shared memory bank instead.
+      const r = await agents.extractContext({ asset_id: asset.id, mission_id: mission.id });
+      if (r.scope === 'mission') {
+        toast.success(`Added ${r.facts.length} fact${r.facts.length === 1 ? '' : 's'} to this mission.`);
+      } else {
+        toast.success(`Looks personal - added ${r.facts.length} fact${r.facts.length === 1 ? '' : 's'} to your Memory bank.`);
+      }
+      await reload();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not read that file');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  if (tuning && mission.persona_id) {
+    return (
+      <section className="mission-overview-card">
+        <PersonaWizard
+          userId={userId}
+          personaId={mission.persona_id}
+          missionId={mission.id}
+          embedded
+          onCancel={() => setTuning(false)}
+          onDone={() => setTuning(false)}
+        />
+      </section>
+    );
+  }
+
+  return (
+    <section className="mission-overview-card mission-memory">
+      <div className="mission-memory-head">
+        <h3 className="mission-memory-title">Mission memory</h3>
+        {mission.persona_id && (
+          <button type="button" className="pw-btn-ghost" onClick={() => setTuning(true)}>
+            <Sparkles size={13} aria-hidden /> Tune voice for this mission
+          </button>
+        )}
+      </div>
+      <p className="mission-memory-hint">
+        Facts and docs specific to this campaign - what you're offering, the deck, the numbers. Drafts can cite these
+        alongside your Memory bank. A resume or bio you drop here is auto-filed to your Memory bank instead.
+      </p>
+
+      <div className="pw-calib-row">
+        <input
+          className="pw-input"
+          value={newFact}
+          onChange={(e) => setNewFact(e.target.value)}
+          placeholder="A specific, citable fact for this campaign"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              addFact();
+            }
+          }}
+        />
+        <button type="button" className="pw-btn-add" onClick={addFact} disabled={busy || !newFact.trim()}>
+          <Plus size={14} /> Add
+        </button>
+        <button type="button" className="pw-btn-add" onClick={() => fileRef.current?.click()} disabled={uploading}>
+          {uploading ? <X size={14} className="pw-spin" /> : <Paperclip size={14} />} Upload
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          hidden
+          accept=".pdf,.doc,.docx,.txt,.md,.rtf,image/*"
+          onChange={onFile}
+          aria-label="Upload an info-packet for this mission"
+        />
+      </div>
+
+      {err && <p className="pw-error">{err}</p>}
+
+      {facts.length > 0 ? (
+        <ul className="pw-ov-list mission-memory-list">
+          {facts.map((f) => (
+            <li key={f.id} className="mission-memory-fact">
+              <span>{f.claim}</span>
+              <button type="button" className="mission-memory-fact-del" onClick={() => removeFact(f.id)} aria-label="Remove fact">
+                <Trash2 size={13} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="pw-empty">No mission facts yet - add what makes this campaign concrete.</p>
+      )}
     </section>
   );
 }

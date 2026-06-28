@@ -162,6 +162,7 @@ async function persistEnrichmentFacts(
     const doc: InsertDoc<ContextFactDoc> = {
       _id: newId(),
       scope: 'person',
+      missionId: null,
       personaId: null,
       type: c.type,
       claim: c.claim,

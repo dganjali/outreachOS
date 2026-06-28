@@ -1,9 +1,11 @@
-// The Context tab - what the agent knows about *you*, shared across every voice.
+// The Memory bank tab - what the agent durably knows about *you*, shared across
+// every voice and every mission.
 //
-// One source of truth: person-level context facts (the same facts your Voices
-// read when drafting). Add a fact here and any voice can cite it; add one in a
-// voice and it shows up here. No web-scraped guesses - everything is entered or
-// confirmed by you. Identity + links round it out.
+// One source of truth: person-level context facts (the same facts every mission
+// draws on when drafting). Add a fact here and any mission can cite it. No
+// web-scraped guesses - everything is entered or confirmed by you. Identity +
+// links round it out. Campaign-specific substance (a sponsorship deck, a rate
+// card) lives on the mission instead, not here.
 
 import { useRef, useState } from 'react';
 import { Plus, X, Sparkles, Loader2, FileText, UserSearch } from 'lucide-react';

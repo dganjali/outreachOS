@@ -256,7 +256,7 @@ export function Me() {
           className={`me-tab ${tab === 'context' ? 'me-tab-active' : ''}`}
           onClick={() => setTab('context')}
         >
-          Context
+          Memory bank
         </button>
         <button
           type="button"

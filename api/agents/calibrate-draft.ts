@@ -1,19 +1,24 @@
-// Calibrate-draft agent - generates ONE real draft for the persona-onboarding
-// calibration step. Instead of asking the user to write/paste an email, we run
-// the full personalization engine once so calibration always starts from a
-// genuine draft to react to.
+// Calibrate-draft agent - generates ONE real draft for the voice calibration
+// step. Instead of asking the user to write/paste an email, we run the full
+// personalization engine once so calibration always starts from a genuine draft
+// to react to.
 //
-// Recipient resolution, best → fallback:
-//   1. The most-recent real contact the user already has (contact→target→mission).
-//   2. If none exists yet (fresh account), we SYNTHESIZE a representative
-//      recipient from the persona's own offer/audience (and most-recent mission,
-//      if any) so the user still reacts to a real-looking draft. The user never
-//      has to write their own - they only give feedback, which is learned as
-//      taste via extract-style (chat_instructions → StyleProfile).
+// A voice carries only style (no offer/audience), so the offer + audience the
+// draft is calibrated against comes from one of two entry points:
+//   • STANDALONE  - the voice wizard passes a typed `sample` {offer, audience,
+//     geo}. Grounding is the person-level memory bank only (no mission facts).
+//   • PER-MISSION - the caller passes `mission_id`. Offer/audience/geo and the
+//     allowed-fact bank come from that mission. If the mission already has a real
+//     contact we draft on it; otherwise we synthesize a representative recipient.
+//   • LEGACY (neither) - falls back to the most-recent mission matching the
+//     voice's mode, mirroring the old behavior.
+//
+// The user never has to write their own email - they only give feedback, which
+// is learned as taste via extract-style (chat_instructions → StyleProfile).
 //
 // Unlike draft.ts (which drafts as the *contact's mission* persona), this forces
-// the persona currently being calibrated, so the onboarding draft reflects the
-// voice under construction - facts, exemplars, and style profile all included.
+// the persona currently being calibrated, so the calibration draft reflects the
+// voice under construction - exemplars and style profile included.
 
 import type { Request, Response } from 'express';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
@@ -34,41 +39,60 @@ export default async function handler(req: Request, res: Response) {
   const scope = forUser(user.id);
   if (!(await checkRateLimit(scope, res))) return;
 
-  const { persona_id } = (req.body ?? {}) as { persona_id?: string };
+  const { persona_id, mission_id, sample } = (req.body ?? {}) as {
+    persona_id?: string;
+    mission_id?: string;
+    sample?: { offer?: string; audience?: string; geo?: string | null };
+  };
   if (!persona_id) return res.status(400).json({ error: 'missing_persona_id' });
 
   const persona = await scope.collection<PersonaDoc>('personas').findById(persona_id);
   if (!persona) return res.status(404).json({ error: 'persona_not_found' });
 
-  // Most-recent contact we can fully resolve (contact→target→mission) whose
-  // mission MATCHES the voice being calibrated. Without this match we'd draft
-  // from whatever the user's most-recent contact happens to be - e.g. building a
-  // BD voice would pull an unrelated Internship mission's offer/audience and
-  // write a co-op email. We only accept a contact when its mission is this
-  // persona's own mission, or (failing that) shares the persona's mode; anything
-  // else falls through to Path B, which drafts from the persona's own context.
-  const contacts = await scope.collection<ContactDoc>('contacts').find({});
-  contacts.sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0));
-
-  let picked: { contact: ContactDoc; target: TargetDoc; mission: MissionDoc } | null = null;
-  let modeMatch: { contact: ContactDoc; target: TargetDoc; mission: MissionDoc } | null = null;
-  for (const contact of contacts) {
-    const target = await scope.collection<TargetDoc>('targets').findById(contact.targetId);
-    if (!target) continue;
-    const mission = await scope.collection<MissionDoc>('missions').findById(target.missionId);
-    if (!mission) continue;
-    // Best: a contact under a mission that uses this exact voice.
-    if (mission.personaId && mission.personaId === persona._id) {
-      picked = { contact, target, mission };
-      break;
-    }
-    // Fallback: same outreach mode (e.g. any BD mission for a BD voice). Keep the
-    // most-recent one but keep scanning for an exact persona match.
-    if (!modeMatch && persona.mode && mission.mode === persona.mode) {
-      modeMatch = { contact, target, mission };
-    }
+  // Per-mission entry point: anchor on a specific mission's offer/audience/bank.
+  let explicitMission: MissionDoc | null = null;
+  if (mission_id) {
+    explicitMission = await scope.collection<MissionDoc>('missions').findById(mission_id);
+    if (!explicitMission) return res.status(404).json({ error: 'mission_not_found' });
   }
-  if (!picked) picked = modeMatch;
+
+  // Standalone: a typed sample drives the draft, so we deliberately skip Path A
+  // (a real contact) - the point is to react to the sample, not a stale lead.
+  const hasSample = !!sample && Boolean(sample.offer?.trim() || sample.audience?.trim());
+  const standalone = !mission_id && hasSample;
+
+  // Path A picks a real contact to draft on. With mission_id we restrict to that
+  // mission; without it (legacy) we prefer this voice's own mission, else mode.
+  let picked: { contact: ContactDoc; target: TargetDoc; mission: MissionDoc } | null = null;
+  if (!standalone) {
+    const contacts = await scope.collection<ContactDoc>('contacts').find({});
+    contacts.sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0));
+    let modeMatch: { contact: ContactDoc; target: TargetDoc; mission: MissionDoc } | null = null;
+    for (const contact of contacts) {
+      const target = await scope.collection<TargetDoc>('targets').findById(contact.targetId);
+      if (!target) continue;
+      const mission = await scope.collection<MissionDoc>('missions').findById(target.missionId);
+      if (!mission) continue;
+      if (mission_id) {
+        // Per-mission: only contacts under THIS mission qualify.
+        if (mission._id === mission_id) {
+          picked = { contact, target, mission };
+          break;
+        }
+        continue;
+      }
+      // Legacy: best is a contact under a mission that uses this exact voice.
+      if (mission.personaId && mission.personaId === persona._id) {
+        picked = { contact, target, mission };
+        break;
+      }
+      // Fallback: same outreach mode. Keep the most-recent, keep scanning.
+      if (!modeMatch && persona.mode && mission.mode === persona.mode) {
+        modeMatch = { contact, target, mission };
+      }
+    }
+    if (!picked && !mission_id) picked = modeMatch;
+  }
 
   // ---- Path A: real contact → assemble + run engine on it. ----
   if (picked) {
@@ -113,28 +137,36 @@ export default async function handler(req: Request, res: Response) {
     }
   }
 
-  // ---- Path B: no contacts yet → synthesize a representative recipient. ----
-  // Pull a recent mission (if any) for richer offer/audience/geo context; else
-  // lean entirely on the persona's own offer/audience.
-  const missions = await scope.collection<MissionDoc>('missions').find({ archivedAt: null });
-  missions.sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0));
-  const mission = missions[0] ?? null;
+  // ---- Path B: no contact to draft on → synthesize a representative recipient.
+  // Resolve the offer/audience/geo this draft is calibrated against:
+  //   • standalone   → the typed sample (grounding = memory bank only).
+  //   • per-mission  → the explicit mission (grounding = its bank + memory bank).
+  //   • legacy       → the most-recent active mission for this voice's mode.
+  let mission: MissionDoc | null = explicitMission;
+  if (!standalone && !mission) {
+    const missions = await scope.collection<MissionDoc>('missions').find({ archivedAt: null });
+    missions.sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0));
+    mission = missions[0] ?? null;
+  }
 
   const mode = (persona.mode ?? mission?.mode ?? 'sales') as MissionMode;
-  const goal = persona.offer || mission?.goal || '';
-  const audience = persona.audience || mission?.targetDescription || '';
-  const geo = mission?.geo ?? null;
+  const goal = standalone ? (sample?.offer ?? '') : mission?.goal || '';
+  const audience = standalone ? (sample?.audience ?? '') : mission?.targetDescription || '';
+  const geo = standalone ? (sample?.geo ?? null) : mission?.geo ?? null;
+  // The allowed-fact bank for this draft. Standalone ⇒ null (memory bank only);
+  // otherwise this mission's substance + the memory bank.
+  const groundingMissionId = standalone ? null : mission?._id ?? null;
 
   const run = await startRun(scope, { agentType: 'draft', missionId: mission?._id });
   try {
     const recipient = await synthesizeRecipient({ mode, goal, audience, geo });
 
     const profile = await scope.collection<ProfileDoc>('profiles').findOne();
-    // Reuse the persona's grounding (facts + exemplars), ranked against the
-    // offer. No real target ⇒ a synthetic id yields no evidence bullets, just
-    // the persona's context bank - which is exactly the cold-start surface.
+    // Grounding (facts + exemplars) ranked against the offer. No real target ⇒ a
+    // synthetic id yields no evidence bullets, just the memory bank (+ mission
+    // facts when per-mission) - exactly the cold-start surface.
     const rankQuery = goal || audience || persona.name;
-    const facts = await assembleAllowedFacts(scope, user.id, persona._id, '__calibrate_synthetic__', rankQuery, {
+    const facts = await assembleAllowedFacts(scope, user.id, groundingMissionId, '__calibrate_synthetic__', rankQuery, {
       excludedFactIds: persona.excludedFactIds ?? [],
     });
     const exemplarDocs = await fetchExemplars(scope, user.id, persona._id, rankQuery);

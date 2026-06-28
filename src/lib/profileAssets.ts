@@ -131,8 +131,14 @@ export async function uploadAsset(opts: {
   userId: string;
   kind: ProfileAssetKind;
   file: File;
+  // Where the asset lives: 'person' (memory bank, default) or 'mission'. When
+  // 'mission', pass the missionId it attaches to.
+  scope?: 'person' | 'mission';
+  missionId?: string | null;
 }): Promise<ProfileAsset> {
   const { userId, kind } = opts;
+  const assetScope = opts.scope ?? 'person';
+  const missionId = assetScope === 'mission' ? opts.missionId ?? null : null;
   // Oversized images are recompressed so server-side OCR can read them; other
   // file types pass through unchanged.
   const file = await downscaleImageForOcr(opts.file);
@@ -163,6 +169,8 @@ export async function uploadAsset(opts: {
     .insert({
       user_id: userId,
       kind,
+      scope: assetScope,
+      mission_id: missionId,
       storage_path: storedPath,
       file_name: file.name.slice(0, 200),
       file_size: file.size,

@@ -74,14 +74,19 @@ export const agents = {
   // Onboarding calibration: run the engine once so the user iterates on a
   // genuine draft. Uses a real contact when one exists; otherwise synthesizes a
   // representative recipient (`synthetic: true`) so a draft always appears.
-  calibrateDraft: (persona_id: string) =>
+  // Calibrate a voice. Standalone: pass a `sample` {offer, audience} typed in the
+  // wizard. Per-mission: pass `mission_id` to anchor on that mission's substance.
+  calibrateDraft: (
+    persona_id: string,
+    opts?: { mission_id?: string; sample?: { offer?: string; audience?: string; geo?: string | null } }
+  ) =>
     authedFetch<{
       run_id: string;
       recipient: { name: string; role: string; company: string };
       synthetic?: boolean;
       subject: string;
       body: string;
-    }>('/api/agents/calibrate-draft', { persona_id }),
+    }>('/api/agents/calibrate-draft', { persona_id, ...(opts ?? {}) }),
   onboardQuestions: (persona_id: string) =>
     authedFetch<{ run_id: string; questions: Array<{ id: string; question: string; why: string }> }>(
       '/api/agents/onboard-questions',
@@ -131,11 +136,21 @@ export const agents = {
       '/api/agents/parse-resume',
       { asset_id }
     ),
-  extractContext: (input: { asset_id?: string; text?: string; persona_id?: string }) =>
-    authedFetch<{ run_id: string; facts: Array<{ id: string; claim: string; type: string }> }>(
-      '/api/agents/extract-context',
-      input
-    ),
+  // Extract facts from a doc/text into the memory bank ('person') or a mission.
+  // Omit `destination` to let the server auto-route by document kind.
+  extractContext: (input: {
+    asset_id?: string;
+    text?: string;
+    mission_id?: string;
+    destination?: 'person' | 'mission';
+  }) =>
+    authedFetch<{
+      run_id: string;
+      facts: Array<{ id: string; claim: string; type: string }>;
+      document_kind: 'personal' | 'offer' | 'mixed';
+      scope: 'person' | 'mission';
+      mission_id: string | null;
+    }>('/api/agents/extract-context', input),
 };
 
 export type CoachField =

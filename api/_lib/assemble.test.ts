@@ -166,6 +166,58 @@ test('draft-context cache reuses mission/persona lookups while keeping target ev
 });
 
 // ---------------------------------------------------------------------------
+// Allowed-fact scope contract: a draft grounds on the person-level memory bank
+// PLUS only THIS mission's facts - never another mission's, never legacy
+// persona-scoped facts. Vector search is unavailable in tests, so this exercises
+// the recency fallback path (the $or query in loadContextAllowedFacts).
+// ---------------------------------------------------------------------------
+
+function factScope(facts: Array<Partial<ContextFactDoc> & { _id: string; scope: string }>) {
+  const matches = (f: { scope: string; missionId?: string | null }, filter: Record<string, unknown>): boolean => {
+    const clauses = (filter.$or as Array<Record<string, unknown>> | undefined) ?? [filter];
+    return clauses.some((c) =>
+      Object.entries(c).every(([k, v]) => (f as Record<string, unknown>)[k] === v)
+    );
+  };
+  return {
+    collection(name: string) {
+      return {
+        find: async (filter: Record<string, unknown> = {}) =>
+          name === 'context_facts' ? facts.filter((f) => matches(f, filter)) : [],
+        findOne: async () => null,
+      };
+    },
+  };
+}
+
+test('allowed facts include person + this mission, exclude other missions and persona-legacy', async () => {
+  const mk = (id: string, scope: string, claim: string, missionId: string | null = null) => ({
+    _id: id,
+    userId: 'u1',
+    scope,
+    missionId,
+    personaId: null,
+    type: 'proof',
+    claim,
+    createdAt: now(),
+    updatedAt: now(),
+  });
+  const scope = factScope([
+    mk('mem1', 'person', 'Sender runs a 1,400-person event'),
+    mk('mis1', 'mission', 'This campaign offers a gold tier at $5k', 'missionA'),
+    mk('other', 'mission', 'A different campaign fact', 'missionB'),
+    mk('legacy', 'persona', 'Legacy voice-owned fact'),
+  ]);
+
+  const facts = await assembleAllowedFacts(scope as never, 'u1', 'missionA', 'targetX', 'Sell the offer');
+  const ids = facts.map((f) => f.id);
+  assert.ok(ids.includes('mem1'), 'memory-bank fact included');
+  assert.ok(ids.includes('mis1'), "this mission's fact included");
+  assert.ok(!ids.includes('other'), "another mission's fact excluded");
+  assert.ok(!ids.includes('legacy'), 'legacy persona-scoped fact excluded');
+});
+
+// ---------------------------------------------------------------------------
 // buildRetrievalQuery - per-recipient ranking key (diversity lever).
 // ---------------------------------------------------------------------------
 

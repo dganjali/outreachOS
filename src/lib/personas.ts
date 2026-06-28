@@ -1,6 +1,7 @@
 // Persona data helpers over the Supabase-shaped Mongo shim. A persona is a
-// reusable, use-case-scoped voice (its StyleProfile + offer/audience) selected
-// or created at mission creation and refined in the ME → Voice tab.
+// reusable voice = email style only (its StyleProfile + exemplars), selected or
+// created at mission creation and refined in the ME → Voice tab. Campaign
+// substance (offer/audience/proof) lives on the mission, not the voice.
 
 import { supabase } from '../supabaseClient';
 import type { MissionMode, Persona, ContextFact, StyleExemplar, StyleProfile } from '../types';
@@ -48,7 +49,7 @@ export async function listPersonas(userId: string): Promise<Persona[]> {
 
 export async function createPersona(
   userId: string,
-  input: { name: string; mode?: MissionMode | null; offer?: string | null; audience?: string | null }
+  input: { name: string; mode?: MissionMode | null }
 ): Promise<Persona> {
   const { data, error } = await supabase
     .from('personas')
@@ -56,8 +57,6 @@ export async function createPersona(
       user_id: userId,
       name: input.name.trim() || 'Untitled persona',
       mode: input.mode ?? null,
-      offer: input.offer ?? null,
-      audience: input.audience ?? null,
       style_profile: emptyStyleProfile(),
       style_profile_version: 1,
       onboarding_completed_at: null,
@@ -81,8 +80,6 @@ export async function updatePersona(
   patch: Partial<{
     name: string;
     mode: MissionMode | null;
-    offer: string | null;
-    audience: string | null;
     style_profile: StyleProfile;
     style_profile_version: number;
     onboarding_completed_at: string | null;
@@ -105,39 +102,41 @@ export async function deletePersona(id: string): Promise<void> {
 
 export interface PersonaBundle {
   persona: Persona;
-  facts: ContextFact[];
   exemplars: StyleExemplar[];
 }
 
-/** Persona + its persona-scoped facts + exemplars - everything the wizard edits. */
-export async function getPersonaBundle(userId: string, personaId: string): Promise<PersonaBundle | null> {
+/** Persona + its exemplars - a voice is style only, so no facts here. */
+export async function getPersonaBundle(_userId: string, personaId: string): Promise<PersonaBundle | null> {
   const persona = await getPersona(personaId);
   if (!persona) return null;
-  const [facts, exemplars] = await Promise.all([
-    listContextFacts(userId, personaId),
-    listExemplars(personaId),
-  ]);
-  // Edit only the facts that belong to this persona; person-level facts are owned
-  // by the Context tab, not the per-voice wizard.
-  return { persona, facts: facts.filter((f) => f.scope === 'persona'), exemplars };
+  const exemplars = await listExemplars(personaId);
+  return { persona, exemplars };
 }
 
-export async function listContextFacts(userId: string, personaId: string | null): Promise<ContextFact[]> {
+/**
+ * Context facts available to a draft: the person-level memory bank always, plus
+ * one mission's substance when `missionId` is given. Legacy persona-scoped facts
+ * are ignored (the migration re-homes them to 'person').
+ */
+export async function listContextFacts(userId: string, missionId: string | null): Promise<ContextFact[]> {
   const { data, error } = await supabase.from('context_facts').select('*').eq('user_id', userId);
   if (error) throw new Error(error.message);
   const all = (data as ContextFact[]) ?? [];
-  // person-level facts apply to every persona; persona-level only to this one.
-  return all.filter((f) => f.scope === 'person' || (personaId && f.persona_id === personaId));
+  return all.filter(
+    (f) => f.scope === 'person' || (missionId != null && f.scope === 'mission' && f.mission_id === missionId)
+  );
 }
 
 export async function addContextFact(
   userId: string,
-  input: { claim: string; type?: ContextFact['type']; scope?: 'person' | 'persona'; personaId?: string | null; provenance?: string }
+  input: { claim: string; type?: ContextFact['type']; scope?: 'person' | 'mission'; missionId?: string | null; provenance?: string }
 ): Promise<void> {
+  const scope = input.scope ?? 'person';
   const { error } = await supabase.from('context_facts').insert({
     user_id: userId,
-    scope: input.scope ?? 'person',
-    persona_id: input.scope === 'persona' ? input.personaId ?? null : null,
+    scope,
+    mission_id: scope === 'mission' ? input.missionId ?? null : null,
+    persona_id: null,
     type: input.type ?? 'proof',
     claim: input.claim.trim(),
     date: null,

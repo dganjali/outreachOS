@@ -95,6 +95,11 @@ export interface ProfileVersionDoc extends BaseDoc {
 
 export interface ProfileAssetDoc extends BaseDoc {
   kind: 'resume' | 'portfolio_pdf' | 'case_study' | 'screenshot' | 'context_dump';
+  // Where this asset lives. 'person' (default) = memory bank, reused by every
+  // mission. 'mission' = attached to one mission only (a campaign offer doc the
+  // user chose not to add to the durable bank). Legacy docs read as 'person'.
+  scope: 'person' | 'mission';
+  missionId: string | null;  // set when scope==='mission'
   storagePath: string;       // GCS path (NOT a URL)
   fileName: string;
   fileSize: number;
@@ -165,8 +170,11 @@ export const DEFAULT_TEMPLATE_STRICTNESS = 50;
 export interface PersonaDoc extends BaseDoc {
   name: string;                          // "Sponsorship voice", "Recruiting voice"
   mode: MissionDoc['mode'] | null;
-  offer: string | null;                  // per-persona defaults (prefilled from mission)
-  audience: string | null;
+  // DEPRECATED: a voice is now purely email style (styleProfile + exemplars).
+  // Offer/audience live on the MISSION. These fields stay nullable for back-compat
+  // with old docs; nothing new reads or writes them.
+  offer?: string | null;
+  audience?: string | null;
   styleProfile: StyleProfile;            // embedded current version
   styleProfileVersion: number;           // monotonically increments on each calibration
   onboardingCompletedAt: Date | null;
@@ -189,8 +197,14 @@ export interface PersonaVersionDoc extends BaseDoc {
 // Atomic, citable substance = the "allowed facts" universe the grounding
 // contract draws from. The generator may only assert facts that appear here.
 export interface ContextFactDoc extends BaseDoc {
-  scope: 'person' | 'persona';           // person-level facts reused across personas
-  personaId: string | null;              // set when scope==='persona'
+  // 'person'  = memory bank: durable proof about the sender, reused by every mission.
+  // 'mission' = campaign substance: offer/audience/proof scoped to one mission.
+  // 'persona' = LEGACY (voice-owned facts). Nothing new writes this; the migration
+  //             re-scopes existing persona facts to 'person'. Kept in the union so
+  //             old docs still parse until the migration runs.
+  scope: 'person' | 'mission' | 'persona';
+  missionId: string | null;              // set when scope==='mission'
+  personaId: string | null;              // LEGACY: set on old scope==='persona' docs
   type: 'proof' | 'metric' | 'offer' | 'audience' | 'credential' | 'constraint';
   claim: string;                         // atomic, self-contained
   date: string | null;                   // recency/decay
@@ -652,6 +666,8 @@ export const INDEX_SPEC: Record<string, Array<{ keys: Record<string, 1 | -1>; op
     { keys: { userId: 1, personaId: 1, version: -1 } },
   ],
   context_facts: [
+    { keys: { userId: 1, scope: 1, missionId: 1 } },
+    // Legacy lookup for persona-scoped facts (read by the migration).
     { keys: { userId: 1, scope: 1, personaId: 1 } },
   ],
   style_exemplars: [
@@ -722,6 +738,7 @@ export const VECTOR_INDEX_SPEC = [
         { type: 'vector', path: 'embedding', numDimensions: 1024, similarity: 'cosine' },
         { type: 'filter', path: 'userId' },
         { type: 'filter', path: 'scope' },
+        { type: 'filter', path: 'missionId' },
         { type: 'filter', path: 'personaId' },
       ],
     },

@@ -860,6 +860,58 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
   border-radius: var(--radius-lg);
   margin-bottom: var(--space-5);
 }
+
+/* Mission memory: campaign-specific facts + info-packet upload. */
+.mission-memory-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.mission-memory-title {
+  margin: 0;
+  font-size: var(--text-sm, 0.9rem);
+  font-weight: 600;
+}
+.mission-memory-hint {
+  margin: var(--space-2) 0 var(--space-3);
+  font-size: 0.8rem;
+  color: var(--muted-foreground, var(--muted));
+}
+.mission-memory-list {
+  margin-top: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mission-memory-fact {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.mission-memory-fact-del {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: none;
+  padding: 2px;
+  color: var(--muted-foreground, var(--muted));
+  cursor: pointer;
+  border-radius: var(--radius-sm, 6px);
+}
+.mission-memory-fact-del:hover {
+  color: var(--destructive, #ef4444);
+}
+
+/* Voice-wizard calibrate sample inputs. */
+.pw-calib-sample {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
 /* View mode: the brief rows in a responsive grid, with room kept on the right
    for the floating Edit affordance. */
 .mission-overview-grid {

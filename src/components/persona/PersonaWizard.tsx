@@ -1,27 +1,26 @@
-// PersonaWizard - the guided, conversational way to build a reusable voice.
+// PersonaWizard - the guided way to build a reusable voice.
 //
-// One screen per question: Frame → Substance → Clarify → Style → Calibrate,
-// then a single Overview that reveals the learned voice and lets you jump back
-// to edit any section. Progressive disclosure does the work - no wall of fields.
-// Used standalone in ME → Personalization and embedded inside mission creation.
+// A voice is EMAIL STYLE ONLY (no offer/audience/proof - that's the mission).
+// One screen per step: Frame → Style → Calibrate, then a single Overview that
+// reveals the learned voice and lets you jump back to edit. Used standalone in
+// ME → Personalization and embedded inside mission creation.
 //
 // LLM flow (Gemini agents, server-side):
-//   • Clarify   → onboard-questions: adaptive questions from gaps/contradictions
-//   • Calibrate → refine: chat-edit a draft (whole or a highlighted span)
+//   • Calibrate → calibrate-draft: generate a real draft against a typed sample
+//                 offer/audience (standalone), then refine: chat-edit it.
 //   • Save      → extract-style: commits a confidence-weighted StyleProfile +
 //                 the confirmed draft as a gold exemplar (+ version snapshot)
 //
 // Persistence is LAZY: the persona row is created the first time an agent needs
-// it (Clarify/Calibrate), so Frame/Substance/Style stay fully navigable and a
-// user who bails early leaves at most an un-calibrated "Draft" (resumable).
-// Every agent call degrades gracefully - failures show inline and never trap.
+// it (Calibrate), so Frame/Style stay fully navigable and a user who bails early
+// leaves at most an un-calibrated "Draft" (resumable). Every agent call degrades
+// gracefully - failures show inline and never trap.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
   Check,
-  FileText,
   Loader2,
   Pencil,
   Plus,
@@ -30,21 +29,16 @@ import {
   X,
 } from 'lucide-react';
 import type { MissionMode, Persona } from '../../types';
-import { useConfirm } from '../../context/ConfirmContext';
 import { useToast } from '../../context/ToastContext';
 import { agents } from '../../lib/api';
-import { uploadAsset, MAX_ASSET_BYTES } from '../../lib/profileAssets';
 import {
-  addContextFact,
   addExemplar,
   createPersona,
   DEFAULT_TEMPLATE_STRICTNESS,
-  deleteContextFact,
   deleteExemplar,
   emptyStyleProfile,
   getPersonaBundle,
   isPersonaCalibrated,
-  listContextFacts,
   updatePersona,
   type PersonaBundle,
 } from '../../lib/personas';
@@ -52,25 +46,13 @@ import {
 // ---------------------------------------------------------------------------
 // Local draft model
 // ---------------------------------------------------------------------------
-interface FactItem {
-  id?: string; // present once persisted
-  claim: string;
-  /** 'person' = already persisted person-level by the extract-context agent;
-   *  'persona' = local / persona-scoped (default for manual entries). */
-  scope?: 'person' | 'persona';
-}
 interface ExItem {
   id?: string;
   body: string;
 }
-interface Question {
-  id: string;
-  question: string;
-  why: string;
-}
 
-type Step = 'frame' | 'substance' | 'clarify' | 'style' | 'calibrate' | 'overview';
-const INPUT_STEPS: Step[] = ['frame', 'substance', 'clarify', 'style', 'calibrate'];
+type Step = 'frame' | 'style' | 'calibrate' | 'overview';
+const INPUT_STEPS: Step[] = ['frame', 'style', 'calibrate'];
 
 const PURPOSES: Array<{ value: MissionMode; label: string; hint: string }> = [
   { value: 'sponsorship', label: 'Sponsorship', hint: 'Win sponsors for an event or community' },
@@ -86,6 +68,9 @@ interface PersonaWizardProps {
   personaId?: string;
   /** Seeds copied from the mission so a brand-new voice starts in context. */
   seed?: { mode?: MissionMode | null; offer?: string | null; audience?: string | null };
+  /** Present = calibrate this voice against a specific mission (its real
+   *  offer/audience + mission substance) instead of a typed sample. */
+  missionId?: string;
   onDone: (persona: Persona) => void;
   onCancel?: () => void;
   /** Tweaks chrome when rendered inside the mission flow. */
@@ -96,24 +81,25 @@ export function PersonaWizard({
   userId,
   personaId: initialPersonaId,
   seed,
+  missionId,
   onDone,
   onCancel,
   embedded,
 }: PersonaWizardProps) {
   const editing = Boolean(initialPersonaId);
-  const confirm = useConfirm();
   const toast = useToast();
 
   // frame
   const [name, setName] = useState('');
   const [mode, setMode] = useState<MissionMode | null>(seed?.mode ?? null);
-  // substance / clarify
-  const [facts, setFacts] = useState<FactItem[]>([]);
   // style
   const [exemplars, setExemplars] = useState<ExItem[]>([]);
   // how strictly the engine should follow the exemplars as a template (0–100)
   const [strictness, setStrictness] = useState<number>(DEFAULT_TEMPLATE_STRICTNESS);
-  // calibrate
+  // calibrate: a sample offer/audience the standalone draft is generated against
+  // (a voice has no offer/audience of its own). Prefilled from the mission seed.
+  const [sampleOffer, setSampleOffer] = useState(seed?.offer ?? '');
+  const [sampleAudience, setSampleAudience] = useState(seed?.audience ?? '');
   const [calSubject, setCalSubject] = useState('');
   const [calBody, setCalBody] = useState('');
   const [calInstructions, setCalInstructions] = useState<string[]>([]);
@@ -136,17 +122,10 @@ export function PersonaWizard({
     if (!initialPersonaId) return;
     let alive = true;
     setLoading(true);
-    Promise.all([
-      getPersonaBundle(userId, initialPersonaId),
-      listContextFacts(userId, null),
-    ])
-      .then(([b, allFacts]) => {
+    getPersonaBundle(userId, initialPersonaId)
+      .then((b) => {
         if (!alive || !b) return;
-        // Separate person-scoped facts from the full list.
-        const personFacts = allFacts
-          .filter((f) => f.scope === 'person')
-          .map((f) => ({ id: f.id, claim: f.claim }));
-        applyBundle(b, personFacts);
+        applyBundle(b);
       })
       .catch((e) => alive && setError(e instanceof Error ? e.message : 'Could not load this voice'))
       .finally(() => alive && setLoading(false));
@@ -156,40 +135,11 @@ export function PersonaWizard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialPersonaId, userId]);
 
-  // ---- new voice: autofill the shared, person-level facts (managed in the
-  // Context tab) so a brand-new voice starts from what the agent already knows
-  // about you. Persona-specific facts are added on top. ----
-  useEffect(() => {
-    if (initialPersonaId) return; // edit mode hydrates its own facts
-    let alive = true;
-    listContextFacts(userId, null)
-      .then((all) => {
-        if (!alive) return;
-        const personItems: FactItem[] = all
-          .filter((f) => f.scope === 'person')
-          .map((f) => ({ id: f.id, claim: f.claim, scope: 'person' as const }));
-        if (personItems.length) setFacts((prev) => (prev.length ? prev : personItems));
-      })
-      .catch(() => undefined);
-    return () => {
-      alive = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialPersonaId, userId]);
-
-  function applyBundle(b: PersonaBundle, personFacts?: Array<{ id: string; claim: string }>) {
+  function applyBundle(b: PersonaBundle) {
     personaIdRef.current = b.persona.id;
     setPersona(b.persona);
     setName(b.persona.name);
     setMode(b.persona.mode);
-    const personaItems: FactItem[] = b.facts.map((f) => ({ id: f.id, claim: f.claim, scope: 'persona' as const }));
-    // Person-level facts this voice has opted out of are hidden from the list.
-    const excluded = new Set(b.persona.excluded_fact_ids ?? []);
-    const personItems: FactItem[] = (personFacts ?? [])
-      .filter((f) => !excluded.has(f.id))
-      .map((f) => ({ id: f.id, claim: f.claim, scope: 'person' as const }));
-    // Merge: person-level first (identity facts), then persona-scoped.
-    setFacts([...personItems, ...personaItems]);
     setExemplars(b.exemplars.map((e) => ({ id: e.id, body: e.body })));
     setStrictness(b.persona.style_profile?.template_strictness ?? DEFAULT_TEMPLATE_STRICTNESS);
   }
@@ -200,16 +150,11 @@ export function PersonaWizard({
     setStep(to);
   }, []);
 
-  // ---- lazy persona create + persist pending facts/exemplars (idempotent) ----
+  // ---- lazy persona create + persist pending exemplars (idempotent) ----
   const ensurePersona = useCallback(async (): Promise<string> => {
     let pid = personaIdRef.current;
     if (!pid) {
-      const p = await createPersona(userId, {
-        name: name.trim() || 'Untitled voice',
-        mode,
-        offer: seed?.offer ?? null,
-        audience: seed?.audience ?? null,
-      });
+      const p = await createPersona(userId, { name: name.trim() || 'Untitled voice', mode });
       pid = p.id;
       personaIdRef.current = pid;
       setPersona(p);
@@ -217,26 +162,9 @@ export function PersonaWizard({
       await updatePersona(pid, { name: name.trim() || 'Untitled voice', mode });
     }
 
-    // Sync facts + exemplars against DB truth. Only persona-scoped facts are
-    // managed here - person-level facts (scope:'person') are already persisted
-    // by the extract-context agent and must NOT be re-inserted.
-    const personaFacts = facts.filter((f) => f.scope !== 'person');
-    const personItemsPreserved = facts.filter((f) => f.scope === 'person');
-
+    // Sync exemplars (the voice's writing samples) against DB truth.
     const before = await getPersonaBundle(userId, pid);
     if (before) {
-      const keptFactIds = new Set(personaFacts.filter((f) => f.id).map((f) => f.id!));
-      for (const f of before.facts) if (f.id && !keptFactIds.has(f.id)) await deleteContextFact(f.id);
-      for (const f of personaFacts)
-        if (!f.id && f.claim.trim() && f.scope !== 'person')
-          await addContextFact(userId, {
-            claim: f.claim,
-            type: 'proof',
-            scope: 'persona',
-            personaId: pid,
-            provenance: 'onboarding',
-          });
-
       const keptExIds = new Set(exemplars.filter((e) => e.id).map((e) => e.id!));
       for (const e of before.exemplars) if (e.id && !keptExIds.has(e.id)) await deleteExemplar(e.id);
       for (const e of exemplars) if (!e.id && e.body.trim()) await addExemplar(userId, pid, { body: e.body });
@@ -250,43 +178,11 @@ export function PersonaWizard({
         await updatePersona(pid, { style_profile: { ...sp, template_strictness: strictness } });
         after.persona = { ...after.persona, style_profile: { ...sp, template_strictness: strictness } };
       }
-      // Re-merge: preserve person-level items, replace persona-level from DB.
-      const freshPersonaFacts: FactItem[] = after.facts.map((f) => ({ id: f.id, claim: f.claim, scope: 'persona' as const }));
-      setFacts([...personItemsPreserved, ...freshPersonaFacts]);
       setExemplars(after.exemplars.map((e) => ({ id: e.id, body: e.body })));
       setPersona(after.persona);
     }
     return pid;
-  }, [userId, name, mode, seed, editing, facts, exemplars, strictness]);
-
-  // Opt this voice out of the shared person-level ("default") facts. They stay
-  // in the Context bank and other voices - we just record their ids on the
-  // persona so they're hidden here and dropped from this voice's grounding.
-  const clearDefaultFacts = useCallback(async () => {
-    const defaultIds = facts.filter((f) => f.scope === 'person' && f.id).map((f) => f.id!);
-    if (defaultIds.length === 0) return;
-    const ok = await confirm({
-      title: 'Clear default facts for this voice?',
-      description: `These ${defaultIds.length} shared fact${defaultIds.length === 1 ? '' : 's'} won't be used by this voice. They stay available in your Context bank and other voices.`,
-      confirmText: 'Clear',
-      destructive: true,
-    });
-    if (!ok) return;
-    setBusy(true);
-    try {
-      const pid = await ensurePersona();
-      const existing = persona?.excluded_fact_ids ?? [];
-      const next = Array.from(new Set([...existing, ...defaultIds]));
-      await updatePersona(pid, { excluded_fact_ids: next });
-      setPersona((p) => (p ? { ...p, excluded_fact_ids: next } : p));
-      setFacts((f) => f.filter((x) => x.scope !== 'person'));
-      toast.success('Default facts cleared for this voice.');
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Could not clear default facts.');
-    } finally {
-      setBusy(false);
-    }
-  }, [facts, persona, ensurePersona, confirm, toast]);
+  }, [userId, name, mode, editing, exemplars, strictness]);
 
   // ---- step transitions (some run side effects) ----
   async function next() {
@@ -298,7 +194,7 @@ export function PersonaWizard({
         await commitCalibration();
         go('overview', 'forward');
       } else if (step === 'style') {
-        // Persist facts + exemplars before the calibrate step needs them.
+        // Persist the voice (exemplars + strictness) before calibrate needs it.
         setBusy(true);
         await ensurePersona();
         go('calibrate', 'forward');
@@ -414,23 +310,6 @@ export function PersonaWizard({
       <div className="pw-stage" data-dir={dir}>
         <div className="pw-stage-inner" key={step}>
           {step === 'frame' && <FrameStep name={name} setName={setName} mode={mode} setMode={setMode} />}
-          {step === 'substance' && (
-            <SubstanceStep
-              facts={facts}
-              setFacts={setFacts}
-              userId={userId}
-              personaId={personaIdRef.current ?? undefined}
-              onClearDefaults={clearDefaultFacts}
-              clearing={busy}
-            />
-          )}
-          {step === 'clarify' && (
-            <ClarifyStep
-              facts={facts}
-              addFact={(claim) => setFacts((f) => [...f, { claim }])}
-              ensurePersona={ensurePersona}
-            />
-          )}
           {step === 'style' && (
             <StyleStep
               exemplars={exemplars}
@@ -447,6 +326,11 @@ export function PersonaWizard({
               setBody={setCalBody}
               instructions={calInstructions}
               setInstructions={setCalInstructions}
+              sampleOffer={sampleOffer}
+              setSampleOffer={setSampleOffer}
+              sampleAudience={sampleAudience}
+              setSampleAudience={setSampleAudience}
+              missionId={missionId}
               ensurePersona={ensurePersona}
               onGenerated={(d) => {
                 calOriginalRef.current = d;
@@ -457,7 +341,6 @@ export function PersonaWizard({
             <OverviewStep
               name={name}
               mode={mode}
-              facts={facts}
               exemplars={exemplars}
               persona={persona}
               editing={editing}
@@ -560,344 +443,6 @@ function FrameStep({
             </button>
           );
         })}
-      </div>
-    </div>
-  );
-}
-
-function SubstanceStep({
-  facts,
-  setFacts,
-  userId,
-  personaId,
-  onClearDefaults,
-  clearing,
-}: {
-  facts: FactItem[];
-  setFacts: React.Dispatch<React.SetStateAction<FactItem[]>>;
-  userId: string;
-  personaId?: string;
-  onClearDefaults: () => void;
-  clearing: boolean;
-}) {
-  const defaultCount = facts.filter((f) => f.scope === 'person').length;
-  const [text, setText] = useState('');
-  // Smart-fill state
-  const [dumpText, setDumpText] = useState('');
-  const [extracting, setExtracting] = useState(false);
-  const [extractError, setExtractError] = useState<string | null>(null);
-  const [dragOver, setDragOver] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  function add() {
-    const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-    if (!lines.length) return;
-    setFacts((f) => [...f, ...lines.map((claim) => ({ claim, scope: 'persona' as const }))]);
-    setText('');
-  }
-
-  async function runExtract(opts: { text?: string; assetId?: string }) {
-    setExtracting(true);
-    setExtractError(null);
-    try {
-      const r = await agents.extractContext({
-        text: opts.text,
-        asset_id: opts.assetId,
-        persona_id: personaId,
-      });
-      // Extracted facts are person-level (already persisted by the agent).
-      const existing = new Set(facts.map((f) => f.claim.toLowerCase()));
-      const newFacts: FactItem[] = r.facts
-        .filter((f) => !existing.has(f.claim.toLowerCase()))
-        .map((f) => ({ id: f.id, claim: f.claim, scope: 'person' as const }));
-      if (newFacts.length > 0) {
-        setFacts((prev) => [...prev, ...newFacts]);
-      }
-      setDumpText('');
-    } catch (e) {
-      setExtractError(e instanceof Error ? e.message : 'Extraction failed - try again.');
-    } finally {
-      setExtracting(false);
-    }
-  }
-
-  async function handleFile(file: File) {
-    if (file.size > MAX_ASSET_BYTES) {
-      setExtractError(`File too large. Max 20MB; this file is ${(file.size / 1024 / 1024).toFixed(1)}MB.`);
-      return;
-    }
-    setExtracting(true);
-    setExtractError(null);
-    try {
-      const asset = await uploadAsset({ userId, kind: 'context_dump', file });
-      await runExtract({ assetId: asset.id });
-    } catch (e) {
-      setExtractError(e instanceof Error ? e.message : 'Upload failed - try again.');
-      setExtracting(false);
-    }
-  }
-
-  function pickFile(f: File | null | undefined) {
-    if (f) handleFile(f);
-  }
-
-  async function handleRemove(i: number) {
-    const fact = facts[i];
-    if (fact?.scope === 'person' && fact.id) {
-      try {
-        await deleteContextFact(fact.id);
-      } catch {
-        // Best-effort - drop locally regardless.
-      }
-    }
-    setFacts((f) => f.filter((_, idx) => idx !== i));
-  }
-
-  return (
-    <div className="pw-step">
-      <StepHead
-        q="What makes you worth a reply?"
-        hint="Drop the concrete facts a great email could cite - what you've built, real numbers, credentials. One per line. Skip the fluff."
-      />
-
-      {/* Smart-fill card */}
-      <div className="pw-smartfill">
-        <div className="pw-smartfill-head">
-          <span className="pw-smartfill-title">
-            <Sparkles size={13} /> Smart fill
-          </span>
-          <span className="pw-smartfill-badge">Recommended</span>
-        </div>
-        <p className="pw-smartfill-hint">Paste your resume, bio, or any context - or upload a file - and we'll extract the facts for you.</p>
-
-        {/* Paste box */}
-        <textarea
-          className="pw-input pw-textarea"
-          rows={3}
-          value={dumpText}
-          onChange={(e) => setDumpText(e.target.value)}
-          placeholder="Paste your resume, LinkedIn bio, or any background text…"
-          disabled={extracting}
-        />
-
-        {/* File dropzone */}
-        <div
-          className={`pw-smartfill-dropzone ${dragOver ? 'asset-dropzone-over' : ''} ${extracting ? 'asset-dropzone-busy' : ''}`}
-          onDragOver={(e) => { e.preventDefault(); if (!extracting) setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDragOver(false);
-            if (extracting) return;
-            pickFile(e.dataTransfer.files?.[0]);
-          }}
-          onClick={() => !extracting && fileRef.current?.click()}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => {
-            if (!extracting && (e.key === 'Enter' || e.key === ' ')) {
-              e.preventDefault();
-              fileRef.current?.click();
-            }
-          }}
-          aria-label="Upload a file to extract facts"
-          aria-busy={extracting}
-        >
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".pdf,.docx,.doc,.txt,.md,.rtf,.png,.jpg,.jpeg,.webp,.heic"
-            hidden
-            onChange={(e) => {
-              pickFile(e.target.files?.[0]);
-              e.target.value = '';
-            }}
-          />
-          <FileText size={14} className="pw-smartfill-dropzone-icon" />
-          <span className="pw-smartfill-dropzone-label">
-            {extracting ? 'Reading…' : 'Drop a PDF, DOCX, image or screenshot - scanned files are OCR’d'}
-          </span>
-        </div>
-
-        <button
-          type="button"
-          className="pw-btn-add pw-smartfill-btn"
-          onClick={() => runExtract({ text: dumpText })}
-          disabled={extracting || !dumpText.trim()}
-        >
-          {extracting ? <Loader2 className="pw-spin" size={14} /> : <Sparkles size={14} />}
-          {extracting ? 'Extracting…' : 'Extract facts'}
-        </button>
-
-        {extractError && <p className="pw-error pw-smartfill-error">{extractError}</p>}
-      </div>
-
-      {/* OR divider */}
-      <div className="pw-or-divider">
-        <span>- or add manually -</span>
-      </div>
-
-      {/* Manual path */}
-      <textarea
-        className="pw-input pw-textarea"
-        rows={3}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault();
-            add();
-          }
-        }}
-        placeholder={'Ran a 1,400-person developer conference\n62% of attendees were senior engineers\nBacked by Vercel and Notion'}
-      />
-      <button type="button" className="pw-btn-add" onClick={add} disabled={!text.trim()}>
-        <Plus size={14} /> Add
-      </button>
-
-      {defaultCount > 0 && (
-        <div className="pw-facts-toolbar">
-          <span className="pw-facts-toolbar-label">
-            <Sparkles size={11} /> {defaultCount} default fact{defaultCount === 1 ? '' : 's'} from your Context bank
-          </span>
-          <button
-            type="button"
-            className="pw-facts-clear"
-            onClick={onClearDefaults}
-            disabled={clearing}
-          >
-            {clearing ? <Loader2 className="pw-spin" size={12} /> : <X size={12} />} Clear defaults
-          </button>
-        </div>
-      )}
-
-      <ScopedChipList facts={facts} onRemove={handleRemove} />
-    </div>
-  );
-}
-
-/** Chip list that shows a person-scope indicator on extracted facts. */
-function ScopedChipList({
-  facts,
-  onRemove,
-}: {
-  facts: FactItem[];
-  onRemove: (i: number) => void;
-}) {
-  if (facts.length === 0) return <p className="pw-empty">No facts yet - add a few above.</p>;
-  return (
-    <div className="pw-chips">
-      {facts.map((f, i) => (
-        <span key={i} className={`pw-chip ${f.scope === 'person' ? 'pw-chip-person' : ''}`}>
-          {f.scope === 'person' && <Sparkles size={10} className="pw-chip-scope-icon" />}
-          {f.claim}
-          <button type="button" className="pw-chip-x" aria-label="Remove" onClick={() => onRemove(i)}>
-            <X size={12} />
-          </button>
-        </span>
-      ))}
-    </div>
-  );
-}
-
-// Clarify (Stage 3) - adaptive questions from the onboard-questions agent.
-function ClarifyStep({
-  facts,
-  addFact,
-  ensurePersona,
-}: {
-  facts: FactItem[];
-  addFact: (claim: string) => void;
-  ensurePersona: () => Promise<string>;
-}) {
-  const [questions, setQuestions] = useState<Question[]>([]);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [loading, setLoading] = useState(false);
-  const [asked, setAsked] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function ask() {
-    setLoading(true);
-    setError(null);
-    try {
-      const pid = await ensurePersona(); // persist facts so the agent can read them
-      const r = await agents.onboardQuestions(pid);
-      setQuestions(r.questions);
-      setAsked(true);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not generate questions. You can skip this step.');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // Auto-generate the questions the moment the user lands on this step (once),
-  // so they never have to press a button and wait. Needs at least one fact to
-  // adapt to; if there's nothing yet we stay quiet until they add substance.
-  const autoAskedRef = useRef(false);
-  useEffect(() => {
-    if (autoAskedRef.current || asked || loading) return;
-    if (facts.length === 0) return;
-    autoAskedRef.current = true;
-    void ask();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [facts.length]);
-
-  function saveAnswer(q: Question) {
-    const a = answers[q.id]?.trim();
-    if (!a) return;
-    addFact(a); // becomes a persona fact on the next persist
-    setAnswers((prev) => ({ ...prev, [q.id]: '' }));
-    setQuestions((prev) => prev.filter((x) => x.id !== q.id));
-  }
-
-  return (
-    <div className="pw-step">
-      <StepHead
-        q="A couple of quick questions."
-        hint="We read what you've added and ask only what fills the biggest gaps. Optional - answer what's useful, skip the rest."
-      />
-      {loading && (
-        <p className="pw-calib-meta">
-          <Loader2 className="pw-spin" size={13} /> Reading your substance…
-        </p>
-      )}
-      {facts.length === 0 && !asked && !loading && (
-        <p className="pw-empty">Add a fact or two on the previous step first - the questions adapt to you.</p>
-      )}
-      {asked && !loading && (
-        <button type="button" className="pw-calib-regen" onClick={ask} disabled={loading}>
-          <Sparkles size={13} /> Regenerate questions
-        </button>
-      )}
-      {error && <p className="pw-error">{error}</p>}
-      <div className="pw-clar-list">
-        {questions.map((q) => (
-          <div key={q.id} className="pw-clar-q">
-            <div className="pw-clar-question">{q.question}</div>
-            <div className="pw-clar-why">{q.why}</div>
-            <div className="pw-clar-row">
-              <input
-                className="pw-input"
-                value={answers[q.id] ?? ''}
-                onChange={(e) => setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))}
-                placeholder="Your answer…"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    saveAnswer(q);
-                  }
-                }}
-              />
-              <button type="button" className="pw-btn-add" onClick={() => saveAnswer(q)} disabled={!answers[q.id]?.trim()}>
-                <Check size={14} />
-              </button>
-            </div>
-          </div>
-        ))}
-        {asked && questions.length === 0 && (
-          <p className="pw-empty">All caught up. Click Next to keep going.</p>
-        )}
       </div>
     </div>
   );
@@ -1021,6 +566,11 @@ function CalibrateStep({
   setBody,
   instructions,
   setInstructions,
+  sampleOffer,
+  setSampleOffer,
+  sampleAudience,
+  setSampleAudience,
+  missionId,
   ensurePersona,
   onGenerated,
 }: {
@@ -1030,6 +580,12 @@ function CalibrateStep({
   setBody: (v: string) => void;
   instructions: string[];
   setInstructions: React.Dispatch<React.SetStateAction<string[]>>;
+  sampleOffer: string;
+  setSampleOffer: (v: string) => void;
+  sampleAudience: string;
+  setSampleAudience: (v: string) => void;
+  /** When set, calibrate against this mission instead of the typed sample. */
+  missionId?: string;
   ensurePersona: () => Promise<string>;
   onGenerated: (draft: { subject: string; body: string }) => void;
 }) {
@@ -1068,7 +624,12 @@ function CalibrateStep({
     setGenError(null);
     try {
       const pid = await ensurePersona();
-      const data = await agents.calibrateDraft(pid);
+      const data = await agents.calibrateDraft(
+        pid,
+        missionId
+          ? { mission_id: missionId }
+          : { sample: { offer: sampleOffer.trim(), audience: sampleAudience.trim() } }
+      );
       setRecipient(data.recipient);
       setSynthetic(Boolean(data.synthetic));
       setSubject(data.subject);
@@ -1087,7 +648,7 @@ function CalibrateStep({
     } finally {
       setGenerating(false);
     }
-  }, [ensurePersona, setSubject, setBody, setInstructions, onGenerated]);
+  }, [ensurePersona, setSubject, setBody, setInstructions, onGenerated, sampleOffer, sampleAudience, missionId]);
 
   // Generate a draft on first entry (only if we don't already have one).
   const triedRef = useRef(false);
@@ -1168,8 +729,36 @@ function CalibrateStep({
     <div className="pw-step">
       <StepHead
         q="Let's calibrate on a real draft."
-        hint="We drafted a real email from your voice. Tell the chat how to fix it - or highlight any part to rewrite just that bit. Every instruction is learned as your taste."
+        hint={
+          missionId
+            ? "We drafted a real email from your voice using this mission's offer and audience. Tell the chat how to fix it, or highlight any part to rewrite just that bit. Every instruction is learned as your taste."
+            : "A voice is just how you write, so give a sample of what you'd be sending and to whom. We draft a real email from it - tell the chat how to fix it, or highlight any part to rewrite just that bit. Every instruction is learned as your taste."
+        }
       />
+
+      {!missionId && (
+        <div className="pw-calib-sample">
+          <label className="pw-field">
+            <span className="pw-field-label">Sample offer (what you'd be sending)</span>
+            <input
+              className="pw-input"
+              value={sampleOffer}
+              onChange={(e) => setSampleOffer(e.target.value)}
+              placeholder="e.g. sponsorship for a 500-person hackathon"
+            />
+          </label>
+          <label className="pw-field">
+            <span className="pw-field-label">Sample audience (who you'd reach)</span>
+            <input
+              className="pw-input"
+              value={sampleAudience}
+              onChange={(e) => setSampleAudience(e.target.value)}
+              placeholder="e.g. heads of developer relations at infra startups"
+            />
+          </label>
+          <p className="pw-field-hint">Just for calibration - this isn't saved to the voice. Your missions carry the real offer and audience.</p>
+        </div>
+      )}
 
       <div className="pw-calib-toolbar">
         {generating ? (
@@ -1276,7 +865,6 @@ function CalibrateStep({
 function OverviewStep({
   name,
   mode,
-  facts,
   exemplars,
   persona,
   editing,
@@ -1284,7 +872,6 @@ function OverviewStep({
 }: {
   name: string;
   mode: MissionMode | null;
-  facts: FactItem[];
   exemplars: ExItem[];
   persona: Persona | null;
   editing: boolean;
@@ -1302,19 +889,6 @@ function OverviewStep({
         sub={PURPOSES.find((p) => p.value === mode)?.label ?? 'No purpose set'}
         onEdit={() => onEdit('frame')}
       />
-
-      <OverviewRow title="Substance" sub={`${facts.length} fact${facts.length === 1 ? '' : 's'}`} onEdit={() => onEdit('substance')}>
-        {facts.length > 0 ? (
-          <ul className="pw-ov-list">
-            {facts.slice(0, 4).map((f, i) => (
-              <li key={i}>{f.claim}</li>
-            ))}
-            {facts.length > 4 && <li className="pw-ov-more">+{facts.length - 4} more</li>}
-          </ul>
-        ) : (
-          <p className="pw-empty">Nothing added.</p>
-        )}
-      </OverviewRow>
 
       <OverviewRow
         title="Writing samples"

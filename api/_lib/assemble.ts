@@ -189,7 +189,7 @@ export async function assembleDraftContext(
     role: contact.role,
     headline: contact.headline,
   });
-  const facts = await assembleAllowedFacts(scope, uid, persona?._id ?? null, target._id, retrievalQuery, {
+  const facts = await assembleAllowedFacts(scope, uid, mission._id, target._id, retrievalQuery, {
     excludedFactIds: persona?.excludedFactIds ?? [],
     recipient: { role: contact.role, headline: contact.headline },
     // Individualized research from the verification gate - facts about THIS
@@ -235,15 +235,16 @@ export async function assembleDraftContext(
 }
 
 /**
- * `allowedFacts` = the persona's context bank (person- + persona-scoped, relevance-
- * ranked) + the target's latest evidence bullets. Evidence ids are stable strings
- * (`evidence:<packId>:<index>`) so claims can cite them. Vector search narrows a
- * large bank; on any failure it falls back to recency so grounding still exists.
+ * `allowedFacts` = the context bank for this draft (person-level memory bank +
+ * this mission's substance, relevance-ranked) + the target's latest evidence
+ * bullets. Evidence ids are stable strings (`evidence:<packId>:<index>`) so
+ * claims can cite them. Vector search narrows a large bank; on any failure it
+ * falls back to recency so grounding still exists.
  */
 export async function assembleAllowedFacts(
   scope: Scope,
   uid: string,
-  personaId: string | null,
+  missionId: string | null,
   targetId: string,
   query: string,
   opts: {
@@ -255,11 +256,11 @@ export async function assembleAllowedFacts(
   cache?: DraftContextCache
 ): Promise<AllowedFact[]> {
   const facts: AllowedFact[] = [];
-  // Default (person-level) facts this voice opted out of - drop them from
+  // Memory-bank (person-level) facts this voice opted out of - drop them from
   // grounding so a cleared default never resurfaces in a generated email.
   const excluded = new Set(opts.excludedFactIds ?? []);
 
-  const contextFacts = await fetchContextAllowedFacts(scope, uid, personaId, query, excluded, cache);
+  const contextFacts = await fetchContextAllowedFacts(scope, uid, missionId, query, excluded, cache);
   for (const f of contextFacts) {
     facts.push(f);
   }
@@ -317,37 +318,37 @@ function senderHeadline(profile: ProfileDoc | null): string | null {
 async function fetchContextAllowedFacts(
   scope: Scope,
   uid: string,
-  personaId: string | null,
+  missionId: string | null,
   missionGoal: string,
   excluded: Set<string>,
   cache?: DraftContextCache
 ): Promise<AllowedFact[]> {
-  const key = `${uid}|${personaId ?? ''}|${missionGoal}|${[...excluded].sort().join(',')}`;
+  const key = `${uid}|${missionId ?? ''}|${missionGoal}|${[...excluded].sort().join(',')}`;
   if (cache) {
     let p = cache.contextFacts.get(key);
     if (!p) {
-      p = loadContextAllowedFacts(scope, uid, personaId, missionGoal, excluded, cache);
+      p = loadContextAllowedFacts(scope, uid, missionId, missionGoal, excluded, cache);
       cache.contextFacts.set(key, p);
     }
     return p;
   }
-  return loadContextAllowedFacts(scope, uid, personaId, missionGoal, excluded);
+  return loadContextAllowedFacts(scope, uid, missionId, missionGoal, excluded);
 }
 
 async function loadContextAllowedFacts(
   scope: Scope,
   uid: string,
-  personaId: string | null,
+  missionId: string | null,
   missionGoal: string,
   excluded: Set<string>,
   cache?: DraftContextCache
 ): Promise<AllowedFact[]> {
-  const ranked = await fetchRankedContextFacts(uid, personaId, missionGoal, cache);
+  const ranked = await fetchRankedContextFacts(uid, missionId, missionGoal, cache);
   let contextFacts = ranked;
   if (contextFacts === null) {
     const candidates = await scope.collection<ContextFactDoc>('context_facts').find(
-      personaId
-        ? ({ $or: [{ scope: 'person' }, { scope: 'persona', personaId }] } as Record<string, unknown>)
+      missionId
+        ? ({ $or: [{ scope: 'person' }, { scope: 'mission', missionId }] } as Record<string, unknown>)
         : { scope: 'person' }
     );
     candidates.sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0));
@@ -374,7 +375,7 @@ async function queryVectorForMissionGoal(missionGoal: string, cache?: DraftConte
 /** Relevance-rank the context bank via Atlas Vector Search. null ⇒ unavailable. */
 async function fetchRankedContextFacts(
   uid: string,
-  personaId: string | null,
+  missionId: string | null,
   missionGoal: string,
   cache?: DraftContextCache
 ): Promise<Array<{ _id: string; claim: string }> | null> {
@@ -400,7 +401,7 @@ async function fetchRankedContextFacts(
         .toArray();
 
     const runs = [search({ userId: uid, scope: 'person' })];
-    if (personaId) runs.push(search({ userId: uid, scope: 'persona', personaId }));
+    if (missionId) runs.push(search({ userId: uid, scope: 'mission', missionId }));
     const results = (await Promise.all(runs)).flat();
     if (results.length === 0) return null;
     results.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));

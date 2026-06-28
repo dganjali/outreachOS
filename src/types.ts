@@ -105,8 +105,10 @@ export interface Persona {
   user_id?: string;
   name: string;
   mode: MissionMode | null;
-  offer: string | null;
-  audience: string | null;
+  // DEPRECATED: a voice is now purely email style. Offer/audience live on the
+  // mission. Kept optional for back-compat with pre-split personas.
+  offer?: string | null;
+  audience?: string | null;
   style_profile: StyleProfile;
   style_profile_version: number;
   onboarding_completed_at: string | null;
@@ -118,7 +120,10 @@ export interface Persona {
 
 export interface ContextFact {
   id: string;
-  scope: 'person' | 'persona';
+  // 'person' = memory bank (shared); 'mission' = this campaign's substance;
+  // 'persona' = legacy voice-owned facts (migrated to 'person').
+  scope: 'person' | 'mission' | 'persona';
+  mission_id: string | null;
   persona_id: string | null;
   type: 'proof' | 'metric' | 'offer' | 'audience' | 'credential' | 'constraint';
   claim: string;
@@ -260,6 +265,9 @@ export interface ProfileAsset {
   id: string;
   user_id: string;
   kind: ProfileAssetKind;
+  // 'person' (default) = memory bank; 'mission' = attached to one mission only.
+  scope?: 'person' | 'mission';
+  mission_id?: string | null;
   storage_path: string;
   file_name: string;
   file_size: number;
