@@ -406,6 +406,30 @@ export interface SentMessageDoc extends BaseDoc {
   attachResume?: boolean;
 }
 
+// Global per-account "already contacted" ledger. One row per person this user
+// has sent (or queued) an INITIAL email to, across ALL missions - permanent
+// cross-mission dedup so a person enters the account's outreach exactly once
+// ever. The per-mission guards still run for re-sourcing; this is the wider net.
+// Survives target/mission deletion, like sent history.
+export interface ContactLedgerDoc extends BaseDoc {
+  emailKey: string | null; // lower-cased email, when known
+  identityKey: string; // `${linkedinUrl}|${name}` lower-cased (the contactKey shape)
+  firstContactedAt: Date;
+  missionId: string; // first mission that reached them (provenance only)
+}
+
+// Platform-wide, ANONYMIZED outreach-pressure tally. `_id` is a salted hash of a
+// contact identity (email or linkedin/name) - not reversible to a person and not
+// tied to any account - so ranking can spread load across the whole platform
+// (stop every account hammering the same popular profiles) without sharing who
+// contacted whom. NOT a BaseDoc: no userId, accessed via adminDb only. See
+// api/_lib/contacted.ts.
+export interface ContactHeatDoc {
+  _id: string; // salted hash of the identity key
+  sends: number; // total initial emails across ALL accounts
+  lastContactedAt: Date;
+}
+
 export interface ReplyDoc extends BaseDoc {
   contactId: string;
   sentMessageId: string | null;
@@ -644,6 +668,16 @@ export const INDEX_SPEC: Record<string, Array<{ keys: Record<string, 1 | -1>; op
   ],
   suppressions: [
     { keys: { userId: 1, email: 1 }, options: { unique: true } },
+  ],
+  contact_ledger: [
+    // One ledger row per email per account (when an email is known)…
+    { keys: { userId: 1, emailKey: 1 }, options: { unique: true, partialFilterExpression: { emailKey: { $type: 'string' } } } },
+    // …and one per linkedin/name identity (always set), so email-less people dedup too.
+    { keys: { userId: 1, identityKey: 1 }, options: { unique: true } },
+  ],
+  contact_heat: [
+    // Lookup is by _id (the salted hash); this index is only for decay/cleanup scans.
+    { keys: { lastContactedAt: 1 } },
   ],
   pipeline_runs: [
     { keys: { userId: 1, missionId: 1, createdAt: -1 } },

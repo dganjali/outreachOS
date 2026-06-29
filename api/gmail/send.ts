@@ -6,6 +6,7 @@ import { getResumeAttachment, hasResume } from '../_lib/attachments';
 import { scheduleFollowups, isSuppressed } from '../_lib/sequencing';
 import { evaluateSend } from '../_lib/deliverability';
 import { recordOutcome } from '../_lib/outcomes';
+import { recordContacted } from '../_lib/contacted';
 import type {
   ContactDoc,
   EmailSequenceDoc,
@@ -193,6 +194,16 @@ export default async function handler(req: Request, res: Response) {
   // scheduledSendAt. The send-due-touches cron picks it up and does the actual
   // send (plus follow-up scheduling for the initial touch). Don't hit Gmail now.
   if (scheduledSendAt) {
+    // A queued initial touch is a commitment to email this person — record the
+    // ledger now (the cron that later sends it won't re-record).
+    if (touchIndex === 0) {
+      await recordContacted(scope, {
+        email: toEmail,
+        linkedinUrl: contact.linkedinUrl,
+        name: contact.name,
+        missionId: seq.missionId,
+      });
+    }
     return res.status(200).json({
       sent_message_id: sentRowId,
       mode: 'scheduled',
@@ -238,6 +249,15 @@ export default async function handler(req: Request, res: Response) {
         sentAt,
       });
       await scope.collection<ContactDoc>('contacts').updateById(contact._id, { status: 'contacted' });
+
+      // Global "already contacted" ledger + cross-account heat: this person is now
+      // permanently off-limits for re-emailing across every mission on this account.
+      await recordContacted(scope, {
+        email: toEmail,
+        linkedinUrl: contact.linkedinUrl,
+        name: contact.name,
+        missionId: seq.missionId,
+      });
 
       // Credit the facts/exemplars behind this email with a 'sent' so per-fact
       // reply-rate has a denominator. Best-effort.

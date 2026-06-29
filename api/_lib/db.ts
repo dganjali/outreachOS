@@ -53,6 +53,8 @@ export const COL = {
   suppressions: 'suppressions',
   pipelineRuns: 'pipeline_runs',
   campaignPolicies: 'campaign_policies',
+  // Global per-account "already contacted" ledger (permanent cross-mission dedup).
+  contactLedger: 'contact_ledger',
   // Personalization layer (the persona/taste model). See shared/schemas.ts.
   personas: 'personas',
   personaVersions: 'persona_versions',
@@ -88,6 +90,7 @@ const OWNERSHIP: Record<CollectionName, OwnershipMode> = {
   suppressions: 'userId',
   pipeline_runs: 'userId',
   campaign_policies: 'userId',
+  contact_ledger: 'userId',
   personas: 'userId',
   persona_versions: 'userId',
   context_facts: 'userId',

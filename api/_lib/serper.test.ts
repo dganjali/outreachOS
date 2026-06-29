@@ -1,6 +1,6 @@
 import { describe, it, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseOrganic, buildPeopleQuery, buildPeopleQueries, profileKey, search } from './serper';
+import { parseOrganic, buildPeopleQuery, buildPeopleQueries, profileKey, search, parseLinkedinTitle, seededRotate } from './serper';
 
 describe('parseOrganic', () => {
   it('extracts title/link/snippet from organic results', () => {
@@ -75,6 +75,71 @@ describe('profileKey', () => {
       profileKey('https://linkedin.com/in/janedoe')
     );
     assert.notEqual(profileKey('https://linkedin.com/in/jane'), profileKey('https://linkedin.com/in/john'));
+  });
+});
+
+describe('parseLinkedinTitle', () => {
+  it('parses the canonical "Name - Title - Company | LinkedIn" shape', () => {
+    const p = parseLinkedinTitle('Manny Okafor - Senior Community Investment Manager - Big Bank | LinkedIn');
+    assert.equal(p.name, 'Manny Okafor');
+    assert.equal(p.role, 'Senior Community Investment Manager');
+    assert.equal(p.company, 'Big Bank');
+  });
+
+  it('splits "Role at Company" in a two-part title', () => {
+    const p = parseLinkedinTitle('Jane Doe - Director, Sponsorships at Shopify | LinkedIn');
+    assert.equal(p.name, 'Jane Doe');
+    assert.equal(p.role, 'Director, Sponsorships');
+    assert.equal(p.company, 'Shopify');
+  });
+
+  it('keeps the role when the title is truncated (no company segment)', () => {
+    const p = parseLinkedinTitle('Manny Okafor - Senior Community Investment Manager');
+    assert.equal(p.role, 'Senior Community Investment Manager');
+  });
+
+  it('treats a bare second segment as a company, not a role', () => {
+    const p = parseLinkedinTitle('Bob Lee - Shopify | LinkedIn');
+    assert.equal(p.role, null);
+    assert.equal(p.company, 'Shopify');
+  });
+
+  it('strips trailing "· Experience" noise Google appends', () => {
+    const p = parseLinkedinTitle('Ada Lin - Community Manager - Acme · Experience: Acme · 500+ connections');
+    assert.equal(p.name, 'Ada Lin');
+    assert.equal(p.role, 'Community Manager');
+  });
+
+  it('returns nulls for unparseable input', () => {
+    assert.deepEqual(parseLinkedinTitle(''), { name: null, role: null, company: null });
+  });
+});
+
+describe('seededRotate + seeded query rotation', () => {
+  it('is the identity for seed 0 / undefined', () => {
+    const arr = ['a', 'b', 'c'];
+    assert.deepEqual(seededRotate(arr, 0), arr);
+    assert.deepEqual(seededRotate(arr, undefined), arr);
+  });
+
+  it('rotates by the seed so different seeds pick different leading terms', () => {
+    const arr = ['a', 'b', 'c', 'd'];
+    assert.deepEqual(seededRotate(arr, 1), ['b', 'c', 'd', 'a']);
+    assert.deepEqual(seededRotate(arr, 2), ['c', 'd', 'a', 'b']);
+  });
+
+  it('produces the same un-seeded query when no seed is passed', () => {
+    const spec = { companyName: 'Acme', functionKeywords: ['community', 'devrel'], seniorityKeywords: ['manager'] };
+    assert.deepEqual(buildPeopleQueries(spec), buildPeopleQueries(spec, 0));
+  });
+
+  it('rotates the synonym subset when more keywords exist than fit the query', () => {
+    const spec = {
+      companyName: 'Acme',
+      functionKeywords: ['a', 'b', 'c', 'd', 'e', 'f', 'g'], // 7 > the 6 slice cap
+      seniorityKeywords: ['manager'],
+    };
+    assert.notDeepEqual(buildPeopleQueries(spec, 1), buildPeopleQueries(spec, 3));
   });
 });
 

@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolvePoolWithBudget, fillWithDisplayOnly, rankCandidates, narrowIcpBySelection, seedToSuggestion, dedupeAgainstMission, type ResolvePoolDeps, type ContactSuggestion } from './contacts';
+import { resolvePoolWithBudget, fillWithDisplayOnly, rankCandidates, narrowIcpBySelection, seedToSuggestion, dedupeAgainstMission, dedupeAgainstContacted, type ResolvePoolDeps, type ContactSuggestion } from './contacts';
 import { defaultContactIcp } from '../_lib/icp';
 import type { ResolvedEmail } from '../_lib/email-resolver';
 import type { ScrapeResult } from '../_lib/web-scrape';
@@ -350,6 +350,86 @@ describe('rankCandidates - the bank example at enterprise size', () => {
   });
 });
 
+describe('rankCandidates - function gate drops off-function noise when the pool is rich', () => {
+  const icp = {
+    ...defaultContactIcp('sponsorship'),
+    functions: ['community', 'sponsorship'],
+    functionKeywords: ['community', 'sponsorship'],
+  };
+
+  it('drops in-band off-function people once there are >=3 on-function candidates', () => {
+    const suggestions = [
+      suggestion('Owen Owner', 'Community Manager'),
+      suggestion('Pat Programs', 'Sponsorship Manager'),
+      suggestion('Cara Comm', 'Community Programs Manager'),
+      // in-band (manager) but off-function — should be dropped by the gate
+      suggestion('Fin Money', 'Finance Manager'),
+    ];
+    const result = rankCandidates(suggestions, { icp, sizeTier: 'mid', target, mission, profile: null });
+    const names = result.rows.map((r) => r.name);
+    assert.ok(!names.includes('Fin Money'), 'off-function finance manager is dropped');
+    assert.equal(names.length, 3);
+  });
+
+  it('keeps an off-function person when the on-function pool is thin (<3)', () => {
+    const suggestions = [
+      suggestion('Owen Owner', 'Community Manager'),
+      suggestion('Fin Money', 'Finance Manager'),
+    ];
+    const names = rankCandidates(suggestions, { icp, sizeTier: 'mid', target, mission, profile: null }).rows.map((r) => r.name);
+    assert.ok(names.includes('Fin Money'), 'thin pool keeps everyone so the company is not emptied');
+  });
+});
+
+describe('rankCandidates - seeded exploration (Fix 2a)', () => {
+  const icp = {
+    ...defaultContactIcp('sponsorship'),
+    functions: ['community'],
+    functionKeywords: ['community'],
+  };
+  // Three interchangeable on-function, same-level managers ⇒ a genuine near-tie.
+  const peers = [
+    suggestion('Amy Comm', 'Community Manager'),
+    suggestion('Bob Comm', 'Community Manager'),
+    suggestion('Cy Comm', 'Community Manager'),
+  ];
+  const rankWith = (seed?: number) =>
+    rankCandidates(peers, { icp, sizeTier: 'mid', target, mission, profile: null, seed }).rows.map((r) => r.name);
+
+  it('no seed ⇒ deterministic order (back-compat)', () => {
+    assert.deepEqual(rankWith(), rankWith());
+  });
+
+  it('same seed ⇒ identical order', () => {
+    assert.deepEqual(rankWith(12345), rankWith(12345));
+  });
+
+  it('different seeds rotate who surfaces first among near-ties', () => {
+    const tops = new Set<string>();
+    for (let s = 1; s <= 30; s++) tops.add(rankWith(s)[0]);
+    assert.ok(tops.size >= 2, `exploration should rotate the top pick across seeds, saw ${[...tops].join(', ')}`);
+  });
+});
+
+describe('rankCandidates - cross-account heat penalty (Fix 2b)', () => {
+  const icp = {
+    ...defaultContactIcp('sponsorship'),
+    functions: ['community'],
+    functionKeywords: ['community'],
+  };
+  const a = suggestion('Amy Comm', 'Community Manager');
+  const b = suggestion('Bob Comm', 'Community Manager');
+  const keyOf = (s: ContactSuggestion) => `${(s.linkedin_url ?? '').toLowerCase()}|${s.name.toLowerCase()}`;
+
+  it('down-ranks a heavily-contacted profile below an equal, cooler one', () => {
+    // Without heat the two tie (and seed is off → input order). With A penalized,
+    // B must come first.
+    const heat = new Map([[keyOf(a), 0.5]]);
+    const order = rankCandidates([a, b], { icp, sizeTier: 'mid', target, mission, profile: null, heat }).rows.map((r) => r.name);
+    assert.equal(order[0], 'Bob Comm', 'the hot profile A is pushed below the cool profile B');
+  });
+});
+
 describe('narrowIcpBySelection - user-chosen contact types narrow the ICP', () => {
   const icp: ContactIcp = {
     ...defaultContactIcp('sponsorship'),
@@ -479,5 +559,33 @@ describe('dedupeAgainstMission', () => {
   it('keeps everyone when the mission has no prior contacts', () => {
     const fresh = dedupeAgainstMission([withEmail('A', 'a@x.co'), withEmail('B', 'b@x.co')], []);
     assert.equal(fresh.length, 2);
+  });
+});
+
+describe('dedupeAgainstContacted - global per-account ledger', () => {
+  const withEmail = (name: string, email: string | null): ContactRow => ({ ...row(name), email, emailStatus: email ? 'verified' : 'none' });
+
+  it('drops a candidate already contacted in ANOTHER mission (by email)', () => {
+    const ledger = { emailKeys: new Set(['ada@acme.co']), identityKeys: new Set<string>() };
+    const fresh = dedupeAgainstContacted([withEmail('Ada Lovelace', 'ada@acme.co'), withEmail('New Person', 'new@acme.co')], [], ledger);
+    assert.deepEqual(fresh.map((r) => r.name), ['New Person'], 'permanent cross-mission dedup');
+  });
+
+  it('drops an email-less candidate matching a ledger linkedin/name identity', () => {
+    const ledger = { emailKeys: new Set<string>(), identityKeys: new Set(['https://linkedin.com/in/ada|ada lovelace']) };
+    const dupe: ContactRow = { ...row('Ada Lovelace'), linkedinUrl: 'https://linkedin.com/in/ada' };
+    const fresh = dedupeAgainstContacted([dupe, row('Brand New')], [], ledger);
+    assert.deepEqual(fresh.map((r) => r.name), ['Brand New']);
+  });
+
+  it('applies the per-mission prior AND the ledger together', () => {
+    const prior = [{ email: 'in@mission.co', linkedinUrl: null, name: 'In Mission' }];
+    const ledger = { emailKeys: new Set(['in@ledger.co']), identityKeys: new Set<string>() };
+    const fresh = dedupeAgainstContacted(
+      [withEmail('In Mission', 'in@mission.co'), withEmail('In Ledger', 'in@ledger.co'), withEmail('Fresh', 'fresh@x.co')],
+      prior,
+      ledger
+    );
+    assert.deepEqual(fresh.map((r) => r.name), ['Fresh']);
   });
 });

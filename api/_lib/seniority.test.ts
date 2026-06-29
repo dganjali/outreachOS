@@ -170,6 +170,43 @@ describe('scoreContact - size relativity', () => {
   });
 });
 
+describe('unknown size band no longer admits execs', () => {
+  const icp = defaultUnknownIcp();
+  function defaultUnknownIcp() {
+    // ICP maxLevel is VP so the SIZE band is the binding constraint (otherwise the
+    // ICP cap would dominate and we wouldn't be testing the size band at all).
+    return {
+      functions: ['partnerships'],
+      functionKeywords: ['partnerships'],
+      seniority: { idealLevels: ['manager', 'director'] as const, maxLevel: 'vp' as const },
+      disqualifierKeywords: [],
+      routerOk: false,
+      geo: { preferred: null, scope: 'global' as const, strict: false },
+      rationale: '',
+    };
+  }
+
+  it('caps an unknown-size company at senior_director, not VP', () => {
+    const band = effectiveBand(icp, null);
+    assert.equal(band.hardMax, rank('senior_director'));
+  });
+
+  it('drops an off-function VP at an unknown-size company', () => {
+    const s = scoreContact({ title: 'VP of Sales', icp, sizeTier: null });
+    assert.equal(s.disqualified, true, 'a VP is above the unknown-size cap and off-function');
+  });
+});
+
+describe('matchFunctions light stemming', () => {
+  it('matches engineer↔engineering and design↔designer', () => {
+    assert.deepEqual(matchFunctions('Robotics Research Engineer', ['engineering']), ['engineering']);
+    assert.deepEqual(matchFunctions('Senior Product Designer', ['design']), ['design']);
+  });
+  it('does not match short or unrelated words', () => {
+    assert.deepEqual(matchFunctions('Operations Manager', ['engineering']), []);
+  });
+});
+
 describe('SENIORITY_RANK monotonicity', () => {
   it('is strictly increasing junior→senior', () => {
     const order = ['ic', 'senior_ic', 'lead', 'manager', 'senior_manager', 'director', 'senior_director', 'vp', 'svp', 'cxo', 'founder'] as const;
