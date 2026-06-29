@@ -25,6 +25,7 @@ import {
   withPolicyDefaults,
 } from '../_lib/autopilot';
 import { isPaidPlan } from '../../shared/plans';
+import { recordContacted } from '../_lib/contacted';
 import type {
   CampaignPolicyDoc,
   ContactDoc,
@@ -142,7 +143,7 @@ export default async function handler(req: Request, res: Response) {
       // 4. Auto-send: queue scheduled sends within the daily cap + send window.
       if (policy.autoSend && passing.length > 0) {
         const cap = remainingCapToday(policy, now);
-        const queueable: Array<{ seq: EmailSequenceDoc; toEmail: string }> = [];
+        const queueable: Array<{ seq: EmailSequenceDoc; toEmail: string; contact: ContactDoc }> = [];
         for (const { seq, contact } of passing) {
           if (queueable.length >= cap) break;
           const toEmail = contact.email?.trim();
@@ -174,14 +175,22 @@ export default async function handler(req: Request, res: Response) {
             await setState(scope, seq._id, 'queued');
             continue;
           }
-          queueable.push({ seq, toEmail });
+          queueable.push({ seq, toEmail, contact });
         }
 
         const slots = nextSendSlots(policy, queueable.length, now);
         for (let i = 0; i < queueable.length; i++) {
-          const { seq, toEmail } = queueable[i];
+          const { seq, toEmail, contact } = queueable[i];
           await queueSend(scope, seq, toEmail, slots[i]);
           await setState(scope, seq._id, 'queued');
+          // Record the global "already contacted" ledger + cross-account heat the
+          // moment we commit the initial touch, so no future mission re-emails them.
+          await recordContacted(scope, {
+            email: toEmail,
+            linkedinUrl: contact.linkedinUrl,
+            name: contact.name,
+            missionId: seq.missionId,
+          });
           out.queued++;
         }
         if (out.queued > 0) {

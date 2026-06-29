@@ -11,7 +11,14 @@ import {
 import { CONTACTS_SYSTEM, CONTACTS_FROM_SERP_SYSTEM, type MissionMode } from '../_lib/prompts';
 import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
 import { resolveCompanyDomain, enrichCompanySize } from '../_lib/company-enrich';
-import { serperEnabled, searchPeoplePool, type PeopleQuerySpec } from '../_lib/serper';
+import {
+  serperEnabled,
+  searchPeoplePool,
+  parseLinkedinTitle,
+  profileKey,
+  type PeopleQuerySpec,
+  type SerperOrganicResult,
+} from '../_lib/serper';
 import { resolveEmail, type ContactEmailFields, type ResolvedEmail } from '../_lib/email-resolver';
 import { scrapeCompanyEmails, type ScrapeResult } from '../_lib/web-scrape';
 import { verifyContactFit, verdictAccepted, type ContactVerification } from '../_lib/contact-verify';
@@ -23,6 +30,7 @@ import {
   senderExclusions,
 } from '../_lib/sender-context';
 import { defaultContactIcp, synthesizeContactIcp } from '../_lib/icp';
+import { loadContactedKeys, loadHeatFor, heatPenalty, type ContactedKeys } from '../_lib/contacted';
 import {
   scoreContact,
   sizeTierFromCount,
@@ -65,6 +73,11 @@ const CANDIDATE_POOL_CAP = 20;
 // "keep 1" hot path it resolves up to LOOKAHEAD at once), so keeping it small
 // bounds wasted spend while the higher cap above adds only free finder misses.
 const RESOLVE_LOOKAHEAD = 3;
+// Once discovery has at least this many ON-function candidates, off-function
+// people (even in-band ones) are dropped rather than kept as low-scored noise.
+// Below it we keep them so a thin company isn't emptied (the empty-pool fallback
+// in rankCandidates is the final backstop).
+const FUNCTION_GATE_MIN = 3;
 
 export default async function handler(req: Request, res: Response) {
   if (req.method !== 'POST') return methodNotAllowed(res, ['POST']);
@@ -123,14 +136,22 @@ export default async function handler(req: Request, res: Response) {
   });
 
   try {
-    const discoveryArgs: DiscoveryArgs = { target: { ...target, domain }, mission, icp, sizeTier, profile };
+    // Exploration seed varies per re-sourced target doc, so repeated/parallel
+    // runs probe a different slice of the candidate pool (queries + ranking).
+    const seed = seedFromId(target._id);
+    const discoveryArgs: DiscoveryArgs = { target: { ...target, domain }, mission, icp, sizeTier, profile, seed };
     const suggestions = seeded
       ? [seedToSuggestion(seeded)]
       : useSerper
         ? await runSerperDiscovery(discoveryArgs)
         : await runWebSearchOnly(discoveryArgs);
 
-    const ranked = rankCandidates(suggestions, { icp, sizeTier, target, mission, profile });
+    // Cross-account heat so the platform doesn't pile onto the same popular
+    // profiles; combined with the per-target seed above, repeated/parallel runs
+    // surface DIFFERENT valid people.
+    const heatRaw = await loadHeatFor(suggestions.map(suggestionKey));
+    const heat = new Map([...heatRaw].map(([k, v]) => [k, heatPenalty(v)] as const));
+    const ranked = rankCandidates(suggestions, { icp, sizeTier, target, mission, profile, seed, heat });
 
     // The recipient-verification gate: research each reachable candidate and drop
     // the ones who don't actually fit the mission (wrong person, former
@@ -218,8 +239,11 @@ export default async function handler(req: Request, res: Response) {
     // duplicate sends to someone already emailed. Drop any candidate whose
     // verified email - or LinkedIn/name when there's no email yet - already
     // belongs to a contact in this mission.
+    // Per-mission prior (also dedupes display-only rows within the run) UNION the
+    // account-wide contacted ledger (permanent cross-mission dedup).
     const priorContacts = await scope.collection<ContactDoc>('contacts').find({ missionId: mission._id });
-    const fresh = dedupeAgainstMission(rows, priorContacts);
+    const ledger = await loadContactedKeys(scope);
+    const fresh = dedupeAgainstContacted(rows, priorContacts, ledger);
 
     if (fresh.length === 0) {
       // Everyone discovered is already in the mission - not a failure, just
@@ -373,6 +397,9 @@ interface DiscoveryArgs {
   icp: ContactIcp;
   sizeTier: SizeTier | null;
   profile: ProfileDoc | null;
+  // Exploration seed (per target doc); rotates the Serper query subset so re-runs
+  // pull a partly different candidate pool from Google.
+  seed?: number;
 }
 
 /** People mode: turn the target's seeded person into the single discovery
@@ -451,7 +478,7 @@ async function runSerperDiscovery(args: DiscoveryArgs): Promise<ContactSuggestio
 
   let results;
   try {
-    results = await searchPeoplePool(spec, 10);
+    results = await searchPeoplePool(spec, 10, args.seed);
   } catch (err) {
     console.error('serper_search_failed', err);
     return runWebSearchOnly(args);
@@ -489,7 +516,54 @@ async function runSerperDiscovery(args: DiscoveryArgs): Promise<ContactSuggestio
   const parsed = extractJson<{ contacts: ContactSuggestion[] }>(message);
   if (!parsed.ok || !parsed.data?.contacts) return runWebSearchOnly(args);
   if (parsed.data.contacts.length === 0) return runWebSearchOnly(args);
-  return parsed.data.contacts;
+  // The LLM is good at SELECTING who's plausible; it is NOT a reliable source of
+  // the verbatim title (it paraphrases, which corrupts seniority parsing). Trust
+  // the LinkedIn SERP title for the role and the snippet for extra function text,
+  // matched back to each LLM pick by profile URL.
+  return overlaySerpTitles(parsed.data.contacts, results);
+}
+
+/**
+ * Overlay the deterministic LinkedIn-title parse onto the LLM's selected
+ * contacts: prefer the verbatim SERP role for scoring, and backfill the headline
+ * with the snippet so function matching has the profile text to work with.
+ * Matched by normalized profile URL; an LLM pick with no SERP match is unchanged.
+ */
+export function overlaySerpTitles(contacts: ContactSuggestion[], results: SerperOrganicResult[]): ContactSuggestion[] {
+  const byProfile = new Map<string, SerperOrganicResult>();
+  for (const r of results) byProfile.set(profileKey(r.link), r);
+  return contacts.map((c) => {
+    const r = c.linkedin_url ? byProfile.get(profileKey(c.linkedin_url)) : undefined;
+    if (!r) return c;
+    const parsed = parseLinkedinTitle(r.title);
+    return {
+      ...c,
+      // Verbatim SERP role wins; fall back to the LLM role only when the title
+      // had no parseable role part.
+      role: parsed.role ?? c.role,
+      // Give the scorer the snippet text (more function keywords) when the LLM
+      // left the headline empty.
+      headline: c.headline ?? r.snippet ?? null,
+    };
+  });
+}
+
+/** Deterministically turn a LinkedIn SERP result into a discovery candidate -
+ *  no LLM. Used by the offline contact-quality eval so the scorer is tested on
+ *  the same parsed signal production feeds it. */
+export function serpResultToSuggestion(r: SerperOrganicResult): ContactSuggestion {
+  const parsed = parseLinkedinTitle(r.title);
+  return {
+    name: parsed.name ?? r.title,
+    role: parsed.role ?? '',
+    linkedin_url: r.link || null,
+    location: null,
+    headline: r.snippet || null,
+    email: null,
+    likely_email_pattern: null,
+    confidence: 0.6,
+    reasoning: 'parsed from linkedin serp',
+  };
 }
 
 // Map the ICP's ideal levels to LinkedIn-friendly query words.
@@ -540,9 +614,24 @@ interface RankResult {
 
 export function rankCandidates(
   suggestions: ContactSuggestion[],
-  ctx: { icp: ContactIcp; sizeTier: SizeTier | null; target: TargetDoc; mission: MissionDoc; profile: ProfileDoc | null }
+  ctx: {
+    icp: ContactIcp;
+    sizeTier: SizeTier | null;
+    target: TargetDoc;
+    mission: MissionDoc;
+    profile: ProfileDoc | null;
+    // Optional exploration seed. When set, a tiny deterministic jitter perturbs
+    // each candidate's score so near-ties rotate per run instead of always
+    // surfacing the same #1 (and it doubles as a stable tie-breaker). Omitted ⇒
+    // fully deterministic ordering (unit tests, manual single-target retries).
+    seed?: number;
+    // Per-candidate cross-account heat (CONTACT_HEAT). identityKey → penalty
+    // multiplier in (0,1]; applied to the composite score to spread popular
+    // profiles across accounts. Omitted ⇒ no penalty.
+    heat?: Map<string, number>;
+  }
 ): RankResult {
-  const { icp, sizeTier, target, mission, profile } = ctx;
+  const { icp, sizeTier, target, mission, profile, seed, heat } = ctx;
   const exclusions = senderExclusions(profile);
   const cleaned = suggestions.filter((c) => c?.name && !isExcludedName(c.name, exclusions));
 
@@ -568,7 +657,26 @@ export function rankCandidates(
     kept = cleaned.map((c) => ({ c, s: score(c, true) })).filter((x) => !x.s.disqualified);
   }
 
-  kept.sort((a, b) => b.s.score - a.s.score);
+  // With a healthy on-function pool, drop the in-band OFF-function people: they
+  // are the wrong team, not the wrong seniority, and keeping them at funcScore
+  // 0.3 is exactly the "right function?" noise this engine exists to remove.
+  const onFunction = kept.filter((x) => x.s.matchedFunctions.length > 0);
+  if (onFunction.length >= FUNCTION_GATE_MIN) kept = onFunction;
+
+  // Effective ordering score = composite × cross-account heat penalty + seeded
+  // exploration jitter. Both are no-ops unless their input is supplied, so the
+  // base ordering stays deterministic; the stored `confidence` is the unperturbed
+  // reply-likelihood (heat/jitter only rotate WHO surfaces, not the score we show).
+  const eff = (c: ContactSuggestion, base: number): number => {
+    let v = base;
+    if (heat) {
+      const p = heat.get(suggestionKey(c));
+      if (typeof p === 'number') v *= p;
+    }
+    if (seed) v += seededJitter(seed, suggestionKey(c));
+    return v;
+  };
+  kept.sort((a, b) => eff(b.c, b.s.score) - eff(a.c, a.s.score));
 
   const droppedDisqualified = scored.filter(
     (x) => x.s.disqualified && x.s.reasons.some((r) => r.startsWith('disqualified'))
@@ -631,6 +739,30 @@ function contactKey(r: ContactRow): string {
   return `${(r.linkedinUrl ?? '').trim().toLowerCase()}|${r.name.trim().toLowerCase()}`;
 }
 
+/** Identity key for a raw suggestion - same shape as contactKey, so jitter/heat
+ *  lookups line up with the ledger and dedup keys. */
+function suggestionKey(c: ContactSuggestion): string {
+  return `${(c.linkedin_url ?? '').trim().toLowerCase()}|${(c.name ?? '').trim().toLowerCase()}`;
+}
+
+/** Stable 32-bit seed from a string id (FNV-1a). Re-sourcing mints fresh target
+ *  docs, so seeding on target._id makes each run explore a different slice of the
+ *  candidate pool while a single target stays internally stable. */
+export function seedFromId(id: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+
+/** Deterministic per-candidate jitter in [-amp, amp]. Small enough that a clearly
+ *  stronger contact still wins; large enough to rotate genuine near-ties. */
+export function seededJitter(seed: number, key: string, amp = 0.03): number {
+  let h = (2166136261 ^ seed) >>> 0;
+  for (let i = 0; i < key.length; i++) h = Math.imul(h ^ key.charCodeAt(i), 16777619);
+  h >>>= 0;
+  return ((h / 0xffffffff) * 2 - 1) * amp;
+}
+
 /**
  * Recipient-level dedup across a whole mission: keep only candidates not already
  * present as a contact in the mission. A person matches an existing contact by
@@ -639,8 +771,27 @@ function contactKey(r: ContactRow): string {
  * already drafted/emailed and producing duplicate sends.
  */
 export function dedupeAgainstMission(rows: ContactRow[], prior: Pick<ContactDoc, 'email' | 'linkedinUrl' | 'name'>[]): ContactRow[] {
+  return dedupeAgainstContacted(rows, prior);
+}
+
+/**
+ * The same recipient-identity dedup, widened to a GLOBAL per-account ledger: a
+ * candidate is dropped if it matches a contact already in THIS mission OR anyone
+ * this account has ever sent an initial email to (the contact_ledger sets). This
+ * is the permanent "never email the same person twice" guard across all missions
+ * (api/_lib/contacted.ts), layered on top of the per-mission prior.
+ */
+export function dedupeAgainstContacted(
+  rows: ContactRow[],
+  prior: Pick<ContactDoc, 'email' | 'linkedinUrl' | 'name'>[],
+  ledger?: ContactedKeys
+): ContactRow[] {
   const seenEmails = new Set(prior.map((c) => c.email?.trim().toLowerCase()).filter(Boolean) as string[]);
   const seenKeys = new Set(prior.map((c) => contactKey(c as ContactRow)));
+  if (ledger) {
+    for (const e of ledger.emailKeys) seenEmails.add(e);
+    for (const k of ledger.identityKeys) seenKeys.add(k);
+  }
   return rows.filter((r) => {
     const email = r.email?.trim().toLowerCase();
     if (email && seenEmails.has(email)) return false;

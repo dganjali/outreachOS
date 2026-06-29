@@ -121,7 +121,10 @@ const SIZE_BAND: Record<SizeTier | 'unknown', Band> = {
   mid: { idealMin: rank('manager'), idealMax: rank('director'), hardMax: rank('senior_director') },
   large: { idealMin: rank('manager'), idealMax: rank('director'), hardMax: rank('senior_director') },
   enterprise: { idealMin: rank('manager'), idealMax: rank('senior_manager'), hardMax: rank('director') },
-  unknown: { idealMin: rank('manager'), idealMax: rank('director'), hardMax: rank('vp') },
+  // When headcount can't be resolved we used to allow up to VP, which let execs
+  // leak in on every size-unknown company (the dominant "too senior" miss). Treat
+  // unknown like a mid-size company: program owners in, VPs/C-suite out.
+  unknown: { idealMin: rank('manager'), idealMax: rank('director'), hardMax: rank('senior_director') },
 };
 
 /** Map a headcount to a size tier. null when unknown → the *unknown* band. */
@@ -156,10 +159,21 @@ export function effectiveBand(icp: ContactIcp, sizeTier: SizeTier | null): Band 
 
 const STOPWORDS = new Set(['and', 'the', 'of', 'for', 'to', 'in', 'on', '&', 'a']);
 
+/** Light stem match so "engineer" ≈ "engineering", "design" ≈ "designer",
+ *  "partner" ≈ "partnership". Only fires on reasonably long words (≥5) where one
+ *  is a prefix of the other, so it adds recall without matching short noise. */
+function stemHit(word: string, tokens: string[]): boolean {
+  return tokens.some((t) => {
+    const min = Math.min(word.length, t.length);
+    return min >= 5 && (word.startsWith(t) || t.startsWith(word));
+  });
+}
+
 /** Functions (by phrase or distinctive word) that appear in the given text. */
 export function matchFunctions(text: string, functions: string[]): string[] {
   const hay = (text ?? '').toLowerCase();
   if (!hay) return [];
+  const tokens = hay.split(/[^a-z0-9]+/).filter(Boolean);
   const out: string[] = [];
   for (const fn of functions) {
     const phrase = fn.toLowerCase().trim();
@@ -168,9 +182,10 @@ export function matchFunctions(text: string, functions: string[]): string[] {
       out.push(fn);
       continue;
     }
-    // Phrase not verbatim - accept if a distinctive (>3 char) word matches.
+    // Phrase not verbatim - accept if a distinctive (>3 char) word matches as a
+    // substring or a light stem (engineer/engineering, design/designer).
     const words = phrase.split(/[\s/&-]+/).filter((w) => w.length > 3 && !STOPWORDS.has(w));
-    if (words.some((w) => hay.includes(w))) out.push(fn);
+    if (words.some((w) => hay.includes(w) || stemHit(w, tokens))) out.push(fn);
   }
   return out;
 }

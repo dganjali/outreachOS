@@ -104,6 +104,66 @@ export interface PeopleQuerySpec {
 const SENIORITY_QUERY_DEFAULT = ['manager', 'director', 'lead'];
 const NEGATIVE_DEFAULT = ['president', 'chief', 'cmo', 'cfo', 'cto', 'ceo'];
 
+// ---------------------------------------------------------------------------
+// LinkedIn SERP title parsing. A public LinkedIn result title is reliably shaped
+// "Name - Title - Company | LinkedIn" (sometimes "Name - Title at Company" or,
+// when there's no headline, just "Name - Company"). The verbatim title is a far
+// better seniority signal than an LLM's free-text re-description, so we parse it
+// deterministically and feed THAT to the scorer (CONTACT_ENGINE.md §3 - the role
+// must be parsed, not paraphrased).
+// ---------------------------------------------------------------------------
+
+export interface ParsedLinkedinTitle {
+  name: string | null;
+  role: string | null;
+  company: string | null;
+}
+
+// Words that mark a fragment as a role rather than a company, so the ambiguous
+// two-part "Name - X" case ("Name - Director" vs "Name - Acme") resolves right.
+const ROLE_HINT =
+  /\b(manager|director|head|lead|chief|officer|president|vp|vice president|founder|partner|principal|staff|senior|sr\.?|specialist|associate|engineer|developer|analyst|recruiter|designer|scientist|researcher|consultant|coordinator|administrator|strategist|advisor|owner|investor|of|for)\b/i;
+
+/** Parse a LinkedIn SERP result title into its name / role / company parts. */
+export function parseLinkedinTitle(rawTitle: string): ParsedLinkedinTitle {
+  const empty: ParsedLinkedinTitle = { name: null, role: null, company: null };
+  if (!rawTitle || typeof rawTitle !== 'string') return empty;
+
+  // Drop the "| LinkedIn" suffix and any "· Experience: …" / "- 500 connections"
+  // trailing noise Google appends, then normalize separators.
+  let t = rawTitle.split('|')[0].split('·')[0].trim();
+  if (!t) return empty;
+
+  const parts = t
+    .split(/\s[-–—]\s/) // " - ", en/em dashes too
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (parts.length === 0) return empty;
+
+  const name = parts[0] || null;
+  const rest = parts.slice(1);
+
+  if (rest.length === 0) return { name, role: null, company: null };
+
+  // 3+ parts: "Name - Role - Company [- extra]". Role is the first remainder,
+  // company the next; ignore trailing fragments.
+  if (rest.length >= 2) {
+    return { name, role: rest[0] || null, company: rest[1] || null };
+  }
+
+  // Exactly one remainder: could be "Role at Company", just a role, or just a
+  // company (no headline on the profile).
+  const one = rest[0];
+  const atSplit = one.split(/\s+\bat\b\s+/i);
+  if (atSplit.length >= 2) {
+    return { name, role: atSplit[0].trim() || null, company: atSplit.slice(1).join(' at ').trim() || null };
+  }
+  // No "at": treat as a role when it reads like a title, else as a company.
+  return ROLE_HINT.test(one)
+    ? { name, role: one, company: null }
+    : { name, role: null, company: one };
+}
+
 /** Normalize the profile URL so the same person from two queries dedupes. */
 export function profileKey(link: string): string {
   try {
@@ -114,12 +174,23 @@ export function profileKey(link: string): string {
   }
 }
 
-/** Build the focused query set for one target from its ICP. */
-export function buildPeopleQueries(spec: PeopleQuerySpec): string[] {
+/** Rotate an array by a seed so different target seeds pick a different subset
+ *  when the list is longer than the slice cap. Pure + deterministic; seed=0 ⇒
+ *  identity (preserves the un-seeded query strings exactly). */
+export function seededRotate<T>(arr: T[], seed: number | undefined): T[] {
+  if (!seed || arr.length <= 1) return arr;
+  const k = seed % arr.length;
+  return [...arr.slice(k), ...arr.slice(0, k)];
+}
+
+/** Build the focused query set for one target from its ICP. An optional seed
+ *  rotates which function/seniority synonyms are used (when more exist than fit
+ *  the query) so re-runs pull a partly different pool; omitted ⇒ deterministic. */
+export function buildPeopleQueries(spec: PeopleQuerySpec, seed?: number): string[] {
   const company = `"${spec.companyName}"`;
-  const fns = spec.functionKeywords.slice(0, 6).map((t) => `"${t}"`);
+  const fns = seededRotate(spec.functionKeywords, seed).slice(0, 6).map((t) => `"${t}"`);
   const funcClause = fns.length ? ` (${fns.join(' OR ')})` : '';
-  const sen = (spec.seniorityKeywords?.length ? spec.seniorityKeywords : SENIORITY_QUERY_DEFAULT)
+  const sen = seededRotate(spec.seniorityKeywords?.length ? spec.seniorityKeywords : SENIORITY_QUERY_DEFAULT, seed)
     .slice(0, 4)
     .map((t) => `"${t}"`);
   const senClause = sen.length ? ` (${sen.join(' OR ')})` : '';
@@ -148,8 +219,8 @@ export function buildPeopleQueries(spec: PeopleQuerySpec): string[] {
  * best-effort; a single failure doesn't sink the others. Throws only if EVERY
  * query throws (so the caller's web_search fallback still triggers).
  */
-export async function searchPeoplePool(spec: PeopleQuerySpec, numPerQuery = 8): Promise<SerperOrganicResult[]> {
-  return runQueryPool(buildPeopleQueries(spec), numPerQuery);
+export async function searchPeoplePool(spec: PeopleQuerySpec, numPerQuery = 8, seed?: number): Promise<SerperOrganicResult[]> {
+  return runQueryPool(buildPeopleQueries(spec, seed), numPerQuery);
 }
 
 // ---------------------------------------------------------------------------

@@ -68,6 +68,16 @@ export const env = {
   // contacts agent resolves a real, deliverable email instead of guessing.
   EMAILFINDER_API_KEY: () => process.env.EMAILFINDER_API_KEY || null,
 
+  // Cross-account contact-diversity penalty (api/_lib/contacted.ts). When on, a
+  // platform-wide ANONYMIZED tally of how often each contact has been emailed
+  // softly down-ranks the most-blasted profiles so two accounts with the same
+  // ICP don't collide on the same people. Off by default - ship dark, then tune.
+  CONTACT_HEAT_ENABLED: () => /^(1|true|on)$/i.test(process.env.CONTACT_HEAT_ENABLED ?? ''),
+  // Salt for the contact-heat identity hash. The hash is what makes the tally
+  // anonymous (not reversible to a person); without a stable salt set, heat is
+  // treated as disabled so we never write weakly-hashed identities.
+  CONTACT_HEAT_SALT: () => process.env.CONTACT_HEAT_SALT || null,
+
   // MillionVerifier (optional) - catch-all gate after resolution. When set, a
   // finder hit on a catch-all/unknown domain is downgraded to 'likely' and
   // 'invalid' addresses are discarded instead of shipped as 'verified'.
