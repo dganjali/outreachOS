@@ -1,0 +1,13 @@
+<svg width="1340" height="380" viewBox="0 0 1340 380" xmlns="http://www.w3.org/2000/svg">
+<defs>
+ <linearGradient id="face" x1="0.1" y1="1" x2="0.9" y2="0"><stop offset="0" stop-color="#0BA05E"/><stop offset="0.5" stop-color="#2FD982"/><stop offset="1" stop-color="#7DF2A6"/></linearGradient>
+ <linearGradient id="osGrad" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#1FB871"/><stop offset="1" stop-color="#52E6A0"/></linearGradient>
+ <symbol id="caret" viewBox="0 0 512 512">
+   <path d="M256 138 L356 350 L256 308 L156 350 Z" fill="url(#face)"/>
+   <path d="M256 360 L312 392 M256 360 L200 392" stroke="#2FD982" stroke-width="18" stroke-linecap="round" opacity="0.55"/>
+ </symbol>
+</defs>
+<use href="#caret" x="20" y="35" width="310" height="310"/>
+<text x="350" y="248" font-family="Poppins" font-weight="500" font-size="170" fill="#EAF1F4" letter-spacing="-4">outreach</text>
+<text x="1086" y="248" font-family="Poppins" font-weight="700" font-size="170" fill="url(#osGrad)" letter-spacing="-3">OS</text>
+</svg>
