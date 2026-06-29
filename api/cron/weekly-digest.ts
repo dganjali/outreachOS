@@ -6,6 +6,7 @@ import type { Request, Response } from 'express';
 import { adminDb, forUser } from '../_lib/db';
 import { requireCronSecret } from '../_lib/auth';
 import { getActiveAccessToken, sendNow } from '../_lib/gmail';
+import { env } from '../_lib/env';
 import type { UserIntegrationDoc, SentMessageDoc, ReplyDoc, EmailSequenceDoc, ProfileDoc } from '../../shared/schemas';
 
 const WEEK = 7 * 24 * 60 * 60 * 1000;
@@ -52,20 +53,19 @@ export default async function handler(req: Request, res: Response) {
         continue;
       }
       const prof = await scope.collection<ProfileDoc>('profiles').findOne();
-      const replyRate = sentThisWeek > 0 ? Math.round((repliesThisWeek / sentThisWeek) * 100) : 0;
       const first = prof?.name ? prof.name.split(' ')[0] : 'there';
+      const appUrl = env.APP_URL();
 
       const body = [
         `Hi ${first},`,
         '',
         `Your OutreachOS week:`,
         `  • ${sentThisWeek} email${sentThisWeek === 1 ? '' : 's'} sent`,
-        `  • ${repliesThisWeek} repl${repliesThisWeek === 1 ? 'y' : 'ies'} (${replyRate}% reply rate)`,
         `  • ${draftsPending} draft${draftsPending === 1 ? '' : 's'} waiting for review`,
         `  • ${dueNext7} follow-up${dueNext7 === 1 ? '' : 's'} scheduled for the next 7 days`,
         '',
-        draftsPending > 0 ? `Review your drafts: https://outreachos-495414.web.app/missions` : '',
-        repliesThisWeek > 0 ? `Handle replies: https://outreachos-495414.web.app/inbox` : '',
+        draftsPending > 0 ? `Review your drafts: ${appUrl}/missions` : '',
+        repliesThisWeek > 0 ? `Open your inbox: ${appUrl}/inbox` : '',
         '',
         `- OutreachOS`,
       ]
@@ -77,7 +77,7 @@ export default async function handler(req: Request, res: Response) {
         fromEmail: tok.email,
         fromName: 'OutreachOS',
         toEmail: tok.email,
-        subject: `Your outreach this week: ${sentThisWeek} sent, ${repliesThisWeek} replied`,
+        subject: `Your outreach this week: ${sentThisWeek} sent, ${draftsPending} drafted`,
         body,
       });
       emailed++;

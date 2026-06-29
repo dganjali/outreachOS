@@ -138,8 +138,8 @@ KPIs that drive action, not vanity zeros. Lead with what needs the user *now*:
 | **Drafts to review** | sequences in `draft` not yet sent | → filtered mission view |
 | **Replies to handle** | unhandled replies | → Inbox |
 | **In flight** | targets currently being researched | → the running mission |
-| **Sent** | total contacted | - |
-| **Reply rate** | replied / contacted (only show once contacted > 0) | - |
+| **Contacted** | total contacted | - |
+| **Drafts** | sequences in `draft` waiting for review | - |
 
 Below: **Active missions** (each row = name, mode, progress bar "6/8 targets researched · 4 drafts", status) + **Recent activity** feed.
 

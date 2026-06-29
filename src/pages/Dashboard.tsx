@@ -9,7 +9,6 @@ import {
   FileText,
   ChevronRight,
   CheckCircle2,
-  TrendingUp,
   Zap,
   Sunrise,
   Sun,
@@ -29,7 +28,6 @@ interface Stats {
   missions: number;
   drafts: number;
   contacted: number;
-  replied: number;
   repliesToHandle: number;
   runsToday: number;
 }
@@ -207,7 +205,6 @@ export function Dashboard() {
     missions: 0,
     drafts: 0,
     contacted: 0,
-    replied: 0,
     repliesToHandle: 0,
     runsToday: 0,
   });
@@ -242,7 +239,6 @@ export function Dashboard() {
         { data: msData },
         { count: draftCount },
         { count: contactedCount },
-        { count: repliedCount },
         { count: repliesToHandle },
         { count: runsToday24h },
         { data: runsData },
@@ -255,7 +251,6 @@ export function Dashboard() {
           .order('created_at', { ascending: false }),
         supabase.from('email_sequences').select('id', { count: 'exact', head: true }).eq('status', 'draft'),
         supabase.from('contacts').select('id', { count: 'exact', head: true }).eq('status', 'contacted'),
-        supabase.from('contacts').select('id', { count: 'exact', head: true }).eq('status', 'replied'),
         supabase.from('replies').select('id', { count: 'exact', head: true }).eq('handled', false),
         supabase.from('agent_runs').select('id', { count: 'exact', head: true }).gte('started_at', dayAgo),
         supabase.from('agent_runs').select('*').eq('user_id', user!.id).order('started_at', { ascending: false }).limit(8),
@@ -295,7 +290,6 @@ export function Dashboard() {
         missions: missionsList.length,
         drafts: draftCount ?? 0,
         contacted: contactedCount ?? 0,
-        replied: repliedCount ?? 0,
         repliesToHandle: repliesToHandle ?? 0,
         runsToday: runsToday24h ?? 0,
       });
@@ -353,7 +347,6 @@ export function Dashboard() {
   const animateNums = !reduceMotion && !loading;
   const greet = greetingFor(now);
 
-  const responseRate = stats.contacted > 0 ? Math.round((stats.replied / stats.contacted) * 100) : null;
   const firstName = profile?.name ? profile.name.split(' ')[0] : null;
   const percent = profileCompleteness(profile as unknown as Record<string, unknown>);
   const dateLabel = now.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
@@ -614,12 +607,6 @@ export function Dashboard() {
               <span className="font-medium text-foreground/90">{stats.contacted}</span> contacted
             </>
           )}
-          {responseRate !== null && (
-            <>
-              {', '}
-              <span className="font-medium text-foreground/90">{responseRate}%</span> reply rate
-            </>
-          )}
           .
         </p>
       </header>
@@ -813,7 +800,7 @@ export function Dashboard() {
             <SectionHeader title="This week" />
             <dl className="panel grid grid-cols-3 divide-x divide-border/60 overflow-hidden">
               <StatCell icon={Users} label="Contacted" value={stats.contacted} animate={animateNums} />
-              <StatCell icon={TrendingUp} label="Reply rate" value={responseRate} unit="%" animate={animateNums} />
+              <StatCell icon={FileText} label="Drafts" value={stats.drafts} animate={animateNums} />
               <StatCell
                 icon={Zap}
                 label="Runs today"
