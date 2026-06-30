@@ -164,6 +164,20 @@ export function parseLinkedinTitle(rawTitle: string): ParsedLinkedinTitle {
     : { name, role: null, company: one };
 }
 
+/** True for an INDIVIDUAL LinkedIn profile URL (linkedin.com/in/<slug>), as
+ *  opposed to a company/school/post/jobs/directory page. The discovery pool is
+ *  meant to be people, so a fund's /company/ page (which is how "Fin Capital"
+ *  style firms leak in) never reads as a person. Country subdomains
+ *  (ca.linkedin.com, uk.linkedin.com) are individual profiles too. */
+export function isLinkedinProfile(link: string): boolean {
+  try {
+    const u = new URL(link);
+    return /(^|\.)linkedin\.com$/i.test(u.hostname) && /^\/in\/[^/]+/i.test(u.pathname);
+  } catch {
+    return false;
+  }
+}
+
 /** Normalize the profile URL so the same person from two queries dedupes. */
 export function profileKey(link: string): string {
   try {
@@ -282,6 +296,7 @@ async function runQueryPool(queries: string[], numPerQuery: number): Promise<Ser
   for (const s of settled) {
     if (s.status !== 'fulfilled') continue;
     for (const r of s.value) {
+      if (!isLinkedinProfile(r.link)) continue; // people only - never a firm/company page
       const key = profileKey(r.link);
       if (seen.has(key)) continue;
       seen.add(key);

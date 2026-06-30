@@ -1,6 +1,6 @@
 import { describe, it, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseOrganic, buildPeopleQuery, buildPeopleQueries, profileKey, search, parseLinkedinTitle, seededRotate } from './serper';
+import { parseOrganic, buildPeopleQuery, buildPeopleQueries, profileKey, search, parseLinkedinTitle, seededRotate, isLinkedinProfile } from './serper';
 
 describe('parseOrganic', () => {
   it('extracts title/link/snippet from organic results', () => {
@@ -75,6 +75,22 @@ describe('profileKey', () => {
       profileKey('https://linkedin.com/in/janedoe')
     );
     assert.notEqual(profileKey('https://linkedin.com/in/jane'), profileKey('https://linkedin.com/in/john'));
+  });
+});
+
+describe('isLinkedinProfile - individual profiles only', () => {
+  it('accepts /in/ profile URLs, including country subdomains', () => {
+    assert.equal(isLinkedinProfile('https://www.linkedin.com/in/janedoe/'), true);
+    assert.equal(isLinkedinProfile('https://linkedin.com/in/jane-doe-123'), true);
+    assert.equal(isLinkedinProfile('https://ca.linkedin.com/in/john'), true);
+  });
+  it('rejects company/school/post/jobs/directory pages and other hosts', () => {
+    assert.equal(isLinkedinProfile('https://www.linkedin.com/company/fin-capital'), false);
+    assert.equal(isLinkedinProfile('https://www.linkedin.com/school/mit'), false);
+    assert.equal(isLinkedinProfile('https://www.linkedin.com/posts/activity-123'), false);
+    assert.equal(isLinkedinProfile('https://www.linkedin.com/pub/dir/Jane/Doe'), false);
+    assert.equal(isLinkedinProfile('https://example.com/in/janedoe'), false);
+    assert.equal(isLinkedinProfile('not a url'), false);
   });
 });
 
