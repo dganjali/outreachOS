@@ -57,7 +57,7 @@ OutreachOS: agent-powered cold outreach. A React SPA talks to a Node/Express API
 
 | Path | What's there |
 |---|---|
-| `src/` | React SPA. `pages/` are routed screens (`MissionPage`, `Me`, `Dashboard`, `Inbox`, `Onboarding`…). `components/` shared UI (incl. `persona/`, `ui/`). `lib/` client helpers — `api.ts` is the REST client, `personas.ts`/`profileAssets.ts` profile + asset logic. `types.ts` shared client types. |
+| `src/` | React SPA. `pages/` are routed screens (`MissionPage`, `Me`, `Dashboard`, `Analytics`, `Onboarding`…). The mission screen is tabbed (Pipeline / Setup / Activity, via `?tab=`). No Inbox: Gmail is send-only so replies are never ingested. `components/` shared UI (incl. `persona/`, `ui/`). `lib/` client helpers — `api.ts` is the REST client, `personas.ts`/`profileAssets.ts` profile + asset logic. `types.ts` shared client types. |
 | `api/` | Backend request handlers, grouped by domain: `agents/` (LLM agents — `calibrate-draft`, `draft`, `extract-context`, `enrich-profile`, `contacts`, `people`, `sequence`…), `data/` (CRUD), `gmail/`, `integrations/`, `billing/`, `cron/`. |
 | `api/_lib/` | Backend internals: `llm.ts` (Gemini), `db.ts` (Mongo), `auth.ts`, `engine.ts`/`pipeline.ts` (orchestration), `assemble.ts` (prompt assembly), `embeddings.ts`, contact/email resolution (`email-finder`, `email-resolver`, `email-verifier`, `contact-verify`), `env.ts` (fail-fast required-env check), `prompts.ts`. Tests sit next to sources as `*.test.ts`. |
 | `shared/` | Code shared by client + server: `schemas.ts` (Zod), `types.ts`, `plans.ts`, `deliverability.ts`. |
