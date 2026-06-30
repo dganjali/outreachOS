@@ -351,3 +351,12 @@ textarea::placeholder {
   border-radius: 999px;
 }
 *::-webkit-scrollbar-thumb:hover { background: hsl(213 16% 32%); background-clip: content-box; }
+
+/* Honor reduced-motion for the page-entrance fade. Functional motion (spinners,
+   progress) is left intact; this only removes the decorative entrance transform. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in,
+  .motion-safe\:animate-fade-in {
+    animation: none !important;
+  }
+}

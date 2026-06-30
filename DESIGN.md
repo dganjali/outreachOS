@@ -1,111 +1,146 @@
-# DESIGN.md - OutreachOS design system
+# DESIGN.md — OutreachOS design system
 
-Register: **product** (design serves the task). Identity: **Linear/Notion register**
-- cool graphite + near-white surfaces, Inter throughout, sharp rectangles,
-hairline borders, near-invisible elevation. Forest green is retained as a
-*sparing* accent only (one identity moment per screen at most). Light theme.
+Register: **product** (design serves the task). Identity: **Linear/Notion register,
+dark**. Matte near-black ground with a faint cool tint, near-white ink, hairline
+borders, near-invisible elevation, sharp rectangles. **Forest green is the single
+chromatic accent, used sparingly** — at most one "go" action per screen plus the
+standing topbar CTA. The app is **forced dark** (`<html class="dark">`); there is
+no light theme in the product.
 
-All tokens live in `src/index.css` `:root`. The "REHAUL LAYER v2" block at the
-end of that file is the authoritative component layer (appended last so it wins
-on equal specificity).
+## Source of truth & the two-layer token system (read this first)
 
-## The one rule
-**Never hardcode a color.** Every color is a token. Hex/rgb literals in component
-CSS are how this system drifted before. If a value you need doesn't exist as a
-token, add it to `:root`, don't inline it.
+Styles come from **two stylesheets**, imported in this order by `src/main.tsx`:
 
-## Color (OKLCH)
-Cool gray neutrals, faintly tinted toward 250 (a hair of blue). Graphite ink.
-Forest green is the only chromatic accent, reserved for the "go" action and
-selection. Status colors are muted so they coexist with the cool ground without
-screaming.
+1. `src/index.css` — the legacy 8.4k-line layer (originally a light system, now
+   carrying a dark-override block). Defines the **legacy tokens**: `--fg`,
+   `--fg-muted`, `--bg`, `--bg-elev`, `--surface-2`, `--accent-hover`,
+   `--success` / `--success-line`, `--info` / `--info-line`, `--border-strong`,
+   `--font-body`, `--font-display`, `--radius-*`, `--space-*`, `--dur*`, etc.
+   These hold real color/length values and are used **directly**: `var(--fg)`.
+2. `src/styles/globals.css` — the shadcn/Tailwind layer, loaded **last** so it
+   wins on token-name collisions. Defines the **shadcn tokens** as bare **HSL
+   triplets** on `:root, .dark`: `--background`, `--foreground`, `--primary`,
+   `--secondary`, `--accent`, `--border`, `--input`, `--ring`, `--card`, …
+
+### The collision rule (do not get this wrong)
+Where a name exists in **both** files (`--primary`, `--accent`, `--border`,
+`--secondary`, `--ring`, `--background`, `--foreground`), **globals.css wins**, so
+the value is an **HSL triplet** like `152 38% 42%`. A triplet is **not a color**:
+
+- ✅ `hsl(var(--primary))` → green. `hsl(var(--border))` → hairline.
+- ❌ `var(--primary)` as a color → **invalid / broken** (it's `152 38% 42%`).
+
+So in component CSS: use `hsl(var(--token))` for any shadcn-named token, and bare
+`var(--token)` only for legacy-only tokens (`--fg`, `--bg-elev`, `--success-line`,
+`--font-body`, spacing, radii, durations). Tailwind already wraps these via
+`hsl(var(--x))` in `tailwind.config.cjs`.
+
+> Eventually the legacy `index.css` should be retired and globals.css become the
+> sole layer. Until then, **never hardcode a hex/rgb in component CSS** — add a
+> token. (Only exception: the macOS window-control dots in the Landing mockup.)
+
+## Color
+
+Cool near-black surfaces, near-white ink, forest green as the only chromatic
+accent (the "go" action + selection + focus ring). Status colors are muted so
+they coexist with the ground without screaming.
 
 | Role | Tokens |
 |---|---|
-| Surfaces | `--paper`/`--bg`, `--bg-elev`, `--bg-soft`, `--surface`, `--surface-2`, `--surface-sunk` |
-| Borders | `--border` (hairline), `--border-soft`, `--border-strong` |
-| Ink | `--fg` (graphite), `--fg-muted`, `--fg-subtle`, `--fg-faint` |
-| Brand (sparing) | `--accent`, `--accent-hover`, `--accent-press`, `--accent-soft`, `--accent-line`, `--accent-fg` |
-| Primary (general buttons) | `--primary` = `--fg` (graphite ink), `--primary-hover`, `--primary-foreground` |
-| Success | `--success`, `--success-soft`, `--success-line` |
-| Warn | `--warn`, `--warn-soft`, `--warn-line` (ochre) |
-| Danger | `--danger`, `--danger-soft`, `--danger-line` (brick) |
-| Info | `--info`, `--info-soft`, `--info-line` (muted slate, NOT alert-blue) |
+| Surfaces | `--background`, `--card`, `--bg-elev`, `--surface-2` |
+| Borders | `--border` (hairline), `--border-strong` |
+| Ink | `--foreground`/`--fg`, `--fg-muted`, `--fg-subtle`, `--muted-foreground` |
+| Brand "go" (sparing) | `--primary` (= green) via `hsl(var(--primary))`; `.btn-go` / `--accent-hover` |
+| Neutral fill | `--secondary`, `--accent` (NOTE: shadcn `--accent` is **neutral grey**, not the brand green) |
+| Success | `--success`, `--success-line` (muted) |
+| Warn | `--warning` |
+| Danger | `--destructive` |
+| Info | `--info`, `--info-line` (muted slate) |
 
-**Color strategy: Restrained.** Cool neutrals + graphite ink + green accent.
-The green accent appears on `.btn-go` / `.btn-primary.is-go`, `.topbar-new`,
-links, focus rings, and `--mission-progress-bar`. Nothing else. No green hero
-washes, no `--accent-soft` backgrounds on whole cards.
+**Green is reserved.** It appears on: the topbar **New mission** CTA, the single
+**go** action per screen (Send / Run pipeline / Connect Gmail), the focus ring,
+`::selection`, and the mission progress bar. Nothing else gets a green *fill*.
+Signal pills (funding/launch/press…) keep their own color coding — that is data,
+not accent.
+
+## The one-green-per-screen rule
+
+The topbar **New mission** button (shadcn `Button` default = `bg-primary`) is the
+screen's standing green identity moment. A **page-body** button is green **only**
+when it is that view's true go-action:
+
+- ✅ `.btn-go` for the one go-action (Run pipeline, Send all, Connect Gmail).
+- ✅ `.btn-secondary` (neutral dark, hairline) for everything else, incl. demoted
+  primaries (e.g. a header action that isn't the climax of the page).
+- ⚠️ `.btn-primary` resolves to **green inside `.app-content`** (via
+  `hsl(var(--primary))`) and near-white standalone — so don't reach for it when
+  you want "neutral". Use `.btn-secondary`.
+- shadcn `<Button>`: `default` = green, `secondary`/`outline`/`ghost` = neutral.
+
+If a screen already shows green on its go-action, secondary actions are neutral.
+Status edges (`.tgt.status-approved` etc.) use the **muted** `--success-line` /
+`--info-line` so a list of them doesn't read as a wall of green.
 
 ## Typography
-- `--font-body: Inter` - **everything** in product UI. Headings, labels, body.
-- `--font-display: Fraunces` - *only* on Landing hero + the marketing-side
-  long-form headings on the auth shell. Forbidden in app UI.
-- `--font-mono` for IDs/data/emails.
-- Fixed rem scale anchored at **14px base** (`--text-base: 0.875rem`), ~1.2 ratio.
-  Product UI is denser than before.
-- Body prose caps at 65–75ch.
+
+- `--font-body` (**Inter**) — **everything in the product UI**: headings, labels,
+  body. Product is sans-only.
+- `--font-display` (**Fraunces**, serif) — **only** on the marketing **Landing**
+  (`.ldg-*`), the **auth** shells (`.auth-*`), the brand wordmark (`.logo`), and
+  public content heroes (`.cl-*`). **Forbidden in product UI** — an appended
+  override at the end of `index.css` pins in-app headings (`.me-*`, `.coach-*`,
+  `.kpi-value`, `.pw-q`, `.mn-title`, …) back to `--font-body`.
+- `--font-mono` (Geist Mono) for IDs / emails / data.
+- Fixed rem scale, ~14px base, ~1.2 ratio. Prose caps at 65–75ch.
+
+> Note: Tailwind's `font-sans` is **Geist**-first while legacy `--font-body` is
+> **Inter**-first. Newer (Tailwind) pages render Geist; legacy-CSS pages render
+> Inter. Both are clean grotesques; unifying them is future work, out of scope of
+> the serif-removal pass.
 
 ## Spacing, radii, elevation, motion
-- Space: `--space-1 … --space-10` (4px base).
-- Radii: **tight**. `--radius-sm` 4, `--radius` 6, `--radius-lg` 10.
-- Elevation: hairline borders do the work. `--shadow-sm` is a single 1px line;
-  `--shadow` is barely there; `--shadow-lg` reserved for floating menus.
-- Motion: 90 / 140 / 200ms. Linear-instant. State changes only. No bounces.
-- Focus: 2px ring (`--ring`), tighter than before. Don't remove it.
+
+- Space `--space-1 … --space-10` (4px base). Radii tight: `--radius-sm` 4,
+  `--radius` ~8, `--radius-lg` 10.
+- Elevation: hairline borders do the work. Shadows only on floating menus.
+- **Motion: minimal and fast.** Page entrance is `animate-fade-in`
+  (**0.18s**, opacity-dominant, `translateY(2px)`) — defined in
+  `tailwind.config.cjs`. No per-item stagger delays on page load (content must be
+  readable immediately). Honor `prefers-reduced-motion`. State changes only, no
+  bounces.
+- Focus: 2px green ring (`--ring`). Never remove it; pair any `outline-none` with
+  a `focus-visible:ring-*` replacement.
 
 ## Components (the unified vocabulary)
-- **Buttons**:
-  - `.btn-primary` = graphite-ink fill, general "do it". Default.
-  - `.btn-primary.is-go` / `.btn-go` = forest green. Reserved for Send / Run /
-    Connect Gmail. **One per screen, ideally.**
-  - `.btn-secondary` = outlined on `--bg-elev`.
-  - `.btn-ghost` = chromeless.
-  - `.btn-lg` / `.tiny` for sizing.
-  - Topbar uses `.topbar-new` (the one place the green button lives by default).
-- **Form controls**: bare `input`/`textarea`/`select` are styled globally
-  (bg-elev, `--border-strong`, 4px radius, focus ring). Don't re-skin per screen.
-  Labels are uppercase 11px.
-- **Status labels**: `.pill` / `.badge` / `.status-pill` share one base (flat,
-  4px radius, no border). Add tone via `.is-success | .is-warn | .is-danger |
-  .is-info | .is-accent`. Common status names (`.status-sent`, `.status-replied`,
-  `.status-bounced`, etc) auto-tone.
-- **Surfaces**: `--bg-elev` + `--border` + `--radius`. No shadows by default.
-  No nested cards. Many lists are just rows-in-a-bordered-list, not cards.
-- **Banners**: `.error-banner` / `.run-banner.warn` / `.run-banner.error` use
-  the status-soft + status-line + status-fg triad. `.link-button` for inline
-  actions.
-- **Loading**: skeletons (`.skeleton-*`), never a centered spinner.
-- **Dashboard pattern**: `.focus-band` (renders only when there's something to
-  do, no big serif numbers) → `.mission-row-list` main column → `.dash-rail`
-  (activity + `.stat-strip` for demoted secondary numbers). No KPI-card grid,
-  no green hero.
-- **App shell**: 220px sticky `.app-sidebar`, gray-fill active nav (not green
-  wash), 48px sticky `.app-topbar` with hairline border (no blur, no
-  translucency). `.topbar-new` is the green identity moment.
-- **Mission list**: `.mission-cards` is a *bordered list of rows*, not a chunky
-  card grid. `.mission-row` flattens hover to background-only (no transform).
 
-## Identity moments (where green earns its rent)
-- `.topbar-new` (the New mission CTA)
-- `.btn-go` / `.btn-primary.is-go` (Send / Run / Connect Gmail)
-- Focus ring (2px green halo on inputs / buttons)
-- Selection (`::selection` background)
-- `.mission-progress-bar` (the only filled green strip)
-- Landing hero (Fraunces + green gradient - brand-register exception)
+- **Buttons**: `.btn-go` (green go), `.btn-secondary` (neutral), `.btn-ghost`
+  (chromeless), `.btn-launch` (pill shape modifier). shadcn `<Button>` for new
+  Tailwind surfaces.
+- **Form controls**: bare `input`/`textarea`/`select` are globally styled. Don't
+  re-skin per screen. Inputs need `aria-label` or a `<label>`.
+- **Status labels**: `.pill` / `.badge` / `.status-pill` share one flat base; add
+  tone via `.is-success | .is-warn | .is-danger | .is-info`.
+- **Surfaces**: `--bg-elev` + `--border` + radius. No nested cards; many lists are
+  rows-in-a-bordered-list, not card grids.
+- **Loading**: skeletons (shimmer), never a centered spinner.
+- **App shell**: sticky sidebar (grey-fill active nav, not green), sticky topbar
+  with hairline border (no blur/translucency). Topbar **New mission** is the green
+  identity moment.
 
-Outside these, the design is monochrome-graphite. If you're tempted to add green
-elsewhere, you're degrading the accent. Use weight or border instead.
+## Accessibility (baseline, already enforced — keep it)
+
+- Icon-only buttons: `aria-label`. Decorative icons: `aria-hidden`.
+- Toasts/async regions: `aria-live="polite"`. Charts: `role="img"` + label.
+- Toggles: `aria-pressed`. Visible focus on every interactive element.
+- Ellipsis `…` (not `...`) in loading/placeholder copy.
 
 ## Bans (enforced)
-- No hardcoded hex/rgb in component CSS (see "The one rule"). The only
-  exception: macOS window-control dots in the Landing mockup.
-- No em dashes in UX copy. Use commas, colons, semicolons, periods, parentheses.
-- No gradient text (`background-clip: text`). Solid color; emphasis via weight.
-- No side-stripe borders (colored `border-left/right` > 1px) as accents.
-- **No glassmorphism.** The previous topbar blur is removed; hairline borders
-  carry separation instead.
-- No hero-metric template, no identical card grids, no modal as first thought.
-- No Fraunces in product UI. Inter only.
-- No green-soft backgrounds on cards/heroes. The accent lives on actions, not
-  surfaces.
+
+- No hardcoded hex/rgb in component CSS (add a token). No **bare `var(--x)`** for
+  a colliding shadcn token used as a color (use `hsl(var(--x))`).
+- No green fills outside the sanctioned go-action / identity moments. No green
+  hero washes, no `--primary`/green-soft backgrounds on whole cards.
+- No Fraunces / `--font-display` in product UI. Sans only.
+- No em dashes in UX copy. No gradient text. No glassmorphism / topbar blur.
+- No slow or staggered page-entrance animation. No hero-metric KPI-grid template
+  as a default (Analytics is the one place a metric grid is allowed).

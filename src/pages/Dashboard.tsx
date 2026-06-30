@@ -681,11 +681,10 @@ export function Dashboard() {
           a clean "caught up" panel with a primary CTA otherwise. */}
       {focusItems.length > 0 ? (
         <section className="grid gap-3 sm:grid-cols-2" aria-label="Needs your attention">
-          {focusItems.map((f, i) => (
+          {focusItems.map((f) => (
             <Link
               key={f.key}
               to={f.to}
-              style={{ animationDelay: `${i * 80}ms` }}
               className="panel group flex items-center gap-4 p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/45 motion-safe:animate-fade-in"
             >
               <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-xl font-bold tabular-nums text-primary ring-1 ring-inset ring-primary/20 transition-transform duration-200 group-hover:scale-105">

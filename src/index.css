@@ -7617,15 +7617,15 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
   font: inherit;
   font-size: var(--text-base);
   font-weight: 600;
-  color: var(--w-green-fg);
-  background: var(--w-green);
-  border: 1px solid var(--w-green);
+  color: hsl(var(--secondary-foreground));
+  background: hsl(var(--secondary));
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius);
   padding: 0.5rem 0.9rem;
   cursor: pointer;
-  transition: background var(--dur) ease;
+  transition: background var(--dur) ease, border-color var(--dur) ease;
 }
-.me-newvoice:hover { background: var(--w-green-hover); }
+.me-newvoice:hover { background: hsl(var(--accent)); border-color: var(--border-strong); }
 
 .me-voice-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(248px, 1fr)); gap: var(--space-4); }
 
@@ -8057,8 +8057,8 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
 .tgt.is-open { border-color: var(--border-strong); box-shadow: var(--shadow-sm); }
 .tgt.is-pinned { border-color: var(--accent-line, var(--border-strong)); box-shadow: inset 2px 0 0 0 var(--accent); }
 .tgt.status-rejected { opacity: 0.5; }
-.tgt.status-approved { border-left: 2px solid var(--success); }
-.tgt.status-contacted { border-left: 2px solid var(--info); }
+.tgt.status-approved { border-left: 2px solid var(--success-line); }
+.tgt.status-contacted { border-left: 2px solid var(--info-line); }
 .tgt-bar { display: flex; align-items: center; gap: var(--space-2); padding: 4px var(--space-3); }
 .tgt-pin {
   flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
@@ -8458,4 +8458,26 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
 /* Reduced motion: the only motion left is the status lamp pulse. */
 @media (prefers-reduced-motion: reduce) {
   .apdeck-lamp { animation: none; }
+}
+
+/* ── Heading-font unification (appended last, wins on equal specificity) ──────
+   The product UI is sans-only. The serif --font-display is reserved for the
+   marketing landing (.ldg-*), the auth marketing/form shells (.auth-*), the
+   brand wordmark (.logo) and public content heroes (.cl-*). Every in-app
+   heading below was drifting to Fraunces; pin them back to the body sans so a
+   single typographic system reads across the whole product. */
+.kpi-value,
+.dashboard-section h2,
+.me-title,
+.me-section-title,
+.me-completeness-num,
+.me-panel-headline h2,
+.me-history-empty h3,
+.coach-title,
+.coach-section-head h3,
+.asset-dropzone-label,
+.parse-modal-title,
+.pw-q,
+.mn-title {
+  font-family: var(--font-body);
 }

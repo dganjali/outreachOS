@@ -255,14 +255,21 @@ export function Missions() {
       <header className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Missions</h1>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={() => setShowArchived((v) => !v)}>
+          <Button
+            variant={showArchived ? 'secondary' : 'outline'}
+            size="sm"
+            className="gap-1.5"
+            aria-pressed={showArchived}
+            onClick={() => setShowArchived((v) => !v)}
+          >
+            <Archive className="h-4 w-4" />
             {showArchived ? 'Hide archived' : 'Show archived'}
           </Button>
           <Button variant="outline" size="sm" className="gap-1.5" disabled={exporting} onClick={handleExport}>
             <Download className="h-4 w-4" />
             {exporting ? 'Exporting…' : 'Export CSV'}
           </Button>
-          <Button asChild size="sm" className="gap-1.5 font-semibold">
+          <Button asChild variant="outline" size="sm" className="gap-1.5">
             <Link to="/missions/new">
               <Plus className="h-4 w-4" /> Create mission
             </Link>
