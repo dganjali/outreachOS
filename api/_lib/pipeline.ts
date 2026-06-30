@@ -109,6 +109,9 @@ export interface PipelineExecutors {
   reserve(missionId: string, excludeIds: string[]): Promise<Array<{ id: string; name: string; score: number | null }>>;
   /** Drop a company from the user-facing output (no deliverable contact found). */
   markRejected(targetId: string): Promise<void>;
+  /** Promote a target that produced a draft out of the 'suggested' pool so a
+   *  later re-run never pulls it back in as reserve (and never re-rejects it). */
+  markCompleted(targetId: string): Promise<void>;
 }
 
 function classify<T = Record<string, unknown>>(result: { status: number; body: unknown }): T {
@@ -136,14 +139,16 @@ export function realExecutors(user: AuthedUser): PipelineExecutors {
       // People mode: find people directly. Each returned target carries the
       // person in `seedContact`; show the PERSON's name in the run, not the firm.
       if (mission?.findMode === 'people') {
+        const result = await invokeAgent(peopleHandler, { user, body: { mission_id: missionId, count, sectors, functions, seniority } });
+        if (isNoResults(result)) return []; // nothing new to add - finish gracefully, don't error
         const body = classify<{
           targets?: Array<{ _id: string; companyName: string; score: number | null; seedContact?: { name?: string } | null }>;
-        }>(await invokeAgent(peopleHandler, { user, body: { mission_id: missionId, count, sectors, functions, seniority } }));
+        }>(result);
         return (body.targets ?? []).map((t) => ({ id: t._id, name: t.seedContact?.name ?? t.companyName, score: t.score ?? null }));
       }
-      const body = classify<{ targets?: Array<{ _id: string; companyName: string; score: number | null }> }>(
-        await invokeAgent(targetHandler, { user, body: { mission_id: missionId, count, sectors } })
-      );
+      const result = await invokeAgent(targetHandler, { user, body: { mission_id: missionId, count, sectors } });
+      if (isNoResults(result)) return [];
+      const body = classify<{ targets?: Array<{ _id: string; companyName: string; score: number | null }> }>(result);
       return (body.targets ?? []).map((t) => ({ id: t._id, name: t.companyName, score: t.score ?? null }));
     },
     async evidence(targetId) {
@@ -165,18 +170,35 @@ export function realExecutors(user: AuthedUser): PipelineExecutors {
       const scope = forUser(user.id);
       const exclude = new Set(excludeIds);
       // The targeting agent over-discovers and inserts the whole pool as
-      // 'suggested'; the ones we never seeded are our backup bench.
+      // 'suggested'; the ones we never seeded are our backup bench. Completed
+      // targets are promoted to 'approved' (see markCompleted), so this query
+      // never re-pulls a prior run's finished work.
       const all = await scope.collection<TargetDoc>('targets').find({ missionId, status: 'suggested' });
       return all
         .filter((t) => !exclude.has(t._id))
         .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
-        .map((t) => ({ id: t._id, name: t.companyName, score: t.score ?? null }));
+        // People targets carry the person in seedContact; show them, not the firm.
+        .map((t) => ({ id: t._id, name: t.seedContact?.name ?? t.companyName, score: t.score ?? null }));
     },
     async markRejected(targetId) {
       const scope = forUser(user.id);
       await scope.collection<TargetDoc>('targets').updateById(targetId, { status: 'rejected' } as Partial<TargetDoc>);
     },
+    async markCompleted(targetId) {
+      const scope = forUser(user.id);
+      await scope.collection<TargetDoc>('targets').updateById(targetId, { status: 'approved' } as Partial<TargetDoc>);
+    },
   };
+}
+
+/** A no-results agent response (502 no_people_found / no_targets_found). Not a
+ *  failure: the search ran, it just had nothing NEW to add (common on a re-run).
+ *  We treat it as an empty result so the run finishes calmly rather than erroring. */
+export function isNoResults(result: { status: number; body: unknown }): boolean {
+  if (result.status !== 502) return false;
+  const body = (result.body ?? {}) as Record<string, unknown>;
+  const code = String(body.error ?? body.detail ?? '');
+  return code === 'no_people_found' || code === 'no_targets_found';
 }
 
 // ---------------------------------------------------------------------------
@@ -484,7 +506,11 @@ async function processTarget(
       await ctx.persist(r);
       return;
     }
-    step(t, 'sequence', t.sequences.some((s) => s === 'done') ? 'done' : 'failed');
+    const drafted = t.sequences.some((s) => s === 'done');
+    step(t, 'sequence', drafted ? 'done' : 'failed');
+    // A delivered target leaves the 'suggested' pool so a later re-run treats it
+    // as finished work, not reserve to re-process (and possibly reject).
+    if (drafted) await completeTarget(t, ctx);
     r.note = progressNote(r);
     await ctx.persist(r);
   }
@@ -576,7 +602,7 @@ async function appendReplacementTargets(
   const fresh = seedTargets(picks, picks.length);
   r.targets.push(...fresh);
   state.added += fresh.length;
-  r.note = `Finding replacement ${unitNoun(r)} with no reachable contact…`;
+  r.note = `Some had no reachable contact, finding fresh ${unitNoun(r)}…`;
   await ctx.persist(r);
   return fresh;
 }
@@ -632,6 +658,16 @@ async function dropTarget(t: PipelineTargetState, ctx: ProcContext): Promise<voi
     await ctx.exec.markRejected(t.targetId);
   } catch (err) {
     console.warn('mark_rejected_failed', t.targetId, err);
+  }
+}
+
+/** Promote a delivered target out of the 'suggested' reserve pool. Best-effort:
+ *  a missed promotion only costs a redundant re-process on a later run. */
+async function completeTarget(t: PipelineTargetState, ctx: ProcContext): Promise<void> {
+  try {
+    await ctx.exec.markCompleted(t.targetId);
+  } catch (err) {
+    console.warn('mark_completed_failed', t.targetId, err);
   }
 }
 

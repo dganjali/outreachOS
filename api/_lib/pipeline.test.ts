@@ -9,6 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   runPipeline,
+  isNoResults,
   PipelineDailyLimitError,
   PipelineRateLimitError,
   type PipelineExecutors,
@@ -49,6 +50,7 @@ function fakeExec(over: Partial<PipelineExecutors> = {}): PipelineExecutors {
     sequence: async () => undefined,
     reserve: async () => [],
     markRejected: async () => undefined,
+    markCompleted: async () => undefined,
     ...over,
   };
 }
@@ -242,6 +244,44 @@ test('no targets found ends the run cleanly', async () => {
   const end = await runPipeline(baseRun(), ctxFor(fakeExec({ targeting: async () => [] })));
   assert.equal(end.status, 'done');
   assert.equal(end.targets.length, 0);
+});
+
+test('a no-results 502 reads as empty (not a failure), so a re-run finishing with no new prospects is calm', () => {
+  assert.equal(isNoResults({ status: 502, body: { error: 'no_people_found' } }), true);
+  assert.equal(isNoResults({ status: 502, body: { error: 'no_targets_found' } }), true);
+  assert.equal(isNoResults({ status: 502, body: { detail: 'no_people_found' } }), true);
+  // Real failures and other statuses must still surface as errors.
+  assert.equal(isNoResults({ status: 502, body: { error: 'agent_failed' } }), false);
+  assert.equal(isNoResults({ status: 500, body: { error: 'no_people_found' } }), false);
+  assert.equal(isNoResults({ status: 200, body: { targets: [] } }), false);
+});
+
+test('a delivered target is promoted out of the reserve pool (markCompleted)', async () => {
+  const completed: string[] = [];
+  const exec = fakeExec({
+    markCompleted: async (id) => {
+      completed.push(id);
+    },
+  });
+  const end = await runPipeline(baseRun(), ctxFor(exec));
+  assert.equal(end.status, 'done');
+  // Every drafted target is promoted so a re-run's reserve never re-pulls it.
+  const drafted = end.targets.filter((t) => t.sequence === 'done').map((t) => t.targetId);
+  assert.deepEqual([...completed].sort(), [...drafted].sort());
+  assert.ok(completed.length > 0);
+});
+
+test('a target with no draft is NOT promoted (only delivered work leaves the pool)', async () => {
+  const completed: string[] = [];
+  const exec = fakeExec({
+    contacts: async () => [], // no reachable contact -> sequence fails, target dropped
+    markCompleted: async (id) => {
+      completed.push(id);
+    },
+  });
+  const end = await runPipeline(baseRun(), ctxFor(exec));
+  assert.equal(end.status, 'done');
+  assert.equal(completed.length, 0);
 });
 
 test('a failing evidence step marks the whole target failed; others still complete', async () => {
