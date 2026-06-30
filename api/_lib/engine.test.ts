@@ -7,10 +7,14 @@ import assert from 'node:assert/strict';
 import {
   verifyDraftDeterministic,
   hasBlocker,
+  isWeakDraft,
+  shouldRevise,
+  QUALITY_MIN_VOICE,
   templateStrictnessDirective,
   ensureSignOff,
   type AllowedFact,
   type DraftOutput,
+  type Violation,
 } from './engine';
 
 const FACTS: AllowedFact[] = [
@@ -114,6 +118,49 @@ test('template-strictness directive scales from loose inspiration to near-verbat
 
   // Out-of-range values are clamped before bucketing.
   assert.match(templateStrictnessDirective(999, true), /100\/100/);
+});
+
+// ---------------------------------------------------------------------------
+// Revise policy - the bulk path must improve "fine but generic" drafts, not
+// only blockers. These guard the cost/quality tradeoff stays where we want it.
+// ---------------------------------------------------------------------------
+
+const block: Violation = { type: 'fabrication', span: 'x', detail: 'unsupported', severity: 'block' };
+const voiceWarn: Violation = { type: 'voice_mismatch', span: '', detail: 'off voice', severity: 'warn' };
+const lengthWarn: Violation = { type: 'constraint', span: '', detail: 'too long', severity: 'warn' };
+
+test('a strong, clean draft is not weak', () => {
+  assert.equal(isWeakDraft([], 0.9), false);
+});
+
+test('a voice/constraint warning marks a draft weak', () => {
+  assert.equal(isWeakDraft([voiceWarn], 0.9), true);
+  assert.equal(isWeakDraft([lengthWarn], 0.9), true);
+});
+
+test('a sub-threshold voice score marks a draft weak', () => {
+  assert.equal(isWeakDraft([], QUALITY_MIN_VOICE - 0.05), true);
+  assert.equal(isWeakDraft([], QUALITY_MIN_VOICE + 0.05), false);
+});
+
+test('a zero voice score is treated as "no signal", not worst-case', () => {
+  // The judge returns 0 when its call fails - never burn a revise on that alone.
+  assert.equal(isWeakDraft([], 0), false);
+});
+
+test('bulk revises a generic draft once, then stops within budget', () => {
+  // A clean-but-generic draft (warn, no blocker) that the old policy shipped as-is.
+  assert.equal(shouldRevise([voiceWarn], 0.5, 0, 1), true); // first pass: improve it
+  assert.equal(shouldRevise([voiceWarn], 0.5, 1, 1), false); // budget spent: ship it
+});
+
+test('a blocker always earns a revise while budget remains', () => {
+  assert.equal(shouldRevise([block], 0.95, 0, 1), true);
+  assert.equal(shouldRevise([block], 0.95, 1, 1), false);
+});
+
+test('a strong draft never spends a revise', () => {
+  assert.equal(shouldRevise([], 0.9, 0, 1), false);
 });
 
 // ---------------------------------------------------------------------------

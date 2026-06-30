@@ -14,8 +14,11 @@
 //                           of deterministic checks, then a targeted revise loop.
 //
 // Tiering (cost vs quality): `onboarding` allows up to 2 revise loops (we're
-// calibrating, one draft, interactive); `bulk` does a single critique pass and
-// revises once only if a `block` violation fires (N drafts/mission, thin margin).
+// calibrating, one draft, interactive); `bulk` allows a single revise pass (N
+// drafts/mission, thin margin). A revise is spent on a hard `block` violation OR
+// a soft quality signal - a voice/constraint warning or a sub-threshold voice
+// match - so "fine but generic" drafts get one improvement pass instead of
+// shipping as-is. Cost stays bounded by maxRevisions either way.
 //
 // This module is deliberately free of DB/HTTP concerns: the caller (the draft
 // agent) loads + retrieves and hands in a fully `AssembledContext`. That keeps
@@ -446,6 +449,35 @@ export function hasBlocker(violations: Violation[]): boolean {
   return violations.some((v) => v.severity === 'block');
 }
 
+// A draft scoring below this against the sender's exemplars reads off-voice
+// enough to be worth one revise pass (when budget remains). The judge returns 0
+// when its call fails, so a 0 is treated as "no signal", not "worst possible".
+export const QUALITY_MIN_VOICE = 0.65;
+
+/** A soft quality signal: the judge flagged off-voice / generic-opener / format,
+ *  or scored the voice match below threshold. These are warnings (still
+ *  sendable), but on a cold email "sendable but generic" is the thing to fix. */
+export function isWeakDraft(violations: Violation[], voiceMatchScore: number): boolean {
+  const qualityWarn = violations.some(
+    (v) => v.severity === 'warn' && (v.type === 'voice_mismatch' || v.type === 'constraint')
+  );
+  const weakVoice = voiceMatchScore > 0 && voiceMatchScore < QUALITY_MIN_VOICE;
+  return qualityWarn || weakVoice;
+}
+
+/** Decide whether to spend a revise pass: on a hard blocker or a soft quality
+ *  signal, as long as the tier's revise budget remains. Pure, so the policy is
+ *  unit-tested without an LLM. */
+export function shouldRevise(
+  violations: Violation[],
+  voiceMatchScore: number,
+  revisions: number,
+  maxRevisions: number
+): boolean {
+  if (revisions >= maxRevisions) return false;
+  return hasBlocker(violations) || isWeakDraft(violations, voiceMatchScore);
+}
+
 // ---------------------------------------------------------------------------
 // LLM stages
 // ---------------------------------------------------------------------------
@@ -494,12 +526,23 @@ async function critiqueDraft(draft: DraftOutput, ctx: AssembledContext): Promise
   };
 }
 
-function reviseInstruction(violations: Violation[]): string {
-  const lines = violations.map((v) => `- [${v.type}] ${v.detail}${v.span ? ` (span: "${v.span}")` : ''}`);
-  return [
-    'Your previous draft had these violations. Rewrite it to fix ALL of them while keeping the sender voice:',
-    ...lines,
-  ].join('\n');
+function reviseInstruction(violations: Violation[], weakVoiceScore?: number): string {
+  const parts: string[] = [];
+  if (violations.length) {
+    const lines = violations.map((v) => `- [${v.type}] ${v.detail}${v.span ? ` (span: "${v.span}")` : ''}`);
+    parts.push('Your previous draft had these issues. Rewrite it to fix ALL of them while keeping the sender voice:', ...lines);
+  }
+  // When the judge scored the voice low (but listed nothing concrete to fix),
+  // give the rewrite a direction: sound like the sender, and earn the send by
+  // opening on something true and specific to THIS recipient.
+  if (typeof weakVoiceScore === 'number') {
+    parts.push(
+      `This draft is sendable but not good enough yet (voice match ${weakVoiceScore.toFixed(2)}/1.0). Rewrite it to:`,
+      "- Match the sender's exemplars far more closely: their rhythm, sentence length, vocabulary, and register. Do not regress to generic professional-email voice.",
+      '- Open on a specific, true signal about THIS recipient or their company so the first sentence could not be swapped onto anyone else. Stay grounded in the allowed facts.'
+    );
+  }
+  return parts.join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -523,8 +566,8 @@ export async function runDraftEngine(ctx: AssembledContext, tier: EngineTier): P
     critique = await critiqueDraft(draft, ctx);
     const all = [...deterministic, ...critique.violations];
 
-    // Revise only if a blocker fired and we still have budget (tiered).
-    if (!hasBlocker(all) || revisions >= maxRevisions) {
+    // Revise on a blocker OR a soft quality signal, while budget remains.
+    if (!shouldRevise(all, critique.voiceMatchScore, revisions, maxRevisions)) {
       // Guarantee a real sign-off on the final body (placeholders swapped,
       // closing appended if missing). Done after verification so the appended
       // closing is never itself flagged. Strip em/en dashes from the final text
@@ -542,7 +585,10 @@ export async function runDraftEngine(ctx: AssembledContext, tier: EngineTier): P
         pass: !hasBlocker(all),
       };
     }
-    draft = await generateDraft(ctx, reviseInstruction(all));
+    // Pass the voice score into the revise prompt only when it's the weak signal
+    // driving the rewrite (not a hard blocker), so the nudge has a direction.
+    const weakVoice = !hasBlocker(all) && critique.voiceMatchScore > 0 && critique.voiceMatchScore < QUALITY_MIN_VOICE;
+    draft = await generateDraft(ctx, reviseInstruction(all, weakVoice ? critique.voiceMatchScore : undefined));
     revisions += 1;
   }
 }
