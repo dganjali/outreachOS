@@ -1488,7 +1488,7 @@ function MissionTopbar({
         {!autopilotOn && (
           <button
             type="button"
-            className="btn-go btn-launch"
+            className="btn-secondary btn-launch"
             onClick={onRun}
             title="Find companies, research them, surface contacts, and draft initial emails, live."
           >
@@ -1667,7 +1667,7 @@ function AutopilotCockpit({
           >
             {!policy.auto_send && (
               <span className="ap-choice-check">
-                <Check size={12} />
+                <Check size={12} aria-hidden />
               </span>
             )}
             <span className="ap-choice-title">Review first</span>
@@ -1681,7 +1681,7 @@ function AutopilotCockpit({
           >
             {policy.auto_send && (
               <span className="ap-choice-check">
-                <Check size={12} />
+                <Check size={12} aria-hidden />
               </span>
             )}
             <span className="ap-choice-title">Send automatically</span>
