@@ -154,13 +154,29 @@ export function Me() {
   /**
    * Save the current context as a snapshot directly from the History tab, so the
    * empty state isn't a dead end that only points back to the Context tab.
+   *
+   * A named checkpoint is a deliberate act, so it always creates a row (it skips
+   * the manual-save coalescing window that quiet auto-saves obey). An unnamed
+   * save still coalesces via maybeSnapshot.
    */
-  async function handleSaveSnapshot() {
+  async function handleSaveSnapshot(label?: string | null) {
     if (!profile?.user_id) return;
+    const trimmed = label?.trim() || null;
     await persistProfile(form);
-    await maybeSnapshot(form, 'manual', null);
+    if (trimmed) {
+      const { error: verErr } = await supabase.from('profile_versions').insert({
+        user_id: profile.user_id,
+        snapshot: form as unknown as Record<string, unknown>,
+        source: 'manual',
+        label: trimmed,
+      });
+      if (verErr) throw new Error(verErr.message);
+      setHistoryReloadKey((k) => k + 1);
+    } else {
+      await maybeSnapshot(form, 'manual', null);
+    }
     await refreshProfile();
-    toast.success('Snapshot saved.');
+    toast.success(trimmed ? `Checkpoint "${trimmed}" saved.` : 'Snapshot saved.');
   }
 
   async function handleSubmit(e: React.FormEvent) {

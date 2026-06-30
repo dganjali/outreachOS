@@ -2954,6 +2954,19 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
 .me-history-save-cta:hover:not(:disabled) { background: var(--accent-hover); }
 .me-history-save-cta:disabled { opacity: 0.6; cursor: not-allowed; }
 
+/* Create a named checkpoint from the top of the history list. */
+.me-history-checkpoint {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+.me-history-checkpoint input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.me-history-checkpoint .btn-secondary { flex: 0 0 auto; white-space: nowrap; }
+
 .me-history {
   list-style: none;
   padding: 0;
@@ -7883,6 +7896,21 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
 .mtop-back:hover { color: var(--fg); text-decoration: none; }
 .mtop-title { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .mtop-title h1 { margin: 0; font-size: var(--text-2xl); font-weight: 650; letter-spacing: -0.018em; color: var(--fg); }
+.mtop-title-row { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.mtop-title-row h1 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mtop-rename {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: var(--radius-sm); border: 1px solid transparent;
+  color: var(--fg-faint); background: none; cursor: pointer; opacity: 0;
+  transition: color var(--dur), opacity var(--dur), border-color var(--dur), background var(--dur);
+}
+.mtop-title-row:hover .mtop-rename, .mtop-rename:focus-visible { opacity: 1; }
+.mtop-rename:hover { color: var(--fg); border-color: var(--border-strong); background: var(--surface-2); }
+.mtop-title-input {
+  font-size: var(--text-2xl); font-weight: 650; letter-spacing: -0.018em; color: var(--fg);
+  background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  padding: 0.1rem 0.5rem; max-width: 100%; min-width: 0;
+}
 .mtop-meta { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
 .mtop-stats { display: inline-flex; align-items: center; gap: var(--space-3); font-size: var(--text-sm); color: var(--fg-muted); font-variant-numeric: tabular-nums; }
 .mtop-stats > span { position: relative; }
@@ -7936,6 +7964,13 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
   display: flex; align-items: center; gap: var(--space-1);
   border-bottom: 1px solid var(--border);
   margin-bottom: calc(-1 * var(--space-2));
+  /* Keep the tab bar in view on long pipelines. The app topbar is 56px tall and
+     sticks at top:0, so the tabs park just beneath it. A backdrop blur keeps
+     scrolling content legible as it passes under. */
+  position: sticky;
+  top: 56px;
+  z-index: 15;
+  background: var(--bg);
 }
 .mission-tab {
   display: inline-flex; align-items: center; gap: var(--space-2);
@@ -7965,6 +8000,32 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
 .cockpit-review-pointer strong { color: var(--fg); font-weight: 650; }
 
 /* --- Target rows: action-first, expand into a clean workspace --- */
+/* Pipeline filter + sort toolbar. Lets a long list be narrowed by stage and
+   reordered without scrolling through everything. */
+.tgt-toolbar {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+  flex-wrap: wrap; margin-bottom: var(--space-1);
+}
+.tgt-filters { display: flex; align-items: center; gap: var(--space-1); flex-wrap: wrap; }
+.tgt-filter {
+  display: inline-flex; align-items: center; gap: var(--space-1);
+  padding: var(--space-1) var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-full);
+  background: var(--surface-2); color: var(--fg-subtle); font-size: var(--text-xs); font-weight: 550; cursor: pointer;
+  transition: color var(--dur), border-color var(--dur), background var(--dur);
+}
+.tgt-filter:hover { color: var(--fg-muted); border-color: var(--border-strong); }
+.tgt-filter.is-active { color: var(--fg); border-color: var(--fg); background: var(--bg-elev); }
+.tgt-sort { display: inline-flex; align-items: center; gap: var(--space-2); margin: 0; }
+.tgt-sort > span {
+  font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.tgt-sort select { height: 30px; font-size: var(--text-sm); }
+.tgt-filter-empty {
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-2);
+  padding: var(--space-6); color: var(--fg-muted); font-size: var(--text-sm); text-align: center;
+}
+
 .tgt-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
 .tgt {
   background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden;
@@ -7972,10 +8033,20 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
 }
 .tgt:hover { border-color: var(--border-strong); }
 .tgt.is-open { border-color: var(--border-strong); box-shadow: var(--shadow-sm); }
+.tgt.is-pinned { border-color: var(--accent-line, var(--border-strong)); box-shadow: inset 2px 0 0 0 var(--accent); }
 .tgt.status-rejected { opacity: 0.5; }
 .tgt.status-approved { border-left: 2px solid var(--success); }
 .tgt.status-contacted { border-left: 2px solid var(--info); }
 .tgt-bar { display: flex; align-items: center; gap: var(--space-2); padding: 4px var(--space-3); }
+.tgt-pin {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: var(--radius-sm); border: 1px solid transparent;
+  color: var(--fg-faint); background: none; cursor: pointer; opacity: 0;
+  transition: color var(--dur), opacity var(--dur), background var(--dur), border-color var(--dur);
+}
+.tgt:hover .tgt-pin, .tgt-pin:focus-visible { opacity: 1; }
+.tgt-pin:hover { color: var(--fg); background: var(--surface-2); border-color: var(--border-strong); }
+.tgt-pin.is-pinned { opacity: 1; color: var(--accent); }
 .tgt-main {
   flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: var(--space-2);
   background: none; border: none; padding: var(--space-2) 0; cursor: pointer; text-align: left; color: var(--fg); font: inherit;
@@ -8014,6 +8085,13 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
 .tgt-detail-facts > span + span::before { content: '·'; margin-right: var(--space-3); color: var(--fg-faint); }
 .tgt-visit { color: var(--fg-muted); }
 .tgt-detail-controls { display: flex; align-items: center; gap: var(--space-2); }
+/* Pair the status dropdown with a visible "Status" label so it reads as a control
+   (and never as an orphaned "Suggested" word). */
+.tgt-status-field { display: inline-flex; align-items: center; gap: var(--space-2); margin: 0; }
+.tgt-status-field > span {
+  font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
 .tgt-status-select { height: 30px; font-size: var(--text-sm); }
 .tgt-remove {
   width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center;

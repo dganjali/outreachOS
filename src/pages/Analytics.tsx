@@ -33,11 +33,23 @@ interface Totals {
   replied: number;
 }
 
-const TREND_DAYS = 30;
+// Selectable trend windows. 0 = "All", resolved to the span since the first send.
+const RANGE_OPTIONS = [
+  { id: 7, label: '7d' },
+  { id: 30, label: '30d' },
+  { id: 90, label: '90d' },
+  { id: 0, label: 'All' },
+] as const;
+type RangeId = (typeof RANGE_OPTIONS)[number]['id'];
+const DEFAULT_RANGE: RangeId = 30;
+// Hard cap so "All" on a very old account stays a readable bar chart, not 1000 slivers.
+const MAX_TREND_DAYS = 365;
 
 function dayKey(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
+
+type SortKey = 'name' | 'sourced' | 'drafts' | 'sent' | 'replied';
 
 // ── small presentational pieces ──────────────────────────────────────────────
 
@@ -95,19 +107,65 @@ function SentTrend({ counts }: { counts: { day: string; sent: number }[] }) {
 }
 
 function MissionBreakdown({ rows }: { rows: MissionOutcome[] }) {
+  // Sort by any column. Click a header to sort; click again to flip direction.
+  // Name sorts A→Z by default; numeric columns sort high→low first (the more
+  // useful read on outcomes). Default is "most sourced" so the busiest leads.
+  const [sortKey, setSortKey] = useState<SortKey>('sourced');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
+  function toggleSort(key: SortKey) {
+    if (key === sortKey) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir(key === 'name' ? 'asc' : 'desc');
+    }
+  }
+
+  const sorted = useMemo(() => {
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      if (sortKey === 'name') return dir * a.name.localeCompare(b.name);
+      return dir * (a[sortKey] - b[sortKey]);
+    });
+  }, [rows, sortKey, sortDir]);
+
   if (rows.length === 0) {
     return <p className="text-sm text-muted-foreground">No missions yet. Create one to start sourcing.</p>;
   }
+
+  const arrow = (key: SortKey) => (sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '');
+  const numCols: Array<{ key: SortKey; label: string }> = [
+    { key: 'sourced', label: 'Sourced' },
+    { key: 'drafts', label: 'Drafts' },
+    { key: 'sent', label: 'Sent' },
+    { key: 'replied', label: 'Replied' },
+  ];
+
   return (
     <div className="flex flex-col divide-y divide-border/60">
       <div className="grid grid-cols-[1fr_auto] items-center gap-x-4 py-2 text-[11px] font-medium uppercase tracking-[0.1em] text-muted-foreground sm:grid-cols-[1fr_repeat(4,56px)]">
-        <span>Mission</span>
-        <span className="hidden text-right sm:block">Sourced</span>
-        <span className="hidden text-right sm:block">Drafts</span>
-        <span className="hidden text-right sm:block">Sent</span>
-        <span className="hidden text-right sm:block">Replied</span>
+        <button
+          type="button"
+          onClick={() => toggleSort('name')}
+          className="text-left transition-colors hover:text-foreground"
+          aria-label="Sort by mission name"
+        >
+          Mission{arrow('name')}
+        </button>
+        {numCols.map((c) => (
+          <button
+            key={c.key}
+            type="button"
+            onClick={() => toggleSort(c.key)}
+            className="hidden text-right transition-colors hover:text-foreground sm:block"
+            aria-label={`Sort by ${c.label.toLowerCase()}`}
+          >
+            {c.label}{arrow(c.key)}
+          </button>
+        ))}
       </div>
-      {rows.map((r) => (
+      {sorted.map((r) => (
         <div
           key={r.id}
           className="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-1 py-3 sm:grid-cols-[1fr_repeat(4,56px)]"
@@ -132,7 +190,9 @@ function MissionBreakdown({ rows }: { rows: MissionOutcome[] }) {
 
 export function Analytics() {
   const [missions, setMissions] = useState<MissionOutcome[] | null>(null);
-  const [trend, setTrend] = useState<{ day: string; sent: number }[] | null>(null);
+  // Raw "sent" rows kept in state so the trend window can change without refetching.
+  const [sentRows, setSentRows] = useState<Row[] | null>(null);
+  const [rangeDays, setRangeDays] = useState<RangeId>(DEFAULT_RANGE);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -172,18 +232,18 @@ export function Analytics() {
       }));
 
       setMissions(outcomes);
-      setTrend(buildTrend(sent.filter((s) => s.status === 'sent')));
+      setSentRows(sent.filter((s) => s.status === 'sent'));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load analytics');
       setMissions([]);
-      setTrend([]);
+      setSentRows([]);
     }
   }, []);
 
   useEffect(() => {
     let cancelled = false;
     setMissions(null);
-    setTrend(null);
+    setSentRows(null);
     void (async () => {
       await load();
       if (cancelled) return;
@@ -214,6 +274,25 @@ export function Analytics() {
       { sourced: 0, drafts: 0, sent: 0, replied: 0 },
     );
   }, [missions]);
+
+  // Resolve the selected window to a concrete day count, then bucket the sent
+  // rows. "All" spans from the first send to today (capped), defaulting to the
+  // 30-day view until anything has been sent.
+  const trend = useMemo<{ day: string; sent: number }[] | null>(() => {
+    if (!sentRows) return null;
+    let days: number = rangeDays;
+    if (rangeDays === 0) {
+      let earliest = Infinity;
+      for (const s of sentRows) {
+        const t = s.sent_at ? new Date(s.sent_at).getTime() : NaN;
+        if (!Number.isNaN(t)) earliest = Math.min(earliest, t);
+      }
+      days = Number.isFinite(earliest)
+        ? Math.min(MAX_TREND_DAYS, Math.max(7, Math.ceil((Date.now() - earliest) / 86_400_000) + 1))
+        : 30;
+    }
+    return buildTrend(sentRows, days);
+  }, [sentRows, rangeDays]);
 
   return (
     <div className="flex flex-col gap-6 animate-fade-in">
@@ -262,7 +341,29 @@ export function Analytics() {
       <div className="grid gap-4 lg:grid-cols-[1fr_1.4fr]">
         {/* Sent over time */}
         <section className="panel flex flex-col gap-3 p-5">
-          <h2 className="text-sm font-semibold text-foreground">Sent, last {TREND_DAYS} days</h2>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold text-foreground">
+              {rangeDays === 0 ? 'Sent, all time' : `Sent, last ${rangeDays} days`}
+            </h2>
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-secondary/40 p-0.5">
+              {RANGE_OPTIONS.map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  onClick={() => setRangeDays(o.id)}
+                  aria-pressed={rangeDays === o.id}
+                  className={cn(
+                    'rounded-md px-2 py-0.5 text-[11px] font-medium tabular-nums transition-colors',
+                    rangeDays === o.id
+                      ? 'bg-secondary text-foreground'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          </div>
           {!trend ? <Skeleton className="h-32 w-full" /> : <SentTrend counts={trend} />}
         </section>
 
@@ -308,7 +409,7 @@ function countDistinctBy(rows: Row[]): Map<string, number> {
   return map;
 }
 
-function buildTrend(sent: Row[]): { day: string; sent: number }[] {
+function buildTrend(sent: Row[], days: number): { day: string; sent: number }[] {
   const byDay = new Map<string, number>();
   for (const s of sent) {
     const iso = s.sent_at;
@@ -320,7 +421,7 @@ function buildTrend(sent: Row[]): { day: string; sent: number }[] {
   }
   const out: { day: string; sent: number }[] = [];
   const today = new Date();
-  for (let i = TREND_DAYS - 1; i >= 0; i--) {
+  for (let i = days - 1; i >= 0; i--) {
     const d = new Date(today);
     d.setDate(today.getDate() - i);
     const k = dayKey(d);

@@ -69,8 +69,14 @@ export function PersonaStudio({ userId }: { userId: string | undefined }) {
   async function commitRename(id: string) {
     const next = nameDraft.trim();
     const current = personas.find((x) => x.id === id);
-    if (!current || !next || next === current.name) {
+    if (!current || next === current.name) {
       cancelRename();
+      return;
+    }
+    // A voice needs a name you'll recognize later. Reject too-short names rather
+    // than silently saving a stray keystroke; keep the field open to fix it.
+    if (next.length < 2) {
+      setError('Give this voice a name with at least 2 characters.');
       return;
     }
     setSavingName(true);
@@ -143,8 +149,10 @@ export function PersonaStudio({ userId }: { userId: string | undefined }) {
                     value={nameDraft}
                     autoFocus
                     maxLength={80}
+                    minLength={2}
                     disabled={savingName}
                     aria-label="Voice name"
+                    placeholder="Give this voice a descriptive name"
                     onChange={(e) => setNameDraft(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {

@@ -386,7 +386,12 @@ export function Missions() {
               className="group flex flex-col gap-3 rounded-lg border border-border bg-card p-5 transition-colors hover:border-primary/50 hover:bg-secondary/30"
             >
               <div className="flex items-start justify-between gap-2">
-                <h3 className="text-base font-semibold leading-tight text-foreground">{m.name}</h3>
+                <h3
+                  className="line-clamp-2 min-h-[2.6em] text-base font-semibold leading-tight text-foreground"
+                  title={m.name}
+                >
+                  {m.name}
+                </h3>
                 <Badge variant="secondary" className="shrink-0 font-normal">{MODE_LABEL[m.mode] ?? m.mode}</Badge>
               </div>
               <p className="line-clamp-2 text-sm leading-relaxed text-muted-foreground" title={m.goal}>

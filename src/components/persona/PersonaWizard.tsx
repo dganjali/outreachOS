@@ -268,7 +268,9 @@ export function PersonaWizard({
   }
 
   const stepIndex = step === 'overview' ? INPUT_STEPS.length : INPUT_STEPS.indexOf(step);
-  const canNextFrame = name.trim().length > 0 && mode != null;
+  // Require a name with at least 2 characters so a voice is recognizable later,
+  // not a stray keystroke like "h".
+  const canNextFrame = name.trim().length >= 2 && mode != null;
 
   if (loading) {
     return (
@@ -366,7 +368,7 @@ export function PersonaWizard({
         </div>
         <div className="pw-actions-right">
           {step === 'overview' ? (
-            <button type="button" className="pw-btn-primary" onClick={finish} disabled={busy || !name.trim()}>
+            <button type="button" className="pw-btn-primary" onClick={finish} disabled={busy || name.trim().length < 2}>
               {busy ? <Loader2 className="pw-spin" size={15} /> : <Check size={15} />}
               {editing ? 'Save changes' : 'Save voice'}
             </button>

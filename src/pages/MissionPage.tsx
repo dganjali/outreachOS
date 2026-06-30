@@ -4,7 +4,7 @@ import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Send, Sparkles, Lock, Undo2, Paperclip, Pencil,
   Plane, PlaneTakeoff, Radar, Search, Users, PenLine, Clock, Eye, MessageSquare, Check, ChevronRight, Gauge as GaugeIcon,
-  AlertTriangle, Plus, Trash2, X,
+  AlertTriangle, Plus, Trash2, X, Pin,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
@@ -45,6 +45,16 @@ const TARGET_STATUS_LABEL: Record<string, string> = {
   rejected: 'Rejected',
   contacted: 'Contacted',
 };
+
+// Short labels for the pipeline stage filter chips (keyed by targetStage().stage).
+const STAGE_FILTER_LABEL: Record<string, string> = {
+  research: 'Needs research',
+  contacts: 'Needs contacts',
+  draft: 'Ready to draft',
+  review: 'Review & send',
+  done: 'Contacted',
+};
+const STAGE_FILTER_ORDER = ['research', 'contacts', 'draft', 'review', 'done'] as const;
 
 // First-write defaults for a mission's Autopilot policy. Everything the user
 // never configures directly; the cron normalizes missing fields too.
@@ -123,6 +133,13 @@ export function MissionPage() {
   const [sendingAll, setSendingAll] = useState(false);
   // Whether the bulk subject-line editor panel is open.
   const [subjectsOpen, setSubjectsOpen] = useState(false);
+  // Pipeline filter + sort, so a long list (dozens of targets) is navigable.
+  const [pipelineFilter, setPipelineFilter] = useState<TargetStage['stage'] | 'all'>('all');
+  const [pipelineSort, setPipelineSort] = useState<'score' | 'name' | 'recent' | 'stage'>('score');
+  // Pinned targets float to the top regardless of sort. Persisted per-mission in
+  // localStorage so a user's "tackle these first" choices survive reloads without
+  // a schema change.
+  const [pinnedIds, setPinnedIds] = useState<Set<string>>(new Set());
   // Bulk contact selection (checkboxes + floating action bar).
   const [selectedContactIds, setSelectedContactIds] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -173,6 +190,56 @@ export function MissionPage() {
       .single();
     setMission(data as Mission | null);
   }, [id, user?.id]);
+
+  // Inline rename from the topbar. Optimistic, with a rollback + toast on failure
+  // so the title edits in place without a full reload. Renaming was previously
+  // only possible by deleting and recreating the mission.
+  const renameMission = useCallback(
+    async (name: string) => {
+      const next = name.trim();
+      if (!mission || !next || next === mission.name) return;
+      const prev = mission.name;
+      setMission({ ...mission, name: next });
+      const { error: renameErr } = await supabase.from('missions').update({ name: next }).eq('id', mission.id);
+      if (renameErr) {
+        setMission({ ...mission, name: prev });
+        toast.error(`Could not rename: ${renameErr.message}`);
+        return;
+      }
+      toast.success('Mission renamed.');
+    },
+    [mission],
+  );
+
+  // Load this mission's pinned target ids from localStorage.
+  useEffect(() => {
+    if (!id) return;
+    try {
+      const raw = localStorage.getItem(`mission-pins:${id}`);
+      setPinnedIds(new Set(raw ? (JSON.parse(raw) as string[]) : []));
+    } catch {
+      setPinnedIds(new Set());
+    }
+  }, [id]);
+
+  const togglePin = useCallback(
+    (targetId: string) => {
+      setPinnedIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(targetId)) next.delete(targetId);
+        else next.add(targetId);
+        if (id) {
+          try {
+            localStorage.setItem(`mission-pins:${id}`, JSON.stringify(Array.from(next)));
+          } catch {
+            /* best-effort; pins are a convenience, never fatal */
+          }
+        }
+        return next;
+      });
+    },
+    [id],
+  );
 
   const loadTargets = useCallback(async () => {
     if (!id) return;
@@ -497,6 +564,18 @@ export function MissionPage() {
     setSelectedContactIds(new Set());
   }
 
+  // Select every drafted contact at once, so a stack of drafts can be reviewed and
+  // approved in a couple of clicks instead of one-by-one. Approving via the bulk
+  // bar is a review gate - it does not send - so it's the safe middle ground
+  // between per-draft review and the immediate "Send all".
+  function selectAllDrafts() {
+    const ids: string[] = [];
+    for (const list of Object.values(contactsByTarget)) {
+      for (const c of list) if (sequencesByContact[c.id]) ids.push(c.id);
+    }
+    setSelectedContactIds(new Set(ids));
+  }
+
   // Apply a status to every selected contact at once (bulk approve/reject), with
   // a single undo that restores each contact's prior status.
   async function bulkSetContactStatus(status: Contact['status']) {
@@ -552,19 +631,36 @@ export function MissionPage() {
   // reply-stop: the user marks the contact replied and the follow-up cron
   // skips them at send time (it checks contact.status === 'replied').
   async function markContactReplied(c: Contact) {
+    const prev = c.status;
     const { error } = await supabase.from('contacts').update({ status: 'replied' }).eq('id', c.id);
     if (error) {
       toast.error(`Could not mark ${c.name} as replied: ${error.message}`);
       return;
     }
-    setContactsByTarget((s) => {
-      const next: typeof s = {};
-      for (const [tid, list] of Object.entries(s)) {
-        next[tid] = list.map((x) => (x.id === c.id ? { ...x, status: 'replied' as Contact['status'] } : x));
-      }
-      return next;
+    const applyStatus = (status: Contact['status']) =>
+      setContactsByTarget((s) => {
+        const next: typeof s = {};
+        for (const [tid, list] of Object.entries(s)) {
+          next[tid] = list.map((x) => (x.id === c.id ? { ...x, status } : x));
+        }
+        return next;
+      });
+    applyStatus('replied');
+    // This fires on a single click and flips follow-ups off, so give it the same
+    // one-click undo the other status actions have, restoring the prior status.
+    toast.success(`Marked ${c.name} as replied. Their scheduled follow-ups will not send.`, {
+      action: {
+        label: 'Undo',
+        onClick: async () => {
+          const { error: undoErr } = await supabase.from('contacts').update({ status: prev }).eq('id', c.id);
+          if (undoErr) {
+            toast.error(`Could not undo: ${undoErr.message}`);
+            return;
+          }
+          applyStatus(prev);
+        },
+      },
     });
-    toast.success(`Marked ${c.name} as replied. Their scheduled follow-ups will not send.`);
   }
 
   // Flip Autopilot on/off. Free users are routed to the upgrade page instead of
@@ -658,6 +754,46 @@ export function MissionPage() {
   // Companies the pipeline dropped for having no reachable contact are marked
   // 'rejected' - keep them out of the output so the user only sees real targets.
   const visibleTargets = targets.filter((t) => t.status !== 'rejected');
+
+  // Pipeline stage per visible target, computed once here so the toolbar can
+  // filter/sort by it (mirrors the per-row computation in TargetRow).
+  const STAGE_ORDER: Record<TargetStage['stage'], number> = {
+    research: 0,
+    contacts: 1,
+    draft: 2,
+    review: 3,
+    done: 4,
+  };
+  const stageByTarget = new Map<string, TargetStage>();
+  for (const t of visibleTargets) {
+    stageByTarget.set(
+      t.id,
+      targetStage(packsByTarget[t.id], contactsByTarget[t.id] ?? [], sequencesByContact, initialSentSeqIds),
+    );
+  }
+  // Filter, then sort, then float pinned targets to the top.
+  const displayedTargets = visibleTargets
+    .filter((t) => pipelineFilter === 'all' || stageByTarget.get(t.id)?.stage === pipelineFilter)
+    .sort((a, b) => {
+      switch (pipelineSort) {
+        case 'name':
+          return a.company_name.localeCompare(b.company_name);
+        case 'recent':
+          return (b.created_at ?? '').localeCompare(a.created_at ?? '');
+        case 'stage':
+          return (
+            (STAGE_ORDER[stageByTarget.get(b.id)?.stage ?? 'research'] ?? 0) -
+            (STAGE_ORDER[stageByTarget.get(a.id)?.stage ?? 'research'] ?? 0)
+          );
+        case 'score':
+        default:
+          return (asScore(b.score) ?? -1) - (asScore(a.score) ?? -1);
+      }
+    })
+    .sort((a, b) => Number(pinnedIds.has(b.id)) - Number(pinnedIds.has(a.id)));
+  // Stage buckets present in this mission, for the filter chips (with counts).
+  const stageCounts = new Map<TargetStage['stage'], number>();
+  for (const s of stageByTarget.values()) stageCounts.set(s.stage, (stageCounts.get(s.stage) ?? 0) + 1);
 
   // Whether to render the hands-off Autopilot cockpit (paid + enabled) vs. the
   // manual action console.
@@ -824,6 +960,7 @@ export function MissionPage() {
         autopilotOn={autopilotOn}
         onToggleAutopilot={toggleAutopilot}
         onRun={() => navigate(`/missions/${mission.id}/run`)}
+        onRename={renameMission}
       />
 
       <MissionTabs
@@ -886,6 +1023,16 @@ export function MissionPage() {
                     {subjectsOpen ? 'Hide subjects' : `Subjects (${subjectRows.length})`}
                   </button>
                 )}
+                {totalDrafts > 1 && selectedContactIds.size < totalDrafts && (
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={selectAllDrafts}
+                    title="Select every drafted contact so you can approve them in one batch (approving does not send)"
+                  >
+                    Select all drafts ({totalDrafts})
+                  </button>
+                )}
                 <CsvImport missionId={mission.id} onImported={loadTargets} />
                 {visibleTargets.length > 0 && (
                   <button
@@ -930,36 +1077,85 @@ export function MissionPage() {
                 </div>
               </div>
             ) : (
-              <ul className="tgt-list">
-                {visibleTargets.map((t) => (
-                  <TargetRow
-                    key={t.id}
-                    target={t}
-                    isPeople={isPeople}
-                    contacts={contactsByTarget[t.id] ?? []}
-                    pack={packsByTarget[t.id]}
-                    sequencesByContact={sequencesByContact}
-                    initialSentSeqIds={initialSentSeqIds}
-                    sentByContact={sentByContact}
-                    repliesByContact={repliesByContact}
-                    refreshKey={refreshKey}
-                    busy={busy}
-                    aiEnabled={aiEnabled}
-                    hasResume={hasResume}
-                    selectedContactIds={selectedContactIds}
-                    onBuildEvidence={buildEvidence}
-                    onFindContacts={findContacts}
-                    onGenerateSequence={generateSequence}
-                    onSetStatus={setTargetStatus}
-                    onDelete={deleteTarget}
-                    onMarkReplied={markContactReplied}
-                    onToggleSelected={toggleContactSelected}
-                    onReloadContacts={loadContactsForTarget}
-                    onReloadSequence={loadSequencesForContact}
-                    onReloadEvidence={loadEvidenceForTarget}
-                  />
-                ))}
-              </ul>
+              <>
+                {visibleTargets.length > 1 && (
+                  <div className="tgt-toolbar">
+                    <div className="tgt-filters" role="group" aria-label="Filter pipeline by stage">
+                      <button
+                        type="button"
+                        className={`tgt-filter${pipelineFilter === 'all' ? ' is-active' : ''}`}
+                        onClick={() => setPipelineFilter('all')}
+                      >
+                        All <span className="console-count">{visibleTargets.length}</span>
+                      </button>
+                      {STAGE_FILTER_ORDER.filter((s) => (stageCounts.get(s) ?? 0) > 0).map((s) => (
+                        <button
+                          key={s}
+                          type="button"
+                          className={`tgt-filter${pipelineFilter === s ? ' is-active' : ''}`}
+                          onClick={() => setPipelineFilter(s)}
+                        >
+                          {STAGE_FILTER_LABEL[s]} <span className="console-count">{stageCounts.get(s)}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <label className="tgt-sort">
+                      <span>Sort</span>
+                      <select
+                        value={pipelineSort}
+                        onChange={(e) => setPipelineSort(e.target.value as typeof pipelineSort)}
+                        aria-label="Sort pipeline"
+                      >
+                        <option value="score">Fit score</option>
+                        <option value="stage">Pipeline stage</option>
+                        <option value="recent">Recently added</option>
+                        <option value="name">Name (A–Z)</option>
+                      </select>
+                    </label>
+                  </div>
+                )}
+                {displayedTargets.length === 0 ? (
+                  <div className="tgt-filter-empty">
+                    <p>No targets in this stage.</p>
+                    <button type="button" className="link-button" onClick={() => setPipelineFilter('all')}>
+                      Show all {visibleTargets.length}
+                    </button>
+                  </div>
+                ) : (
+                  <ul className="tgt-list">
+                    {displayedTargets.map((t) => (
+                      <TargetRow
+                        key={t.id}
+                        target={t}
+                        isPeople={isPeople}
+                        contacts={contactsByTarget[t.id] ?? []}
+                        pack={packsByTarget[t.id]}
+                        sequencesByContact={sequencesByContact}
+                        initialSentSeqIds={initialSentSeqIds}
+                        sentByContact={sentByContact}
+                        repliesByContact={repliesByContact}
+                        refreshKey={refreshKey}
+                        busy={busy}
+                        aiEnabled={aiEnabled}
+                        hasResume={hasResume}
+                        selectedContactIds={selectedContactIds}
+                        pinned={pinnedIds.has(t.id)}
+                        onTogglePin={togglePin}
+                        onBuildEvidence={buildEvidence}
+                        onFindContacts={findContacts}
+                        onGenerateSequence={generateSequence}
+                        onSetStatus={setTargetStatus}
+                        onDelete={deleteTarget}
+                        onMarkReplied={markContactReplied}
+                        onToggleSelected={toggleContactSelected}
+                        onReloadContacts={loadContactsForTarget}
+                        onReloadSequence={loadSequencesForContact}
+                        onReloadEvidence={loadEvidenceForTarget}
+                      />
+                    ))}
+                  </ul>
+                )}
+              </>
             )}
           </section>
 
@@ -1205,6 +1401,7 @@ function MissionTopbar({
   autopilotOn,
   onToggleAutopilot,
   onRun,
+  onRename,
 }: {
   mission: Mission;
   metrics: Metrics;
@@ -1213,7 +1410,20 @@ function MissionTopbar({
   autopilotOn: boolean;
   onToggleAutopilot: () => void;
   onRun: () => void;
+  onRename: (name: string) => void | Promise<void>;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(mission.name);
+
+  function startEdit() {
+    setDraft(mission.name);
+    setEditing(true);
+  }
+  function commit() {
+    setEditing(false);
+    if (draft.trim() && draft.trim() !== mission.name) void onRename(draft);
+  }
+
   return (
     <header className="mtop">
       <div className="mtop-left">
@@ -1221,7 +1431,39 @@ function MissionTopbar({
           ← Missions
         </Link>
         <div className="mtop-title">
-          <h1>{mission.name}</h1>
+          {editing ? (
+            <input
+              className="mtop-title-input"
+              value={draft}
+              autoFocus
+              maxLength={120}
+              aria-label="Mission name"
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={commit}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  commit();
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setEditing(false);
+                }
+              }}
+            />
+          ) : (
+            <div className="mtop-title-row">
+              <h1>{mission.name}</h1>
+              <button
+                type="button"
+                className="mtop-rename"
+                onClick={startEdit}
+                title="Rename mission"
+                aria-label="Rename mission"
+              >
+                <Pencil size={14} aria-hidden />
+              </button>
+            </div>
+          )}
           <div className="mtop-meta">
             <span className="mode-pill">{MODE_LABEL[mission.mode] ?? mission.mode}</span>
             {mission.find_mode === 'people' && <span className="mode-pill">People</span>}
@@ -1889,6 +2131,8 @@ function TargetRow({
   aiEnabled,
   hasResume,
   selectedContactIds,
+  pinned,
+  onTogglePin,
   onBuildEvidence,
   onFindContacts,
   onGenerateSequence,
@@ -1913,6 +2157,8 @@ function TargetRow({
   aiEnabled: boolean;
   hasResume: boolean;
   selectedContactIds: Set<string>;
+  pinned: boolean;
+  onTogglePin: (targetId: string) => void;
   onBuildEvidence: (t: Target) => void | Promise<void>;
   onFindContacts: (t: Target) => void | Promise<void>;
   onGenerateSequence: (c: Contact) => void | Promise<void>;
@@ -1954,8 +2200,18 @@ function TargetRow({
     (stage.stage === 'research' && evidenceBusy) || (stage.stage === 'contacts' && contactsBusy);
 
   return (
-    <li className={`tgt status-${t.status}${open ? ' is-open' : ''}`}>
+    <li className={`tgt status-${t.status}${open ? ' is-open' : ''}${pinned ? ' is-pinned' : ''}`}>
       <div className="tgt-bar">
+        <button
+          type="button"
+          className={`tgt-pin${pinned ? ' is-pinned' : ''}`}
+          onClick={() => onTogglePin(t.id)}
+          aria-pressed={pinned}
+          title={pinned ? 'Unpin (remove from top)' : 'Pin to top'}
+          aria-label={pinned ? `Unpin ${t.company_name}` : `Pin ${t.company_name} to top`}
+        >
+          <Pin size={13} aria-hidden />
+        </button>
         <button type="button" className="tgt-main" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
           <ChevronRight size={15} className="tgt-caret" aria-hidden />
           {score != null && (
@@ -2016,6 +2272,8 @@ function TargetRow({
               )}
             </div>
             <div className="tgt-detail-controls">
+              <label className="tgt-status-field">
+                <span>Status</span>
               <select
                 className="tgt-status-select"
                 value={t.status}
@@ -2027,6 +2285,7 @@ function TargetRow({
                 <option value="rejected">Rejected</option>
                 <option value="contacted">Contacted</option>
               </select>
+              </label>
               <button
                 type="button"
                 className="tgt-remove"
@@ -2323,8 +2582,26 @@ function BulkSubjectEditor({
 }) {
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  // A single template applied across every editable subject at once. {company}
+  // and {name} are filled per-row; the user still reviews before saving.
+  const [template, setTemplate] = useState('');
 
   const valueFor = (r: SubjectRow) => edits[r.sequenceId] ?? r.subject;
+
+  function applyTemplate() {
+    const tpl = template.trim();
+    if (!tpl) return;
+    setEdits((m) => {
+      const next = { ...m };
+      for (const r of rows) {
+        if (r.sent) continue;
+        next[r.sequenceId] = tpl
+          .replace(/\{company\}/gi, r.company)
+          .replace(/\{name\}/gi, r.recipient || '');
+      }
+      return next;
+    });
+  }
   const dirty = rows.filter((r) => {
     if (r.sent) return false;
     const v = valueFor(r).trim();
@@ -2383,6 +2660,53 @@ function BulkSubjectEditor({
         <button type="button" className="link-button" onClick={onClose}>
           Close
         </button>
+      </div>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '10px 14px',
+          borderBottom: '1px solid var(--border-soft)',
+          background: 'var(--surface-2)',
+        }}
+      >
+        <input
+          type="text"
+          value={template}
+          onChange={(e) => setTemplate(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              applyTemplate();
+            }
+          }}
+          placeholder="One subject for all, e.g. Quick idea for {company}"
+          aria-label="Subject template to apply to all drafts"
+          style={{
+            flex: 1,
+            minWidth: 0,
+            padding: '6px 9px',
+            fontSize: 13,
+            color: 'var(--fg)',
+            background: 'var(--bg)',
+            border: '1px solid var(--border)',
+            borderRadius: 6,
+          }}
+        />
+        <button type="button" className="btn-secondary" onClick={applyTemplate} disabled={!template.trim()}>
+          Apply to all
+        </button>
+      </div>
+      <div
+        style={{
+          padding: '6px 14px',
+          fontSize: 11,
+          color: 'var(--fg-muted)',
+          borderBottom: '1px solid var(--border-soft)',
+        }}
+      >
+        Tip: use <code>{'{company}'}</code> and <code>{'{name}'}</code> as placeholders. Review below, then save.
       </div>
       <div style={{ maxHeight: 360, overflowY: 'auto' }}>
         {rows.map((r) => (
@@ -2717,7 +3041,9 @@ function SequenceCard({ sequence, contact, aiEnabled, hasResume, onContactUpdate
           )}
           {sequence.autopilot_state === 'review' && (
             <div className="autopilot-banner warn">
-              Held by Autopilot for review: the address is not verified, or confidence is below your threshold.
+              Held for review: the recipient address isn't verified yet. Add or confirm a verified
+              address below to send it, or switch this mission to Manual (top right) to review and
+              send each draft yourself.
             </div>
           )}
           {(needsEmail || !contact.email) && (

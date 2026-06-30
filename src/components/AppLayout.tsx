@@ -133,6 +133,7 @@ function NavItems({ onNavigate }: { onNavigate?: () => void }) {
         <NavLink
           key={to}
           to={to}
+          end
           onClick={onNavigate}
           className={({ isActive }) =>
             cn(

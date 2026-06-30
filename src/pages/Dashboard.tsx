@@ -584,6 +584,11 @@ export function Dashboard() {
       ? draftMissions.slice(0, 3).map((m) => m.name).join(' · ') +
         (draftMissions.length > 3 ? ` +${draftMissions.length - 3} more` : '')
       : 'Agent-written emails waiting for your eyes.';
+  // Route "Review drafts" straight to a mission that actually has drafts (the one
+  // with the most), not the generic Missions list. With one draft-bearing mission
+  // it's exact; with several we land on the heaviest and the sub-text names the
+  // rest, so the CTA is never a dead end.
+  const topDraftMission = [...draftMissions].sort((a, b) => b.draft_count - a.draft_count)[0];
   const focusItems = [
     stats.drafts > 0
       ? {
@@ -591,7 +596,7 @@ export function Dashboard() {
           count: stats.drafts,
           noun: stats.drafts === 1 ? 'draft to review' : 'drafts to review',
           sub: draftMissionsSub,
-          to: draftMissions.length === 1 ? `/missions/${draftMissions[0].id}` : '/missions',
+          to: topDraftMission ? `/missions/${topDraftMission.id}` : '/missions',
           cta: 'Review drafts',
         }
       : null,
@@ -721,7 +726,7 @@ export function Dashboard() {
       )}
 
       <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
-        <section className="flex flex-col gap-3">
+        <section className="flex min-w-0 flex-col gap-3">
           <SectionHeader
             title="Active missions"
             action={
@@ -802,8 +807,8 @@ export function Dashboard() {
           )}
         </section>
 
-        <aside className="flex flex-col gap-6">
-          <section className="flex flex-col gap-3">
+        <aside className="flex min-w-0 flex-col gap-6">
+          <section className="flex min-w-0 flex-col gap-3">
             <SectionHeader title="Recent activity" />
             {runs.length === 0 ? (
               <div className="panel flex flex-col items-center gap-1.5 px-3.5 py-8 text-center">
@@ -816,12 +821,12 @@ export function Dashboard() {
               <div className="panel divide-y divide-border/60 overflow-hidden">
                 {runs.map((r) => {
                   const v = describeRun(r);
-                  return (
-                    <div
-                      key={r.id}
-                      title={v.title}
-                      className="flex items-center gap-2.5 px-3.5 py-2.5 transition-colors hover:bg-secondary/30"
-                    >
+                  // Most runs belong to a mission; make those rows jump to that
+                  // mission's Activity tab. Profile-level runs (enrich/coach/résumé)
+                  // carry no mission_id, so they stay informational.
+                  const to = r.mission_id ? `/missions/${r.mission_id}?tab=activity` : null;
+                  const inner = (
+                    <>
                       <StatusDot tone={v.tone} />
                       <span className="min-w-0 flex-1 truncate text-[13px] text-foreground/90">{v.label}</span>
                       {v.tone === 'running' && (
@@ -833,7 +838,18 @@ export function Dashboard() {
                       {v.tone === 'empty' && (
                         <span className="shrink-0 text-[11px] font-medium text-warning">{v.tag}</span>
                       )}
-                      <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{timeAgo(r.started_at)}</span>
+                      <span className="shrink-0 whitespace-nowrap text-[11px] tabular-nums text-muted-foreground">{timeAgo(r.started_at)}</span>
+                    </>
+                  );
+                  const rowClass =
+                    'flex items-center gap-2.5 px-3.5 py-2.5 transition-colors hover:bg-secondary/30';
+                  return to ? (
+                    <Link key={r.id} to={to} title={v.title} className={cn(rowClass, 'group')}>
+                      {inner}
+                    </Link>
+                  ) : (
+                    <div key={r.id} title={v.title} className={rowClass}>
+                      {inner}
                     </div>
                   );
                 })}

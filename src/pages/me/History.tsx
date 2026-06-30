@@ -28,8 +28,11 @@ interface HistoryProps {
   current: ProfileSnapshot;
   reloadKey: number;
   onRestore: (snapshot: ProfileSnapshot, fromVersionId: string) => Promise<void>;
-  /** Save the current context as a snapshot without leaving the History tab. */
-  onSaveSnapshot?: () => Promise<void>;
+  /**
+   * Save the current context as a snapshot without leaving the History tab. Pass
+   * a label to create a named checkpoint (always saved); omit it for a quiet save.
+   */
+  onSaveSnapshot?: (label?: string | null) => Promise<void>;
 }
 
 function relTime(iso: string): string {
@@ -74,12 +77,15 @@ export function History({ userId, current, reloadKey, onRestore, onSaveSnapshot 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const [savingSnapshot, setSavingSnapshot] = useState(false);
+  // Optional name for a deliberate checkpoint created from the top of the list.
+  const [checkpointName, setCheckpointName] = useState('');
 
-  async function saveSnapshot() {
+  async function saveSnapshot(label?: string | null) {
     if (!onSaveSnapshot) return;
     setSavingSnapshot(true);
     try {
-      await onSaveSnapshot();
+      await onSaveSnapshot(label ?? null);
+      setCheckpointName('');
     } finally {
       setSavingSnapshot(false);
     }
@@ -189,7 +195,7 @@ export function History({ userId, current, reloadKey, onRestore, onSaveSnapshot 
           <button
             type="button"
             className="me-history-save-cta"
-            onClick={saveSnapshot}
+            onClick={() => saveSnapshot()}
             disabled={savingSnapshot}
           >
             {savingSnapshot ? 'Saving…' : 'Save current context snapshot'}
@@ -200,8 +206,36 @@ export function History({ userId, current, reloadKey, onRestore, onSaveSnapshot 
   }
 
   return (
-    <ol className="me-history">
-      {versions.map((v, i) => {
+    <>
+      {onSaveSnapshot && (
+        <div className="me-history-checkpoint">
+          <input
+            type="text"
+            value={checkpointName}
+            maxLength={60}
+            placeholder="Name a checkpoint (optional)"
+            aria-label="Checkpoint name"
+            onChange={(e) => setCheckpointName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                void saveSnapshot(checkpointName);
+              }
+            }}
+          />
+          <button
+            type="button"
+            className="btn-secondary"
+            disabled={savingSnapshot}
+            onClick={() => saveSnapshot(checkpointName)}
+            title="Save the current context as a snapshot you can roll back to"
+          >
+            {savingSnapshot ? 'Saving…' : checkpointName.trim() ? 'Save checkpoint' : 'Save snapshot'}
+          </button>
+        </div>
+      )}
+      <ol className="me-history">
+        {versions.map((v, i) => {
         const snap = normalizeSnapshot(v.snapshot);
         const prev = versions[i + 1];
         const prevSnap = prev ? normalizeSnapshot(prev.snapshot) : null;
@@ -346,7 +380,8 @@ export function History({ userId, current, reloadKey, onRestore, onSaveSnapshot 
             </article>
           </li>
         );
-      })}
-    </ol>
+        })}
+      </ol>
+    </>
   );
 }
