@@ -94,7 +94,10 @@ export interface ProfileVersionDoc extends BaseDoc {
 }
 
 export interface ProfileAssetDoc extends BaseDoc {
-  kind: 'resume' | 'portfolio_pdf' | 'case_study' | 'screenshot' | 'context_dump';
+  // 'mission_attachment' is a pure email attachment (a deck, one-pager, résumé
+  // copy) sent with every email in a mission. It is NOT parsed/embedded and never
+  // feeds drafting - it only rides along on the wire.
+  kind: 'resume' | 'portfolio_pdf' | 'case_study' | 'screenshot' | 'context_dump' | 'mission_attachment';
   // Where this asset lives. 'person' (default) = memory bank, reused by every
   // mission. 'mission' = attached to one mission only (a campaign offer doc the
   // user chose not to add to the durable bank). Legacy docs read as 'person'.
@@ -257,6 +260,10 @@ export interface MissionDoc extends BaseDoc {
   // The persona (reusable voice) this mission drafts as. Required for new
   // missions; null on pre-personalization missions until backfilled.
   personaId: string | null;
+  // Optional profile_assets id (kind 'mission_attachment') attached to EVERY
+  // email sent for this mission - a deck, one-pager, or résumé the user wants on
+  // all outreach. null/absent = no attachment.
+  attachAssetId?: string | null;
 }
 
 export interface TargetDoc extends BaseDoc {
@@ -404,6 +411,10 @@ export interface SentMessageDoc extends BaseDoc {
   // Set for queued/scheduled sends so the cron knows to re-attach at send time
   // (the bytes aren't persisted on the row - only the intent). Optional/legacy.
   attachResume?: boolean;
+  // The mission's "attach to every email" asset (a profile_assets id), captured
+  // at send so a queued/scheduled touch re-attaches the right file at send time
+  // even if the mission setting later changes. Optional/legacy.
+  attachAssetId?: string | null;
 }
 
 // Global per-account "already contacted" ledger. One row per person this user

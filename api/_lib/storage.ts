@@ -21,7 +21,7 @@ import * as os from 'os';
 import type { Request, Response } from 'express';
 import { env } from './env';
 
-type Kind = 'resume' | 'portfolio_pdf' | 'case_study' | 'screenshot' | 'context_dump';
+type Kind = 'resume' | 'portfolio_pdf' | 'case_study' | 'screenshot' | 'context_dump' | 'mission_attachment';
 type Action = 'read' | 'write';
 
 // ---------------------------------------------------------------------------

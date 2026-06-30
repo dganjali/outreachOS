@@ -77,6 +77,9 @@ export interface Mission {
   // The reusable persona (voice) this mission drafts as. Required for new
   // missions; null on pre-personalization missions until backfilled.
   persona_id: string | null;
+  // Optional profile_assets id (kind 'mission_attachment') attached to every
+  // email sent for this mission. null/absent = no attachment.
+  attach_asset_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -241,7 +244,7 @@ export type AgentType =
   | 'parse_resume'
   | 'extract_context';
 
-export type ProfileAssetKind = 'resume' | 'portfolio_pdf' | 'case_study' | 'screenshot' | 'context_dump';
+export type ProfileAssetKind = 'resume' | 'portfolio_pdf' | 'case_study' | 'screenshot' | 'context_dump' | 'mission_attachment';
 
 export interface ParsedResumeRole {
   title: string;

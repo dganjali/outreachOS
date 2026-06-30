@@ -27,6 +27,20 @@ export async function hasResume(scope: UserScope): Promise<boolean> {
   return (await findResumeAsset(scope)) !== null;
 }
 
+/** Load a profile asset's bytes as a `MailAttachment`. Throws only on a real
+ *  storage failure or an over-size file; returns the attachment otherwise. */
+async function assetToAttachment(asset: ProfileAssetDoc): Promise<MailAttachment> {
+  const content = await downloadObject(asset.storagePath);
+  if (content.length > MAX_ATTACHMENT_BYTES) {
+    throw new Error('attachment_too_large');
+  }
+  return {
+    filename: asset.fileName || 'attachment',
+    mimeType: asset.mimeType || 'application/octet-stream',
+    content,
+  };
+}
+
 /**
  * Load the sender's résumé as a `MailAttachment`, or null when none exists.
  * Throws only on a real storage failure (so the caller fails the send loudly
@@ -35,13 +49,19 @@ export async function hasResume(scope: UserScope): Promise<boolean> {
 export async function getResumeAttachment(scope: UserScope): Promise<MailAttachment | null> {
   const asset = await findResumeAsset(scope);
   if (!asset) return null;
-  const content = await downloadObject(asset.storagePath);
-  if (content.length > MAX_ATTACHMENT_BYTES) {
-    throw new Error('resume_too_large');
-  }
-  return {
-    filename: asset.fileName || 'resume.pdf',
-    mimeType: asset.mimeType || 'application/pdf',
-    content,
-  };
+  const att = await assetToAttachment(asset);
+  return { ...att, filename: asset.fileName || 'resume.pdf', mimeType: asset.mimeType || 'application/pdf' };
+}
+
+/**
+ * Load an arbitrary profile asset (by id) as a `MailAttachment`. Used for the
+ * mission-level "attach to every email" file. Returns null when the asset no
+ * longer exists, so a deleted attachment degrades to "send without it" rather
+ * than blocking the send. Re-resolves storagePath at call time, which is what
+ * lets the scheduled-send cron load the right bytes at actual send time.
+ */
+export async function getAssetAttachment(scope: UserScope, assetId: string): Promise<MailAttachment | null> {
+  const asset = await scope.collection<ProfileAssetDoc>('profile_assets').findById(assetId);
+  if (!asset) return null;
+  return assetToAttachment(asset);
 }

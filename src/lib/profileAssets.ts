@@ -19,6 +19,18 @@ const ACCEPTED_MIME: Record<ProfileAssetKind, string[]> = {
   portfolio_pdf: ['application/pdf'],
   case_study: ['application/pdf'],
   screenshot: ['image/png', 'image/jpeg', 'image/webp'],
+  // A pure email attachment (deck, one-pager, résumé copy) sent with every email
+  // in a mission. Accept the common document/image types a recipient can open.
+  mission_attachment: [
+    'application/pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'application/vnd.ms-powerpoint',
+    'image/png',
+    'image/jpeg',
+    'image/webp',
+  ],
   // context_dump accepts PDF, DOCX, TXT, MD, RTF. Note: .md and .rtf files
   // often have an empty file.type - the existing `if (file.type && ...)` guard
   // already lets empty types through, so extension-only detection works fine.

@@ -41,8 +41,8 @@ router.post('/_storage/sign-upload', async (req, res) => {
   const { path, contentType } = (req.body ?? {}) as { path?: string; contentType?: string };
   if (!path || !contentType) return res.status(400).json({ error: 'missing_params' });
 
-  const kindMatch = /\b(resume|portfolio_pdf|case_study|screenshot|context_dump)\b/.exec(path);
-  const kind = (kindMatch?.[1] ?? 'resume') as 'resume' | 'portfolio_pdf' | 'case_study' | 'screenshot' | 'context_dump';
+  const kindMatch = /\b(resume|portfolio_pdf|case_study|screenshot|context_dump|mission_attachment)\b/.exec(path);
+  const kind = (kindMatch?.[1] ?? 'resume') as 'resume' | 'portfolio_pdf' | 'case_study' | 'screenshot' | 'context_dump' | 'mission_attachment';
   const fileName = path.split('/').pop() ?? 'file';
 
   const result = await signedUploadUrl({ uid, kind, fileName, contentType });

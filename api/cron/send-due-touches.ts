@@ -6,8 +6,8 @@
 import type { Request, Response } from 'express';
 import { adminDb, forUser } from '../_lib/db';
 import { requireCronSecret } from '../_lib/auth';
-import { getActiveAccessToken, sendNow } from '../_lib/gmail';
-import { getResumeAttachment } from '../_lib/attachments';
+import { getActiveAccessToken, sendNow, type MailAttachment } from '../_lib/gmail';
+import { getResumeAttachment, getAssetAttachment } from '../_lib/attachments';
 import { scheduleFollowups } from '../_lib/sequencing';
 import { evaluateSend } from '../_lib/deliverability';
 import { recordOutcome } from '../_lib/outcomes';
@@ -138,15 +138,24 @@ export default async function handler(req: Request, res: Response) {
       const prior = await sentCol.findOne({ sequenceId: msg.sequenceId, touchIndex: msg.touchIndex - 1, status: 'sent' });
       const prof = await scope.collection<ProfileDoc>('profiles').findOne();
 
-      // Re-attach the résumé if this touch was queued with that intent. The bytes
-      // aren't persisted on the row, so we re-load the current résumé at send
-      // time; a missing/unreadable file just sends without the attachment rather
-      // than failing the whole touch.
-      let attachments;
+      // Re-attach files this touch was queued with. The bytes aren't persisted on
+      // the row, so we re-load them at send time; a missing/unreadable file just
+      // sends without the attachment rather than failing the whole touch.
+      //  - the per-send résumé toggle (attachResume), and
+      //  - the mission's "attach to every email" asset (attachAssetId).
+      const attachments: MailAttachment[] = [];
       if (msg.attachResume) {
         try {
           const resume = await getResumeAttachment(scope);
-          if (resume) attachments = [resume];
+          if (resume) attachments.push(resume);
+        } catch {
+          // best-effort: send without the attachment
+        }
+      }
+      if (msg.attachAssetId) {
+        try {
+          const att = await getAssetAttachment(scope, msg.attachAssetId);
+          if (att) attachments.push(att);
         } catch {
           // best-effort: send without the attachment
         }
@@ -161,7 +170,7 @@ export default async function handler(req: Request, res: Response) {
         body: msg.body,
         threadId: prior?.gmailThreadId ?? undefined,
         inReplyTo: prior?.gmailMessageId ? `<${prior.gmailMessageId}>` : undefined,
-        attachments,
+        attachments: attachments.length ? attachments : undefined,
       });
 
       const sentAt = new Date();

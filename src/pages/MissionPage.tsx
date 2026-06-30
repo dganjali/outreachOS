@@ -16,9 +16,10 @@ import { asScore } from '../lib/score';
 import { CsvImport } from '../components/CsvImport';
 import { PersonaWizard } from '../components/persona/PersonaWizard';
 import { listContextFacts, addContextFact, deleteContextFact } from '../lib/personas';
-import { uploadAsset, MAX_ASSET_BYTES } from '../lib/profileAssets';
+import { uploadAsset, deleteAsset, MAX_ASSET_BYTES } from '../lib/profileAssets';
 import type {
   Mission,
+  ProfileAsset,
   Target,
   Contact,
   EvidencePack,
@@ -783,6 +784,8 @@ export function MissionPage() {
       />
 
       <MissionBriefCard mission={mission} onSaved={loadMission} />
+
+      {user?.id && <MissionAttachmentCard mission={mission} userId={user.id} onSaved={loadMission} />}
 
       {user?.id && <MissionMemoryCard mission={mission} userId={user.id} />}
 
@@ -2718,6 +2721,162 @@ function EmailStatusPill({ status }: { status: Contact['email_status'] }) {
 // location) and a private notes field can be refined after creation - not just at
 // the wizard. View mode shows the brief with an Edit affordance; edit mode is an
 // inline form that writes back to the mission and reloads.
+// A single file (deck, one-pager, résumé) attached to EVERY email this mission
+// sends - manual single sends, "Send all", scheduled sends, and Autopilot. The
+// file lives as a mission-scoped profile_asset; the mission row just references
+// its id. Backend (api/gmail/send.ts + the send cron) re-loads it at send time.
+function MissionAttachmentCard({
+  mission,
+  userId,
+  onSaved,
+}: {
+  mission: Mission;
+  userId: string;
+  onSaved: () => void | Promise<void>;
+}) {
+  const [asset, setAsset] = useState<ProfileAsset | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const assetId = mission.attach_asset_id ?? null;
+
+  // Resolve the referenced asset so we can show its name/size. A dangling
+  // reference (asset deleted out from under the mission) reads as "none".
+  useEffect(() => {
+    let cancelled = false;
+    if (!assetId) {
+      setAsset(null);
+      setLoaded(true);
+      return;
+    }
+    setLoaded(false);
+    supabase
+      .from('profile_assets')
+      .select('*')
+      .eq('id', assetId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled) {
+          setAsset((data as ProfileAsset | null) ?? null);
+          setLoaded(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [assetId]);
+
+  async function pickFile(file: File) {
+    setBusy(true);
+    const prior = asset;
+    try {
+      const uploaded = await uploadAsset({ userId, kind: 'mission_attachment', file, scope: 'mission', missionId: mission.id });
+      const { error } = await supabase.from('missions').update({ attach_asset_id: uploaded.id }).eq('id', mission.id);
+      if (error) throw new Error(error.message);
+      setAsset(uploaded);
+      // Replace: drop the file we just swapped out (best-effort).
+      if (prior) await deleteAsset(prior).catch(() => undefined);
+      await onSaved();
+      toast.success('Attachment set. It will ride along on every email in this mission.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not set the attachment');
+    } finally {
+      setBusy(false);
+      if (inputRef.current) inputRef.current.value = '';
+    }
+  }
+
+  async function remove() {
+    setBusy(true);
+    const prior = asset;
+    try {
+      const { error } = await supabase.from('missions').update({ attach_asset_id: null }).eq('id', mission.id);
+      if (error) throw new Error(error.message);
+      setAsset(null);
+      if (prior) await deleteAsset(prior).catch(() => undefined);
+      await onSaved();
+      toast.success('Attachment removed');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not remove the attachment');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function fmtSize(bytes: number): string {
+    if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  }
+
+  return (
+    <section className="mission-overview-card">
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".pdf,.doc,.docx,.ppt,.pptx,.png,.jpg,.jpeg,.webp"
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) void pickFile(f);
+        }}
+      />
+      <div className="mission-overview-row" style={{ alignItems: 'flex-start' }}>
+        <strong style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <Paperclip size={13} aria-hidden /> Attachment
+        </strong>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0, flex: 1 }}>
+          {!loaded ? (
+            <span style={{ color: 'var(--fg-muted)', fontSize: 13 }}>Loading…</span>
+          ) : asset ? (
+            <>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                <span
+                  style={{
+                    fontSize: 13,
+                    color: 'var(--fg)',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                  title={asset.file_name}
+                >
+                  {asset.file_name}
+                </span>
+                <span style={{ flexShrink: 0, fontSize: 11, color: 'var(--fg-muted)' }}>{fmtSize(asset.file_size)}</span>
+              </span>
+              <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>
+                Sent with every email in this mission.
+              </span>
+              <span style={{ display: 'flex', gap: 12 }}>
+                <button type="button" className="link-button" disabled={busy} onClick={() => inputRef.current?.click()}>
+                  {busy ? 'Working…' : 'Replace'}
+                </button>
+                <button type="button" className="link-button" disabled={busy} onClick={remove}>
+                  Remove
+                </button>
+              </span>
+            </>
+          ) : (
+            <>
+              <span style={{ fontSize: 13, color: 'var(--fg-muted)' }}>
+                Attach a file (deck, one-pager, résumé) to every email this mission sends.
+              </span>
+              <span>
+                <button type="button" className="btn-secondary" disabled={busy} onClick={() => inputRef.current?.click()}>
+                  {busy ? 'Uploading…' : 'Upload a file'}
+                </button>
+              </span>
+              <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+                PDF, Word, PowerPoint, or image. Max {Math.round(MAX_ASSET_BYTES / 1024 / 1024)} MB.
+              </span>
+            </>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function MissionBriefCard({
   mission,
   onSaved,

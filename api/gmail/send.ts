@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { forUser, newId, type InsertDoc } from '../_lib/db';
 import { getActiveAccessToken, sendNow, isValidEmailAddress, type MailAttachment } from '../_lib/gmail';
-import { getResumeAttachment, hasResume } from '../_lib/attachments';
+import { getResumeAttachment, getAssetAttachment, hasResume } from '../_lib/attachments';
 import { scheduleFollowups, isSuppressed } from '../_lib/sequencing';
 import { evaluateSend } from '../_lib/deliverability';
 import { recordOutcome } from '../_lib/outcomes';
@@ -10,6 +10,7 @@ import { recordContacted } from '../_lib/contacted';
 import type {
   ContactDoc,
   EmailSequenceDoc,
+  MissionDoc,
   ProfileDoc,
   SentMessageDoc,
 } from '../../shared/schemas';
@@ -55,6 +56,11 @@ export default async function handler(req: Request, res: Response) {
   const contact = await scope.collection<ContactDoc>('contacts').findById(seq.contactId);
   if (!contact) return res.status(404).json({ error: 'contact_not_found' });
 
+  // The mission may carry a "attach to every email" file (a deck/one-pager/
+  // résumé). It rides along on every send for this mission, no per-send flag.
+  const mission = await scope.collection<MissionDoc>('missions').findById(seq.missionId);
+  const missionAssetId = mission?.attachAssetId ?? null;
+
   const toEmail = body.to_override?.trim() || contact.email?.trim();
   if (!toEmail) {
     return res.status(400).json({ error: 'no_recipient_email', message: 'Contact has no email. Provide to_override.' });
@@ -96,23 +102,36 @@ export default async function handler(req: Request, res: Response) {
 
   const profile = await scope.collection<ProfileDoc>('profiles').findOne();
 
-  // Résumé attachment. Validate up-front (immediate AND scheduled) so the user
-  // learns now if they asked to attach but have none on file. The bytes are only
-  // loaded for an immediate send; a scheduled send persists the intent and the
-  // cron re-loads the résumé at actual send time.
-  let resumeAttachment: MailAttachment | null = null;
+  // Attachments. Bytes are loaded only for an immediate send; a scheduled send
+  // persists the intent (attachResume + attachAssetId on the row) and the cron
+  // re-loads the files at actual send time.
+  //  - Résumé (per-send toggle): validated up-front for BOTH immediate and
+  //    scheduled, so the user learns now if they asked to attach but have none.
+  //  - Mission asset ("attach to every email"): best-effort - a deleted or
+  //    unreadable file degrades to sending without it, never blocks the send.
+  const attachments: MailAttachment[] = [];
   if (attachResume) {
     if (mode === 'send' && !scheduledSendAt) {
+      let resume: MailAttachment | null = null;
       try {
-        resumeAttachment = await getResumeAttachment(scope);
+        resume = await getResumeAttachment(scope);
       } catch {
         return res.status(400).json({ error: 'resume_unreadable', message: 'Could not read your résumé file. Re-upload it in your profile.' });
       }
-      if (!resumeAttachment) {
+      if (!resume) {
         return res.status(400).json({ error: 'no_resume_on_file', message: 'No résumé on file. Upload one in your profile first.' });
       }
+      attachments.push(resume);
     } else if (!(await hasResume(scope))) {
       return res.status(400).json({ error: 'no_resume_on_file', message: 'No résumé on file. Upload one in your profile first.' });
+    }
+  }
+  if (missionAssetId && mode === 'send' && !scheduledSendAt) {
+    try {
+      const att = await getAssetAttachment(scope, missionAssetId);
+      if (att) attachments.push(att);
+    } catch {
+      /* best-effort: a too-large/unreadable mission file just doesn't ride along */
     }
   }
 
@@ -177,6 +196,7 @@ export default async function handler(req: Request, res: Response) {
     profileVersionId: seq.profileVersionId ?? null,
     profileRefs: touchRefs,
     attachResume,
+    attachAssetId: missionAssetId,
   };
 
   let sentRowId: string;
@@ -221,7 +241,7 @@ export default async function handler(req: Request, res: Response) {
       body: bodyText,
       threadId: threadId ?? undefined,
       inReplyTo: priorMessageId ?? undefined,
-      attachments: resumeAttachment ? [resumeAttachment] : undefined,
+      attachments: attachments.length ? attachments : undefined,
     };
 
     // Drafts are kept in OutreachOS only - pushing them into the user's Gmail
