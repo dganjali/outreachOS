@@ -2751,8 +2751,13 @@ function TargetRow({
                               )}
                             </div>
                           )}
-                          {c.headline && <div className="pc-note muted">{c.headline}</div>}
-                          {c.reasoning && <div className="pc-note">{c.reasoning}</div>}
+                          {/* One quiet rationale line — the "why this person" the
+                              reviewer needs, without stacking headline + reasoning
+                              above the draft. Prefer the reasoning; fall back to
+                              the LinkedIn headline. */}
+                          {(c.reasoning || c.headline) && (
+                            <div className="pc-note">{c.reasoning || c.headline}</div>
+                          )}
 
                           {seq && (
                             <SequenceCard
@@ -3089,12 +3094,11 @@ function BulkSubjectEditor({
 }
 
 function SequenceCard({ sequence, contact, aiEnabled, hasResume, onContactUpdated, onSequenceUpdated }: { sequence: EmailSequence; contact: Contact; aiEnabled: boolean; hasResume: boolean; onContactUpdated?: () => void | Promise<void>; onSequenceUpdated?: () => void | Promise<void> }) {
-  // Collapsed by default: inside an expanded company, auto-opening every draft is
-  // exactly the wall-of-text the accordion hierarchy is meant to avoid.
-  const [open, setOpen] = useState(false);
-  // Follow-ups stay folded until asked for. They largely restate the initial
-  // email, so showing the first touch alone keeps the reviewer focused on the
-  // one message that actually varies.
+  // The draft is the point of opening a person, so it renders inline the moment
+  // the contact row expands — no extra collapse to click through. (This card only
+  // mounts when its contact row is open.) Follow-ups stay folded until asked for:
+  // they largely restate the initial email, so showing the first touch alone keeps
+  // the reviewer focused on the one message that actually varies.
   const [showFollowups, setShowFollowups] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   const [sending, setSending] = useState<string | null>(null);
@@ -3173,7 +3177,7 @@ function SequenceCard({ sequence, contact, aiEnabled, hasResume, onContactUpdate
   // draft was created recently. The recency gate avoids polling (and a stuck
   // "writing…" state) on old drafts whose generation genuinely produced none.
   useEffect(() => {
-    if (!open || draft.followups.length > 0) return;
+    if (draft.followups.length > 0) return;
     const ageMs = Date.now() - new Date(sequence.created_at).getTime();
     if (!(ageMs >= 0 && ageMs < 3 * 60_000)) return;
 
@@ -3206,7 +3210,7 @@ function SequenceCard({ sequence, contact, aiEnabled, hasResume, onContactUpdate
       setGeneratingFollowups(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, sequence.id, draft.followups.length]);
+  }, [sequence.id, draft.followups.length]);
 
   useEffect(() => {
     supabase
@@ -3308,22 +3312,18 @@ function SequenceCard({ sequence, contact, aiEnabled, hasResume, onContactUpdate
   }
 
   return (
-    <div className={`sequence-card${open ? ' open' : ''}`}>
-      <button type="button" className="sequence-toggle" onClick={() => setOpen((o) => !o)}>
-        <span className="sequence-toggle-caret" aria-hidden>{open ? '▾' : '▸'}</span>
-        <span className="sequence-toggle-label">Draft email{draft.followups.length > 0 ? ' sequence' : ''}</span>
-        {sequence.primary_angle && <span className="angle-pill">{sequence.primary_angle}</span>}
-        {sequence.autopilot_state && (
-          <span className={`badge ${autopilotBadgeTone(sequence.autopilot_state)}`}>
-            {autopilotLabel(sequence.autopilot_state)}
-          </span>
-        )}
-        {!open && draft.followups.length > 0 && (
-          <span className="sequence-toggle-count">{draft.followups.length + 1} emails</span>
-        )}
-      </button>
-      {open && (
-        <div className="sequence-body">
+    <div className="sequence-card">
+      {(sequence.primary_angle || sequence.autopilot_state) && (
+        <div className="sequence-meta">
+          {sequence.primary_angle && <span className="angle-pill">{sequence.primary_angle}</span>}
+          {sequence.autopilot_state && (
+            <span className={`badge ${autopilotBadgeTone(sequence.autopilot_state)}`}>
+              {autopilotLabel(sequence.autopilot_state)}
+            </span>
+          )}
+        </div>
+      )}
+      <div className="sequence-body">
           {sequence.autopilot_state === 'ready' && (
             <div className="autopilot-banner ok">
               <span>Passed the Autopilot gate: verified address, high confidence.</span>
@@ -3449,8 +3449,7 @@ function SequenceCard({ sequence, contact, aiEnabled, hasResume, onContactUpdate
                 />
               );
             })}
-        </div>
-      )}
+      </div>
     </div>
   );
 }
