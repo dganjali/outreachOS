@@ -1925,6 +1925,18 @@ function TargetRow({
   onReloadEvidence: (targetId: string) => void | Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
+  // Progressive disclosure inside an open target: the research pack and each
+  // contact's draft stay collapsed until asked for, so opening a target shows a
+  // clean summary instead of every email and fact at once.
+  const [showEvidence, setShowEvidence] = useState(false);
+  const [openContacts, setOpenContacts] = useState<Set<string>>(new Set());
+  const toggleContact = (id: string) =>
+    setOpenContacts((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   const score = asScore(t.score);
   const stage = targetStage(pack, contacts, sequencesByContact, initialSentSeqIds);
   const draftCount = contacts.filter((c) => sequencesByContact[c.id]).length;
@@ -2041,13 +2053,22 @@ function TargetRow({
           {/* Research */}
           <div className="tgt-sec">
             <div className="tgt-sec-head">
-              <span className="tgt-sec-title">Research</span>
-              <button type="button" className="btn-secondary small" disabled={evidenceBusy} onClick={() => onBuildEvidence(t)}>
-                {evidenceBusy ? 'Researching…' : pack ? 'Refresh' : 'Build evidence'}
-              </button>
+              <span className="tgt-sec-title">
+                Research{pack && pack.bullets.length > 0 && <span className="tgt-sec-count">{pack.bullets.length}</span>}
+              </span>
+              <div className="tgt-sec-head-actions">
+                {pack && pack.bullets.length > 0 && (
+                  <button type="button" className="link-button" onClick={() => setShowEvidence((v) => !v)}>
+                    {showEvidence ? 'Hide' : 'Show'}
+                  </button>
+                )}
+                <button type="button" className="btn-secondary small" disabled={evidenceBusy} onClick={() => onBuildEvidence(t)}>
+                  {evidenceBusy ? 'Researching…' : pack ? 'Refresh' : 'Build evidence'}
+                </button>
+              </div>
             </div>
             {pack && pack.bullets.length > 0 ? (
-              <EvidenceEditor pack={pack} onSaved={() => onReloadEvidence(t.id)} />
+              showEvidence && <EvidenceEditor pack={pack} onSaved={() => onReloadEvidence(t.id)} />
             ) : (
               <p className="tgt-sec-empty">No evidence yet. Research the company to personalize every email.</p>
             )}
@@ -2083,8 +2104,23 @@ function TargetRow({
               <div className="ppl">
                 {contacts.map((c) => {
                   const seq = sequencesByContact[c.id];
+                  const cOpen = openContacts.has(c.id);
+                  const sent = (seq && initialSentSeqIds.has(seq.id)) || c.status === 'contacted';
+                  // One calm chip on the collapsed row tells the user where this
+                  // contact stands without opening the draft.
+                  const statusChip =
+                    c.status === 'replied'
+                      ? { label: 'Replied', tone: 'is-success' }
+                      : sent
+                        ? { label: 'Sent', tone: 'is-info' }
+                        : seq
+                          ? { label: 'Draft ready', tone: 'is-ready' }
+                          : null;
                   return (
-                    <div key={c.id} className={`pc${selectedContactIds.has(c.id) ? ' selected' : ''}`}>
+                    <div
+                      key={c.id}
+                      className={`pc${selectedContactIds.has(c.id) ? ' selected' : ''}${cOpen ? ' is-open' : ''}`}
+                    >
                       <div className="pc-head">
                         <input
                           type="checkbox"
@@ -2093,7 +2129,13 @@ function TargetRow({
                           onChange={() => onToggleSelected(c.id)}
                           aria-label={`Select ${c.name}`}
                         />
-                        <div className="pc-id">
+                        <button
+                          type="button"
+                          className="pc-id pc-toggle"
+                          onClick={() => toggleContact(c.id)}
+                          aria-expanded={cOpen}
+                        >
+                          <ChevronRight size={13} className="pc-caret" aria-hidden />
                           <span className="pc-name">
                             <strong>{c.name}</strong>
                             <span className="pc-role">{c.role}</span>
@@ -2101,72 +2143,79 @@ function TargetRow({
                           {typeof c.confidence === 'number' && (
                             <span
                               className="pc-conf"
-                              title="Estimated reply-likelihood — role & seniority fit plus signals. Higher is better."
+                              title="Estimated reply-likelihood: role & seniority fit plus signals. Higher is better."
                             >
                               {Math.round(c.confidence * 100)}%
                             </span>
                           )}
-                        </div>
+                          {statusChip && <span className={`status-pill ${statusChip.tone}`}>{statusChip.label}</span>}
+                        </button>
                         <div className="pc-actions">
-                          {c.linkedin_url && (
-                            <a href={c.linkedin_url} target="_blank" rel="noreferrer" className="link-pill">
-                              LinkedIn ↗
-                            </a>
-                          )}
-                          {c.status === 'replied' ? (
-                            <span className="status-pill is-success" title="Follow-ups stopped">
-                              replied
-                            </span>
-                          ) : (
-                            c.status === 'contacted' && (
-                              <button
-                                type="button"
-                                className="btn-secondary small"
-                                title="They wrote back in Gmail - stop their scheduled follow-ups"
-                                onClick={() => onMarkReplied(c)}
-                              >
-                                Mark replied
-                              </button>
-                            )
-                          )}
                           <button
                             type="button"
                             className="btn-primary small"
                             disabled={busy === `sequence:${c.id}` || !pack}
                             title={!pack ? 'Build an evidence pack first' : ''}
-                            onClick={() => onGenerateSequence(c)}
+                            onClick={() => {
+                              if (!cOpen) toggleContact(c.id);
+                              onGenerateSequence(c);
+                            }}
                           >
                             {busy === `sequence:${c.id}` ? 'Drafting…' : seq ? 'Regenerate' : 'Draft email'}
                           </button>
                         </div>
                       </div>
-                      {c.email ? (
-                        <div className="pc-email">
-                          {c.email} <EmailStatusPill status={c.email_status} />
-                        </div>
-                      ) : (
-                        c.likely_email_pattern && <div className="pc-email muted">Pattern: {c.likely_email_pattern}</div>
-                      )}
-                      {c.headline && <div className="pc-note muted">{c.headline}</div>}
-                      {c.reasoning && <div className="pc-note">{c.reasoning}</div>}
 
-                      {seq && (
-                        <SequenceCard
-                          key={`${seq.id}:${refreshKey}`}
-                          sequence={seq}
-                          contact={c}
-                          aiEnabled={aiEnabled}
-                          hasResume={hasResume}
-                          onContactUpdated={() => onReloadContacts(t.id)}
-                          onSequenceUpdated={() => onReloadSequence(c.id)}
-                        />
+                      {cOpen && (
+                        <div className="pc-body">
+                          {c.email ? (
+                            <div className="pc-email">
+                              {c.email} <EmailStatusPill status={c.email_status} />
+                            </div>
+                          ) : (
+                            c.likely_email_pattern && <div className="pc-email muted">Pattern: {c.likely_email_pattern}</div>
+                          )}
+                          {(c.linkedin_url || c.status === 'replied' || c.status === 'contacted') && (
+                            <div className="pc-meta">
+                              {c.linkedin_url && (
+                                <a href={c.linkedin_url} target="_blank" rel="noreferrer" className="link-pill">
+                                  LinkedIn ↗
+                                </a>
+                              )}
+                              {c.status === 'contacted' && (
+                                <button
+                                  type="button"
+                                  className="btn-secondary small"
+                                  title="They wrote back in Gmail - stop their scheduled follow-ups"
+                                  onClick={() => onMarkReplied(c)}
+                                >
+                                  Mark replied
+                                </button>
+                              )}
+                            </div>
+                          )}
+                          {c.headline && <div className="pc-note muted">{c.headline}</div>}
+                          {c.reasoning && <div className="pc-note">{c.reasoning}</div>}
+
+                          {seq && (
+                            <SequenceCard
+                              key={`${seq.id}:${refreshKey}`}
+                              sequence={seq}
+                              contact={c}
+                              aiEnabled={aiEnabled}
+                              hasResume={hasResume}
+                              onContactUpdated={() => onReloadContacts(t.id)}
+                              onSequenceUpdated={() => onReloadSequence(c.id)}
+                            />
+                          )}
+                          <ContactActivity
+                            contact={c}
+                            sequence={seq}
+                            sent={sentByContact[c.id] ?? []}
+                            replies={repliesByContact[c.id] ?? []}
+                          />
+                        </div>
                       )}
-                      <ContactActivity
-                        contact={c}
-                        sequence={seq}
-                        sent={sentByContact[c.id] ?? []}
-                        replies={repliesByContact[c.id] ?? []}
-                      />
                     </div>
                   );
                 })}
