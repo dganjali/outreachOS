@@ -19,7 +19,7 @@ import {
   type PeopleQuerySpec,
   type SerperOrganicResult,
 } from '../_lib/serper';
-import { resolveEmail, type ContactEmailFields, type ResolvedEmail } from '../_lib/email-resolver';
+import { resolveEmail, type ContactEmailFields, type ResolvedEmail, type EmailStatus } from '../_lib/email-resolver';
 import { scrapeCompanyEmails, type ScrapeResult } from '../_lib/web-scrape';
 import { verifyContactFit, verdictAccepted, type ContactVerification } from '../_lib/contact-verify';
 import { env } from '../_lib/env';
@@ -187,18 +187,19 @@ export default async function handler(req: Request, res: Response) {
 
     // Start with the deliverable (verified/likely email) rows, then - if we still
     // haven't reached `wanted` - top up with the best email-less people discovery
-    // surfaced. A company where we found the right person but couldn't VERIFY an
-    // address is far more useful shown (with their LinkedIn / likely pattern) than
-    // dropped: the user can still reach them. Only a company where discovery found
-    // nobody at all comes back empty.
+    // surfaced. A company where we found the right person but couldn't resolve a
+    // deliverable address is far more useful shown (with their LinkedIn / likely
+    // pattern) than dropped: the user can still reach them. Only a company where
+    // discovery found nobody at all comes back empty.
     //
-    // EXCEPTION: when the recipient-verification gate is active we deliberately do
-    // NOT surface display-only people. Those candidates were never verified (the
-    // gate only runs on reachable ones), and the whole point of the gate is that
-    // we only ever put VERIFIED people in front of the user. An unverified,
-    // unreachable contact is exactly the noise this feature exists to remove; the
-    // pipeline's replacement loop backfills the count from the bench instead.
-    const rows = verify ? resolved.rows : fillWithDisplayOnly(resolved.rows, ranked.rows, wanted);
+    // When the recipient-verification gate is active the display-only backfill is
+    // itself fit-gated (fillWithVettedDisplayOnly): we surface ONLY the email-less
+    // people who pass the same recipient check, so the gate's "only people we've
+    // checked go in front of the user" promise still holds - while companies that
+    // yielded the right person but no deliverable email stop coming back empty.
+    const rows = verify
+      ? await fillWithVettedDisplayOnly(resolved.rows, ranked.rows, wanted, verify)
+      : fillWithDisplayOnly(resolved.rows, ranked.rows, wanted);
 
     if (rows.length === 0) {
       // Categorize WHERE the company was lost so a "No contacts" drop is
@@ -228,6 +229,7 @@ export default async function handler(req: Request, res: Response) {
         usedAboveCapFallback: ranked.usedFallback,
         attempts: resolved.attempts,
         resolverCounts: resolved.resolverCounts,
+        likelyKept: resolved.likelyKept,
         verifiedDropped: resolved.verifiedDropped,
       });
       return res.status(502).json({ error: 'no_contacts_found' });
@@ -272,6 +274,9 @@ export default async function handler(req: Request, res: Response) {
       // so the decision log shows when a company was surfaced on people alone.
       withEmail,
       displayOnly: inserted.length - withEmail,
+      // Of the emailed rows, how many leaned on a 'likely' (catch-all / pattern)
+      // address vs a fully 'verified' one - the catch-all recovery, measurable.
+      likelyKept: resolved.likelyKept,
       source: discoverySource,
       // Decision-log summary (CONTACT_ENGINE.md §9) - observability for why the
       // pool looked the way it did, without per-contact schema churn.
@@ -735,6 +740,60 @@ export function fillWithDisplayOnly(
   return out;
 }
 
+// How many display-only candidates we'll spend a recipient-fit check on when
+// backfilling under the verification gate. Bounds the extra web_search/LLM cost
+// per target - we only need a couple to fill the (usually 1-2) open slots.
+const DISPLAY_ONLY_FIT_CHECK_CAP = 4;
+
+/**
+ * Like fillWithDisplayOnly, but each display-only candidate is run through the
+ * recipient-fit gate first and surfaced only if it passes. Used when the gate is
+ * on: a company that yielded no DELIVERABLE address still surfaces the RIGHT
+ * person (LinkedIn / likely pattern) for the user to reach manually - but never an
+ * unvetted one, so the gate's "only people we've checked go in front of the user"
+ * promise still holds. The already-resolved rows come first and are never
+ * re-checked (the resolver gated them). Bounded to DISPLAY_ONLY_FIT_CHECK_CAP gate
+ * calls so the extra spend is capped, and a gate hiccup drops the candidate rather
+ * than surfacing it unvetted.
+ */
+export async function fillWithVettedDisplayOnly(
+  resolved: ContactRow[],
+  ranked: ContactRow[],
+  wanted: number,
+  verify: (row: ContactRow) => Promise<ContactVerification>
+): Promise<ContactRow[]> {
+  const out = [...resolved];
+  if (out.length >= wanted) return out;
+  const seen = new Set(out.map(contactKey));
+  let checks = 0;
+  for (const row of ranked) {
+    if (out.length >= wanted || checks >= DISPLAY_ONLY_FIT_CHECK_CAP) break;
+    const key = contactKey(row);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    checks += 1;
+    let verification: ContactVerification;
+    try {
+      verification = await verify(row);
+    } catch (err) {
+      console.warn('display_only_verify_failed', row.targetId, err);
+      continue; // a gate hiccup must not surface an unvetted contact
+    }
+    if (!verdictAccepted(verification)) continue;
+    out.push({
+      ...row,
+      verification: {
+        verdict: verification.verdict,
+        confidence: verification.confidence,
+        reason: verification.reason,
+        checkedAt: new Date(),
+      },
+      personResearch: verification.research.length ? verification.research : null,
+    });
+  }
+  return out;
+}
+
 function contactKey(r: ContactRow): string {
   return `${(r.linkedinUrl ?? '').trim().toLowerCase()}|${r.name.trim().toLowerCase()}`;
 }
@@ -834,19 +893,36 @@ export interface ResolvePoolResult {
   // mismatch. 0 when the gate is off. Surfaced via run telemetry so a company
   // lost to "all wrong people" is distinguishable from "no email found".
   verifiedDropped: number;
+  // How many of the kept rows shipped on a 'likely' (catch-all / pattern-match)
+  // address rather than a fully 'verified' one. Surfaced via run telemetry so the
+  // catch-all recovery is measurable (and so an all-'likely' company is visible).
+  likelyKept: number;
 }
 
 function emptyResolverCounts(): Record<ResolverName, number> {
   return { preexisting: 0, email_finder: 0, scrape: 0, verifier: 0, none: 0 };
 }
 
+// A DELIVERABLE address is one we can actually put in front of the user: a fully
+// confirmed mailbox ('verified') OR a real, reachable address we just can't fully
+// confirm ('likely' - a finder hit on a catch-all domain, or a scraped pattern
+// match). Both are kept; the auto-send gate (autopilot.ts gateDecision) holds a
+// non-'verified' contact for human review, so 'likely' never auto-sends. Only
+// 'none'/'guessed' (no real address) are dropped.
+function isDeliverable(status: EmailStatus): boolean {
+  return status === 'verified' || status === 'likely';
+}
+
 // Walk the ranked candidate pool resolving a trustworthy email for each via the
 // cascade (emailfinder.dev → verifier gate → real scraped email → none). Keeps a
-// row only when the address is confirmed deliverable (emailStatus 'verified');
-// 'likely' (catch-all/pattern-match) and 'none' are dropped and we try the next
-// candidate. Stops at `count` kept or RESOLVE_ATTEMPT_CAP attempts (the per-target
-// cost ceiling). Scrapes the company site once up front and reuses it. Never
-// ships an unverified address.
+// row when the address is DELIVERABLE - 'verified' (mailbox confirmed) or 'likely'
+// (a finder hit on a catch-all domain, or a scraped pattern match): both are real,
+// reachable addresses. Verified rows fill the `want` slots first; 'likely' only
+// backfills what verified didn't, so the most-deliverable contacts surface on top
+// (the auto-send gate still holds a 'likely' contact for human review, never
+// auto-send). Only 'none'/'guessed' (no real address) are dropped and we try the
+// next candidate. Stops at `want` deliverable or RESOLVE_ATTEMPT_CAP attempts (the
+// per-target cost ceiling). Scrapes the company site once up front and reuses it.
 export async function resolvePoolWithBudget(
   rows: ContactRow[],
   domain: string | null,
@@ -857,10 +933,10 @@ export async function resolvePoolWithBudget(
   const want = Math.max(1, count);
   const resolverCounts = emptyResolverCounts();
   let verifiedDropped = 0;
-  if (rows.length === 0) return { rows, attempts: 0, resolverCounts, verifiedDropped };
+  if (rows.length === 0) return { rows, attempts: 0, resolverCounts, verifiedDropped, likelyKept: 0 };
   // No domain → can't resolve emails, so we can't ship a deliverable contact.
-  // Return empty so the caller drops/replaces this company (no email guesses).
-  if (!domain) return { rows: [], attempts: 0, resolverCounts, verifiedDropped };
+  // Return empty so the caller can backfill display-only people (no email guesses).
+  if (!domain) return { rows: [], attempts: 0, resolverCounts, verifiedDropped, likelyKept: 0 };
 
   let scraped: ScrapeResult;
   try {
@@ -875,11 +951,18 @@ export async function resolvePoolWithBudget(
   // case this may spend a couple of extra finder/verifier attempts when the top
   // result would have worked, but it removes the worst latency cliff: waiting
   // through several serial misses at one company.
-  const kept: ContactRow[] = [];
+  //
+  // Deliverable hits are split by trust so a fully-'verified' address always
+  // claims a slot before a 'likely' one. We stop once we have `want` deliverable
+  // total (verified + likely), so the catch-all path costs no extra attempts than
+  // the old verified-only walk - it just no longer throws the 'likely' rows away.
+  const verifiedKept: ContactRow[] = [];
+  const likelyKept: ContactRow[] = [];
+  const deliverableCount = () => verifiedKept.length + likelyKept.length;
   let attempts = 0;
   let i = 0;
-  while (i < rows.length && kept.length < want && attempts < RESOLVE_ATTEMPT_CAP) {
-    const need = want - kept.length;
+  while (i < rows.length && deliverableCount() < want && attempts < RESOLVE_ATTEMPT_CAP) {
+    const need = want - deliverableCount();
     const budget = RESOLVE_ATTEMPT_CAP - attempts;
     const batchSize = Math.min(Math.max(need, RESOLVE_LOOKAHEAD), budget);
     const batch = rows.slice(i, i + batchSize);
@@ -897,32 +980,27 @@ export async function resolvePoolWithBudget(
       )
     );
 
-    // Verify ONLY the candidates with a VERIFIED email - we never spend a
-    // verification on someone we won't keep (unverified address) or can't reach.
-    // Runs concurrently within the batch (it is the slow, paid step); a null
-    // entry means "not verified" (no gate, or nothing to gate).
+    // Verify ONLY the candidates with a DELIVERABLE email - verified OR likely. We
+    // never surface a reachable contact, at any trust level, without the recipient
+    // check, but we also never spend a verification on someone we can't reach.
+    // Runs concurrently within the batch (it is the slow, paid step); a null entry
+    // means "not verified" (no gate, or nothing to gate).
     const verifications = await Promise.all(
       batch.map((row, j) =>
-        deps.verify && resolved[j].emailStatus === 'verified' ? deps.verify(row) : Promise.resolve(null)
+        deps.verify && isDeliverable(resolved[j].emailStatus) ? deps.verify(row) : Promise.resolve(null)
       )
     );
 
-    // Keep deliverable rows in their ranked (batch) order; never exceed the cap.
-    // We ship ONLY confirmed-deliverable addresses: a 'likely' result (finder hit
-    // on a catch-all domain, or a scraped pattern match) is dropped and the walk
-    // continues, same as an unreachable one. A reachable candidate the recipient
-    // gate marks a clear mismatch is likewise dropped.
     for (let j = 0; j < batch.length; j++) {
       const res = resolved[j];
       resolverCounts[res.resolver] += 1; // telemetry: where each attempt landed
-      if (res.emailStatus !== 'verified') continue;
+      if (!isDeliverable(res.emailStatus)) continue;
       const verification = verifications[j];
       if (verification && !verdictAccepted(verification)) {
         verifiedDropped += 1;
         continue;
       }
-      if (kept.length >= want) continue;
-      kept.push({
+      const keptRow: ContactRow = {
         ...batch[j],
         email: res.email,
         emailStatus: res.emailStatus,
@@ -939,14 +1017,23 @@ export async function resolvePoolWithBudget(
               personResearch: verification.research.length ? verification.research : null,
             }
           : {}),
-      });
+      };
+      (res.emailStatus === 'verified' ? verifiedKept : likelyKept).push(keptRow);
     }
   }
 
-  // `kept` empty → caller drops/replaces this company (we never ship display-only
-  // rows with no verified email). `attempts`/`resolverCounts`/`verifiedDropped`
-  // ride along so the run telemetry can show WHY it came back empty.
-  return { rows: kept, attempts, resolverCounts, verifiedDropped };
+  // Verified first, then 'likely' backfill, capped at `want`. An empty result →
+  // caller backfills display-only people. `attempts`/`resolverCounts`/
+  // `verifiedDropped`/`likelyKept` ride along so the run telemetry shows WHY the
+  // pool looked the way it did (and how many rows leaned on a catch-all address).
+  const kept = [...verifiedKept, ...likelyKept].slice(0, want);
+  return {
+    rows: kept,
+    attempts,
+    resolverCounts,
+    verifiedDropped,
+    likelyKept: kept.filter((r) => r.emailStatus === 'likely').length,
+  };
 }
 
 function clamp01(n: number) {

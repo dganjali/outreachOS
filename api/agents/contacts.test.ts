@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolvePoolWithBudget, fillWithDisplayOnly, rankCandidates, narrowIcpBySelection, seedToSuggestion, dedupeAgainstMission, dedupeAgainstContacted, type ResolvePoolDeps, type ContactSuggestion } from './contacts';
+import { resolvePoolWithBudget, fillWithDisplayOnly, fillWithVettedDisplayOnly, rankCandidates, narrowIcpBySelection, seedToSuggestion, dedupeAgainstMission, dedupeAgainstContacted, type ResolvePoolDeps, type ContactSuggestion } from './contacts';
 import { defaultContactIcp } from '../_lib/icp';
 import type { ResolvedEmail } from '../_lib/email-resolver';
 import type { ScrapeResult } from '../_lib/web-scrape';
@@ -108,7 +108,9 @@ describe('resolvePoolWithBudget', () => {
     assert.equal(calls(), 0, 'no domain → no resolver calls');
   });
 
-  it("drops 'likely' (unverified) addresses and walks on to a verified one", async () => {
+  it('prefers a verified address over a likely one for the same slot', async () => {
+    // Both A (likely) and B (verified) are deliverable; with want=1 the fully
+    // verified B claims the slot - the likely A is only backfill.
     const deps: ResolvePoolDeps = {
       scrape: async () => emptyScrape,
       resolve: async (name, domain): Promise<ResolvedEmail> =>
@@ -117,11 +119,14 @@ describe('resolvePoolWithBudget', () => {
           : { email: `${name.toLowerCase()}@${domain}`, emailStatus: 'verified', likelyEmailPattern: null, resolver: 'verifier' },
     };
     const out = await resolvePoolWithBudget(['A', 'B'].map(row), 'acme.co', 't1', 1, deps);
-    assert.deepEqual(out.rows.map((r) => r.name), ['B'], 'the likely A is skipped, verified B is kept');
+    assert.deepEqual(out.rows.map((r) => r.name), ['B'], 'verified B fills the slot ahead of likely A');
     assert.equal(out.rows[0].emailStatus, 'verified');
+    assert.equal(out.likelyKept, 0);
   });
 
-  it('returns empty when every reachable address is only likely (not verified)', async () => {
+  it('keeps a likely (catch-all) address rather than dropping the company', async () => {
+    // A catch-all domain: the finder hits but the verifier can only say 'likely'.
+    // We now surface it (labelled likely) instead of returning the company empty.
     const deps: ResolvePoolDeps = {
       scrape: async () => emptyScrape,
       resolve: async (name, domain): Promise<ResolvedEmail> => ({
@@ -132,7 +137,48 @@ describe('resolvePoolWithBudget', () => {
       }),
     };
     const out = await resolvePoolWithBudget(['A', 'B', 'C'].map(row), 'acme.co', 't1', 2, deps);
-    assert.equal(out.rows.length, 0, 'never ships an unverified address');
+    assert.deepEqual(out.rows.map((r) => r.name), ['A', 'B'], 'likely addresses fill the ask in rank order');
+    assert.ok(out.rows.every((r) => r.emailStatus === 'likely' && !!r.email));
+    assert.equal(out.likelyKept, 2, 'telemetry counts the likely-backed rows');
+  });
+
+  it('backfills the ask with likely rows once verified ones run out', async () => {
+    // A verified, B/C likely, want=3: verified A leads, the two likelies backfill.
+    const deps: ResolvePoolDeps = {
+      scrape: async () => emptyScrape,
+      resolve: async (name, domain): Promise<ResolvedEmail> =>
+        name === 'A'
+          ? { email: `a@${domain}`, emailStatus: 'verified', likelyEmailPattern: null, resolver: 'verifier' }
+          : { email: `${name.toLowerCase()}@${domain}`, emailStatus: 'likely', likelyEmailPattern: null, resolver: 'verifier' },
+    };
+    const out = await resolvePoolWithBudget(['A', 'B', 'C'].map(row), 'acme.co', 't1', 3, deps);
+    assert.deepEqual(out.rows.map((r) => r.name), ['A', 'B', 'C']);
+    assert.equal(out.rows[0].emailStatus, 'verified');
+    assert.equal(out.likelyKept, 2);
+  });
+
+  it('fit-gates likely addresses too: a mismatch on a likely hit is dropped', async () => {
+    // The recipient gate runs on DELIVERABLE hits, not just verified ones, so a
+    // wrong-fit person on a catch-all domain is still dropped and counted.
+    const deps: ResolvePoolDeps = {
+      scrape: async () => emptyScrape,
+      resolve: async (name, domain): Promise<ResolvedEmail> => ({
+        email: `${name.toLowerCase()}@${domain}`,
+        emailStatus: 'likely',
+        likelyEmailPattern: null,
+        resolver: 'verifier',
+      }),
+      verify: async (r): Promise<ContactVerification> => ({
+        verdict: r.name === 'A' ? 'mismatch' : 'match',
+        confidence: r.name === 'A' ? 0.2 : 0.9,
+        reason: 'x',
+        research: [],
+      }),
+    };
+    const out = await resolvePoolWithBudget(['A', 'B', 'C'].map(row), 'acme.co', 't1', 1, deps);
+    assert.deepEqual(out.rows.map((r) => r.name), ['B'], 'the likely-but-mismatched A is dropped');
+    assert.equal(out.verifiedDropped, 1);
+    assert.equal(out.rows[0].emailStatus, 'likely');
   });
 
   it('resolves a batch concurrently rather than one-at-a-time', async () => {
@@ -283,6 +329,67 @@ describe('fillWithDisplayOnly - surface people even when no email verifies', () 
 
   it('returns empty only when discovery found nobody', () => {
     assert.equal(fillWithDisplayOnly([], [], 1).length, 0);
+  });
+});
+
+describe('fillWithVettedDisplayOnly - display-only backfill under the verification gate', () => {
+  const withEmail = (name: string): ContactRow => ({ ...row(name), email: `${name}@acme.co`, emailStatus: 'verified' });
+
+  // A verify dep driven by a name→verdict map (anyone unlisted defaults to 'match'),
+  // counting calls so we can assert the fit-check budget is respected.
+  function verifyWith(verdicts: Record<string, Verdict>): { verify: (r: ContactRow) => Promise<ContactVerification>; calls: () => number } {
+    let calls = 0;
+    const verify = async (r: ContactRow): Promise<ContactVerification> => {
+      calls++;
+      const verdict = verdicts[r.name] ?? 'match';
+      return { verdict, confidence: verdict === 'mismatch' ? 0.2 : 0.9, reason: 'x', research: verdict === 'mismatch' ? [] : [{ fact: `${r.name} ships`, sourceUrl: 'https://x.co', sourceTitle: 'X' }] };
+    };
+    return { verify, calls: () => calls };
+  }
+
+  it('surfaces a fit-passing display-only person (no email) instead of nothing', async () => {
+    const { verify } = verifyWith({});
+    const out = await fillWithVettedDisplayOnly([], [row('B'), row('C')], 1, verify);
+    assert.deepEqual(out.map((r) => r.name), ['B'], 'best-ranked vetted person surfaces');
+    assert.equal(out[0].email, null);
+    assert.equal(out[0].emailStatus, 'none');
+    assert.equal(out[0].verification?.verdict, 'match', 'annotated with the fit verdict');
+  });
+
+  it('skips a mismatch and surfaces the next person who fits', async () => {
+    const { verify, calls } = verifyWith({ B: 'mismatch' });
+    const out = await fillWithVettedDisplayOnly([], [row('B'), row('C')], 1, verify);
+    assert.deepEqual(out.map((r) => r.name), ['C'], 'B is a mismatch, C is surfaced');
+    assert.equal(calls(), 2);
+  });
+
+  it('never re-checks already-resolved rows; only the email-less backfill is gated', async () => {
+    const { verify, calls } = verifyWith({});
+    const out = await fillWithVettedDisplayOnly([withEmail('A')], [row('A'), row('B')], 2, verify);
+    assert.deepEqual(out.map((r) => r.name), ['A', 'B']);
+    assert.equal(out[0].email, 'A@acme.co', 'resolved A kept as-is');
+    assert.equal(calls(), 1, 'only B is fit-checked (A is deduped, not re-verified)');
+  });
+
+  it('caps the number of fit-checks so the extra spend is bounded', async () => {
+    const ranked = ['B', 'C', 'D', 'E', 'F', 'G'].map(row);
+    const { verify, calls } = verifyWith({ B: 'mismatch', C: 'mismatch', D: 'mismatch', E: 'mismatch', F: 'mismatch', G: 'mismatch' });
+    const out = await fillWithVettedDisplayOnly([], ranked, 1, verify);
+    assert.equal(out.length, 0, 'all mismatched ⇒ nothing surfaced');
+    assert.ok(calls() <= 4, `fit-check budget bounded (saw ${calls()})`);
+  });
+
+  it('a gate hiccup drops the candidate rather than surfacing it unvetted', async () => {
+    const verify = async (): Promise<ContactVerification> => { throw new Error('gate down'); };
+    const out = await fillWithVettedDisplayOnly([], [row('B')], 1, verify);
+    assert.equal(out.length, 0, 'an unvetted contact is never surfaced on a gate error');
+  });
+
+  it('returns resolved rows unchanged when they already fill the ask (no gate spend)', async () => {
+    const { verify, calls } = verifyWith({});
+    const out = await fillWithVettedDisplayOnly([withEmail('A')], [row('B')], 1, verify);
+    assert.deepEqual(out.map((r) => r.name), ['A']);
+    assert.equal(calls(), 0);
   });
 });
 
