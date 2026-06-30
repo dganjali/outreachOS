@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Send, Sparkles, Lock, Undo2, Paperclip, Pencil,
   Plane, PlaneTakeoff, Radar, Search, Users, PenLine, Clock, Eye, MessageSquare, Check, ChevronRight, Gauge as GaugeIcon,
@@ -62,9 +62,20 @@ const AP_DEFAULTS = {
 // the original message for anything we don't have a friendlier line for.
 function humanizeAgentError(msg: string): string {
   if (msg.includes('no_contacts_found'))
-    return 'No reachable contact found for this company yet. Try refreshing the evidence pack, or move on to another target.';
-  if (msg === 'agent_failed') return 'That step hit an error. Please try again in a moment.';
+    return 'We could not find a reachable contact here yet. Refresh the research, or move on to another target.';
+  if (msg.includes('no_people_found') || msg.includes('no_targets_found'))
+    return 'No new matches to add right now. Your existing ones are still here.';
+  if (msg === 'agent_failed' || msg === 'pipeline_failed')
+    return 'That step needs another try. Give it a moment and run it again.';
   return msg;
+}
+
+// The mission screen is split into three tabs so the work surface (Pipeline)
+// isn't buried under setup and activity. Pipeline is the default.
+type MissionTab = 'pipeline' | 'setup' | 'activity';
+const MISSION_TABS: MissionTab[] = ['pipeline', 'setup', 'activity'];
+function isMissionTab(v: string | null): v is MissionTab {
+  return v != null && (MISSION_TABS as string[]).includes(v);
 }
 
 export function MissionPage() {
@@ -74,6 +85,24 @@ export function MissionPage() {
   const aiEnabled = isPaidPlan(profile?.plan, profile?.plan_status);
   const confirm = useConfirm();
   const navigate = useNavigate();
+  // Which mission tab is showing. Kept in the URL (?tab=) so a reload or a shared
+  // link lands on the same surface. Default is the work surface (Pipeline).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab: MissionTab = isMissionTab(searchParams.get('tab')) ? (searchParams.get('tab') as MissionTab) : 'pipeline';
+  const setTab = useCallback(
+    (next: MissionTab) => {
+      setSearchParams(
+        (prev) => {
+          const p = new URLSearchParams(prev);
+          if (next === 'pipeline') p.delete('tab');
+          else p.set('tab', next);
+          return p;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
   const [mission, setMission] = useState<Mission | null>(null);
   // People mode: targets ARE people (their company carried as research context),
   // so the cockpit's "company" copy and the manual discovery button speak "people".
@@ -340,10 +369,24 @@ export function MissionPage() {
 
   async function findTargets() {
     if (!mission) return;
-    const r = await runWith<{ run_id: string; targets: Target[] }>('targeting', () =>
-      mission.find_mode === 'people' ? agents.people(mission.id, 10) : agents.target(mission.id, 10)
-    );
-    if (r) await loadTargets();
+    const people = mission.find_mode === 'people';
+    setBusy('targeting');
+    setError(null);
+    try {
+      await (people ? agents.people(mission.id, 10) : agents.target(mission.id, 10));
+      await loadTargets();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed';
+      // "Nothing new to add" is a normal outcome on a re-run, not a failure -
+      // surface it as a calm note, not the red error banner.
+      if (msg.includes('no_people_found') || msg.includes('no_targets_found')) {
+        toast.info(`No new ${people ? 'people' : 'companies'} to add right now. Your existing ones are still here.`);
+      } else {
+        setError(humanizeAgentError(msg));
+      }
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function findContacts(target: Target) {
@@ -783,11 +826,12 @@ export function MissionPage() {
         onRun={() => navigate(`/missions/${mission.id}/run`)}
       />
 
-      <MissionBriefCard mission={mission} onSaved={loadMission} />
-
-      {user?.id && <MissionAttachmentCard mission={mission} userId={user.id} onSaved={loadMission} />}
-
-      {user?.id && <MissionMemoryCard mission={mission} userId={user.id} />}
+      <MissionTabs
+        tab={tab}
+        onTab={setTab}
+        pipelineCount={visibleTargets.length}
+        activityCount={metrics.scheduled + metrics.review}
+      />
 
       {error && (
         <div className="banner-error" role="alert">
@@ -795,7 +839,7 @@ export function MissionPage() {
         </div>
       )}
 
-      {autopilotOn && policy ? (
+      {tab === 'pipeline' && (autopilotOn && policy ? (
         <AutopilotCockpit
           policy={policy}
           metrics={metrics}
@@ -803,16 +847,8 @@ export function MissionPage() {
           nextScheduledAt={nextScheduledAt}
           flights={flights}
           entityLabel={isPeople ? 'People' : 'Companies'}
-          reviewItems={reviewItems}
-          sendQueue={sendQueue}
-          refreshKey={refreshKey}
-          aiEnabled={aiEnabled}
-          hasResume={hasResume}
+          hasReview={metrics.review > 0}
           onSaveField={saveAutopilotField}
-          onReloadContacts={loadContactsForTarget}
-          onReloadSequence={loadSequencesForContact}
-          onSendNow={sendQueuedNow}
-          onCancelQueued={cancelQueued}
         />
       ) : (
         <>
@@ -949,6 +985,143 @@ export function MissionPage() {
             </div>
           )}
         </>
+      ))}
+
+      {tab === 'setup' && (
+        <>
+          <MissionBriefCard mission={mission} onSaved={loadMission} />
+          {user?.id && <MissionAttachmentCard mission={mission} userId={user.id} onSaved={loadMission} />}
+          {user?.id && <MissionMemoryCard mission={mission} userId={user.id} />}
+        </>
+      )}
+
+      {tab === 'activity' && (
+        <ActivityPanel
+          metrics={metrics}
+          sendQueue={sendQueue}
+          reviewItems={reviewItems}
+          refreshKey={refreshKey}
+          aiEnabled={aiEnabled}
+          hasResume={hasResume}
+          onReloadContacts={loadContactsForTarget}
+          onReloadSequence={loadSequencesForContact}
+          onSendNow={sendQueuedNow}
+          onCancelQueued={cancelQueued}
+        />
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tab nav: the three mission surfaces. Pipeline is the work; Setup is the
+// mission's brief, attachment, and memory; Activity is what's queued to send and
+// held for review. Counts ride on the tabs that have actionable items.
+// ---------------------------------------------------------------------------
+function MissionTabs({
+  tab,
+  onTab,
+  pipelineCount,
+  activityCount,
+}: {
+  tab: MissionTab;
+  onTab: (t: MissionTab) => void;
+  pipelineCount: number;
+  activityCount: number;
+}) {
+  const items: Array<{ id: MissionTab; label: string; count?: number }> = [
+    { id: 'pipeline', label: 'Pipeline', count: pipelineCount || undefined },
+    { id: 'setup', label: 'Setup' },
+    { id: 'activity', label: 'Activity', count: activityCount || undefined },
+  ];
+  return (
+    <div className="mission-tabs" role="tablist" aria-label="Mission sections">
+      {items.map((it) => (
+        <button
+          key={it.id}
+          type="button"
+          role="tab"
+          aria-selected={tab === it.id}
+          className={`mission-tab${tab === it.id ? ' is-active' : ''}`}
+          onClick={() => onTab(it.id)}
+        >
+          {it.label}
+          {it.count != null && <span className="console-count">{it.count}</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Activity tab: the "what's leaving / what needs me" surface, available in both
+// manual and Autopilot modes. The live send queue plus drafts held for review.
+// ---------------------------------------------------------------------------
+function ActivityPanel({
+  metrics,
+  sendQueue,
+  reviewItems,
+  refreshKey,
+  aiEnabled,
+  hasResume,
+  onReloadContacts,
+  onReloadSequence,
+  onSendNow,
+  onCancelQueued,
+}: {
+  metrics: Metrics;
+  sendQueue: QueueItem[];
+  reviewItems: Array<{ target: Target; contact: Contact; sequence: EmailSequence }>;
+  refreshKey: number;
+  aiEnabled: boolean;
+  hasResume: boolean;
+  onReloadContacts: (targetId: string) => void | Promise<void>;
+  onReloadSequence: (contactId: string) => void | Promise<void>;
+  onSendNow: (item: QueueItem) => void | Promise<void>;
+  onCancelQueued: (item: QueueItem) => void | Promise<void>;
+}) {
+  return (
+    <div className="activity">
+      <div className="activity-stats">
+        <span className="activity-stat"><strong>{metrics.scheduled}</strong> queued</span>
+        <span className="activity-stat"><strong>{metrics.sent}</strong> sent</span>
+        <span className="activity-stat"><strong>{metrics.replies}</strong> replied</span>
+        <span className="activity-stat"><strong>{metrics.review}</strong> to review</span>
+      </div>
+
+      <SendQueuePanel queue={sendQueue} onSendNow={onSendNow} onCancel={onCancelQueued} />
+
+      {reviewItems.length > 0 && (
+        <section className="cockpit-review">
+          <div className="cockpit-review-head">
+            <Eye size={15} aria-hidden />
+            <span>Held for review</span>
+            <span className="console-count">{reviewItems.length}</span>
+          </div>
+          <p className="cockpit-review-sub">
+            Drafts waiting on your approval, plus anything held back for an unverified address or low confidence. Nothing here enters the send queue until you approve it.
+          </p>
+          <div className="cockpit-review-list">
+            {reviewItems.map(({ target, contact, sequence }) => (
+              <div key={sequence.id} className="cockpit-review-item">
+                <div className="cri-id">
+                  <strong>{contact.name}</strong>
+                  <span className="pc-role">{contact.role}</span>
+                  <span className="cri-co">{target.company_name}</span>
+                </div>
+                <SequenceCard
+                  key={`${sequence.id}:${refreshKey}`}
+                  sequence={sequence}
+                  contact={contact}
+                  aiEnabled={aiEnabled}
+                  hasResume={hasResume}
+                  onContactUpdated={() => onReloadContacts(target.id)}
+                  onSequenceUpdated={() => onReloadSequence(contact.id)}
+                />
+              </div>
+            ))}
+          </div>
+        </section>
       )}
     </div>
   );
@@ -1118,16 +1291,8 @@ function AutopilotCockpit({
   nextScheduledAt,
   flights,
   entityLabel,
-  reviewItems,
-  sendQueue,
-  refreshKey,
-  aiEnabled,
-  hasResume,
+  hasReview,
   onSaveField,
-  onReloadContacts,
-  onReloadSequence,
-  onSendNow,
-  onCancelQueued,
 }: {
   policy: CampaignPolicy;
   metrics: Metrics;
@@ -1135,16 +1300,8 @@ function AutopilotCockpit({
   nextScheduledAt: string | null;
   flights: Flight[];
   entityLabel: string;
-  reviewItems: Array<{ target: Target; contact: Contact; sequence: EmailSequence }>;
-  sendQueue: QueueItem[];
-  refreshKey: number;
-  aiEnabled: boolean;
-  hasResume: boolean;
+  hasReview: boolean;
   onSaveField: (patch: Partial<CampaignPolicy>) => void | Promise<void>;
-  onReloadContacts: (targetId: string) => void | Promise<void>;
-  onReloadSequence: (contactId: string) => void | Promise<void>;
-  onSendNow: (item: QueueItem) => void | Promise<void>;
-  onCancelQueued: (item: QueueItem) => void | Promise<void>;
 }) {
   const [capDraft, setCapDraft] = useState(String(policy.daily_send_cap));
 
@@ -1224,7 +1381,12 @@ function AutopilotCockpit({
 
       <CompanyBoard flights={flights} label={entityLabel} />
 
-      <SendQueuePanel queue={sendQueue} onSendNow={onSendNow} onCancel={onCancelQueued} />
+      {hasReview && (
+        <p className="cockpit-review-pointer">
+          <Eye size={14} aria-hidden /> {metrics.review} draft{metrics.review === 1 ? '' : 's'} waiting for you in the{' '}
+          <strong>Activity</strong> tab.
+        </p>
+      )}
 
       <div className="cockpit-throttle">
         <div className="cockpit-throttle-label">When a draft is ready</div>
@@ -1274,42 +1436,9 @@ function AutopilotCockpit({
         )}
       </div>
 
-      {reviewItems.length > 0 && (
-        <section className="cockpit-review">
-          <div className="cockpit-review-head">
-            <Eye size={15} aria-hidden />
-            <span>Held for review</span>
-            <span className="console-count">{reviewItems.length}</span>
-          </div>
-          <p className="cockpit-review-sub">
-            Drafts waiting on your approval, plus anything held back for an unverified address or low confidence. Nothing here enters the send queue until you approve it.
-          </p>
-          <div className="cockpit-review-list">
-            {reviewItems.map(({ target, contact, sequence }) => (
-              <div key={sequence.id} className="cockpit-review-item">
-                <div className="cri-id">
-                  <strong>{contact.name}</strong>
-                  <span className="pc-role">{contact.role}</span>
-                  <span className="cri-co">{target.company_name}</span>
-                </div>
-                <SequenceCard
-                  key={`${sequence.id}:${refreshKey}`}
-                  sequence={sequence}
-                  contact={contact}
-                  aiEnabled={aiEnabled}
-                  hasResume={hasResume}
-                  onContactUpdated={() => onReloadContacts(target.id)}
-                  onSequenceUpdated={() => onReloadSequence(contact.id)}
-                />
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
       <p className="cockpit-note">
         Autopilot only sends to verified addresses, during business hours, and sources a few new companies a day.
-        Low-confidence drafts always wait here for you. Switch to <strong>Manual</strong> any time, up top.
+        Low-confidence drafts wait in the <strong>Activity</strong> tab for you. Switch to <strong>Manual</strong> any time, up top.
       </p>
     </div>
   );

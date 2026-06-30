@@ -522,13 +522,15 @@ export function MissionRun() {
           <h1 className="run-title">{mission?.name ?? 'Mission'}</h1>
           <p className="run-subtitle">
             {phase === 'done'
-              ? 'Pipeline complete.'
+              ? targets.length === 0
+                ? `No new ${isPeople ? 'people' : 'companies'} to add right now.`
+                : 'Pipeline complete.'
               : phase === 'paused'
                 ? `Paused, daily limit reached. Resumes ${resetLabel}.`
                 : phase === 'canceled'
                   ? 'Stopped. Finished targets are saved.'
                   : phase === 'error'
-                    ? 'Something went wrong.'
+                    ? 'That run did not finish.'
                     : 'Researching your pipeline…'}
           </p>
         </div>
@@ -558,9 +560,9 @@ export function MissionRun() {
       )}
       {phase === 'error' && (
         <div className="run-banner error">
-          {run?.error ?? error ?? 'The run failed.'}{' '}
+          {humanizeRunError(run?.error ?? error)}{' '}
           <button type="button" className="link-button" onClick={launch}>
-            Retry
+            Try again
           </button>
         </div>
       )}
@@ -604,12 +606,18 @@ export function MissionRun() {
 
       {(phase === 'done' || phase === 'canceled') && (
         <div className="run-summary">
-          <div className="run-summary-stat">
-            <strong>{draftsReady}</strong> draft{draftsReady === 1 ? '' : 's'} ready
-            {targets.length > draftsReady ? ` · ${targets.length - draftsReady} incomplete` : ''}
-          </div>
+          {targets.length === 0 ? (
+            <div className="run-summary-stat">
+              No new {isPeople ? 'people' : 'companies'} this time. Your existing ones are still on the mission.
+            </div>
+          ) : (
+            <div className="run-summary-stat">
+              <strong>{draftsReady}</strong> draft{draftsReady === 1 ? '' : 's'} ready
+              {targets.length > draftsReady ? ` · ${targets.length - draftsReady} still finishing` : ''}
+            </div>
+          )}
           <Link to={`/missions/${id}`} className="launchpad-cta">
-            Review &amp; send →
+            {targets.length === 0 ? 'Back to mission →' : 'Review & send →'}
           </Link>
         </div>
       )}
@@ -701,6 +709,16 @@ function fmt(s: number): string {
   const m = Math.floor(s / 60);
   const sec = s % 60;
   return `${m}:${sec.toString().padStart(2, '0')}`;
+}
+
+// Friendly, non-alarming copy for a genuinely failed run. Raw codes
+// (pipeline_failed, agent_failed, parse_failed) become a calm, retry-oriented
+// line; anything already human-readable passes through.
+function humanizeRunError(raw: string | null | undefined): string {
+  const msg = (raw ?? '').trim();
+  if (!msg) return 'That run did not finish. You can try again.';
+  if (/^[a-z_]+$/.test(msg)) return 'That run did not finish. You can try again.';
+  return msg;
 }
 
 /** Render the daily-cap reset time in the user's local clock: "today at 3:42 PM",

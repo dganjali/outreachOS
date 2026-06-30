@@ -595,16 +595,6 @@ export function Dashboard() {
           cta: 'Review drafts',
         }
       : null,
-    stats.repliesToHandle > 0
-      ? {
-          key: 'replies',
-          count: stats.repliesToHandle,
-          noun: stats.repliesToHandle === 1 ? 'reply to handle' : 'replies to handle',
-          sub: 'Prospects wrote back. Keep the thread warm.',
-          to: '/inbox',
-          cta: 'Open inbox',
-        }
-      : null,
   ].filter(Boolean) as Array<{
     key: string; count: number; noun: string; sub: string; to: string; cta: string;
   }>;

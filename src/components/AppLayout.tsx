@@ -3,7 +3,6 @@ import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
   Target,
-  Inbox as InboxIcon,
   Activity,
   User,
   Settings as SettingsIcon,
@@ -13,7 +12,6 @@ import {
   ChevronsUpDown,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { supabase } from '../supabaseClient';
 import { Logo } from './Logo';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
@@ -31,7 +29,6 @@ import { cn } from '@/lib/utils';
 const NAV = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/missions', label: 'Missions', icon: Target },
-  { to: '/inbox', label: 'Inbox', icon: InboxIcon },
   { to: '/analytics', label: 'Analytics', icon: Activity },
   { to: '/me', label: 'Me', icon: User },
   { to: '/settings', label: 'Settings', icon: SettingsIcon },
@@ -44,7 +41,6 @@ const SHORTCUTS: { keys: string; label: string }[] = [
   { keys: 'n', label: 'New mission' },
   { keys: 'd', label: 'Go to Dashboard' },
   { keys: 'm', label: 'Go to Missions' },
-  { keys: 'i', label: 'Go to Inbox' },
   { keys: '/', label: 'Search missions (on Missions)' },
   { keys: '?', label: 'Show this help' },
 ];
@@ -123,9 +119,6 @@ function useGlobalShortcuts(onToggleHelp: () => void, onCloseHelp: () => void) {
         case 'm':
           navigate('/missions');
           break;
-        case 'i':
-          navigate('/inbox');
-          break;
       }
     }
     window.addEventListener('keydown', onKey);
@@ -133,40 +126,7 @@ function useGlobalShortcuts(onToggleHelp: () => void, onCloseHelp: () => void) {
   }, [navigate, onToggleHelp, onCloseHelp]);
 }
 
-// Poll the count of replies still needing a response, so the Inbox nav can carry
-// an urgency badge. Replies are populated by a daily cron + handled in the inbox,
-// so a light interval + refetch on window focus keeps it fresh without churn.
-function useUnhandledReplyCount(): number {
-  const { user } = useAuth();
-  const [count, setCount] = useState(0);
-  useEffect(() => {
-    if (!user?.id) return;
-    let cancelled = false;
-    async function load() {
-      try {
-        const { count: c } = await supabase
-          .from('replies')
-          .select('id', { count: 'exact', head: true })
-          .eq('handled', false);
-        if (!cancelled) setCount(c ?? 0);
-      } catch {
-        /* non-critical: leave the last known count */
-      }
-    }
-    load();
-    const id = window.setInterval(load, 60000);
-    const onFocus = () => load();
-    window.addEventListener('focus', onFocus);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-      window.removeEventListener('focus', onFocus);
-    };
-  }, [user?.id]);
-  return count;
-}
-
-function NavItems({ onNavigate, inboxCount = 0 }: { onNavigate?: () => void; inboxCount?: number }) {
+function NavItems({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <nav className="flex flex-col gap-1 px-3">
       {NAV.map(({ to, label, icon: Icon }) => (
@@ -196,14 +156,6 @@ function NavItems({ onNavigate, inboxCount = 0 }: { onNavigate?: () => void; inb
                 strokeWidth={2}
               />
               <span>{label}</span>
-              {to === '/inbox' && inboxCount > 0 && (
-                <span
-                  className="ml-auto inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-bold tabular-nums text-primary-foreground"
-                  aria-label={`${inboxCount} ${inboxCount === 1 ? 'reply' : 'replies'} to handle`}
-                >
-                  {inboxCount > 9 ? '9+' : inboxCount}
-                </span>
-              )}
             </>
           )}
         </NavLink>
@@ -224,7 +176,6 @@ export function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const { user, profile, signOut } = useAuth();
-  const inboxCount = useUnhandledReplyCount();
   useGlobalShortcuts(
     () => setHelpOpen((v) => !v),
     () => setHelpOpen(false)
@@ -239,7 +190,7 @@ export function AppLayout() {
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-sidebar-border bg-gradient-to-b from-sidebar to-background md:flex">
         <SidebarBrand />
         <div className="mt-2 flex-1 overflow-y-auto pb-4">
-          <NavItems inboxCount={inboxCount} />
+          <NavItems />
         </div>
       </aside>
 
@@ -257,7 +208,7 @@ export function AppLayout() {
               <SheetContent side="left" className="w-64 border-sidebar-border bg-sidebar p-0">
                 <SidebarBrand />
                 <div className="mt-2">
-                  <NavItems onNavigate={() => setMobileOpen(false)} inboxCount={inboxCount} />
+                  <NavItems onNavigate={() => setMobileOpen(false)} />
                 </div>
               </SheetContent>
             </Sheet>
