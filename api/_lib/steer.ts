@@ -18,6 +18,31 @@ function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
 }
 
+function camelKey(k: string): string {
+  return k.replace(/_([a-z0-9])/g, (_m, c: string) => c.toUpperCase());
+}
+
+/**
+ * Deep-camelCase every object key. The proposal round-trips through the
+ * frontend data shim (src/lib/caseMap.ts), which snake_cases nested keys on
+ * read - so a stored proposal comes back as `target_description`/`clear_icp`.
+ * This restores `targetDescription`/`clearIcp` etc. so buildSteerUpdates (which
+ * reads camelCase) sees the fields. Only KEYS are touched; string values
+ * (claims, fact ids, change text) are untouched.
+ */
+export function normalizeProposal(raw: unknown): SteerProposal {
+  const deep = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(deep);
+    if (v && typeof v === 'object') {
+      const out: Record<string, unknown> = {};
+      for (const [k, val] of Object.entries(v as Record<string, unknown>)) out[camelKey(k)] = deep(val);
+      return out;
+    }
+    return v;
+  };
+  return (deep(raw ?? {}) as SteerProposal) ?? ({ changes: [] } as SteerProposal);
+}
+
 export interface SteerUpdates {
   missionUpdate: Partial<MissionDoc>;
   policyUpdate: Partial<CampaignPolicyDoc>;

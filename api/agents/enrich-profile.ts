@@ -3,7 +3,7 @@ import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { forUser, newId, type InsertDoc } from '../_lib/db';
 import { MODEL, WEB_SEARCH_TOOL, generateJsonWithSearch } from '../_lib/llm';
 import { PROFILE_ENRICH_SYSTEM } from '../_lib/prompts';
-import { startRun, completeRun, failRun } from '../_lib/runs';
+import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
 import { embedOne } from '../_lib/embeddings';
 import type { ContextFactDoc, ProfileDoc } from '../../shared/schemas';
 
@@ -28,6 +28,9 @@ export default async function handler(req: Request, res: Response) {
   const user = await requireUser(req, res);
   if (!user) return;
   const scope = forUser(user.id);
+  // Web-search-grounded LLM call - gate it like every other agent so it counts
+  // against the plan's rolling agent-run limit (no free LLM usage).
+  if (!(await checkRateLimit(scope, res))) return;
 
   const profile = await scope.collection<ProfileDoc>('profiles').findOne();
   if (!profile) return res.status(404).json({ error: 'profile_not_found' });

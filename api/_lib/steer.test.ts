@@ -3,7 +3,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSteerUpdates, isEmptyUpdate } from './steer';
+import { buildSteerUpdates, isEmptyUpdate, normalizeProposal } from './steer';
 import { MAX_DAILY_SEND_CAP, MAX_TARGETS_PER_CYCLE } from './autopilot';
 import type { SteerProposal } from '../../shared/schemas';
 
@@ -82,4 +82,24 @@ test('validFactIds drops a pin the user does not own', () => {
 test('a clarification-only proposal yields an empty update', () => {
   const u = buildSteerUpdates(mission, policy, prop({ clarification: 'Which fact did you mean?' }));
   assert.equal(isEmptyUpdate(u), true);
+});
+
+test('a snake_cased proposal (round-tripped through the data shim) still applies', () => {
+  // What the frontend shim hands back after storing/reloading: nested keys are
+  // snake_cased. Without normalize, buildSteerUpdates would see nothing.
+  const roundTripped = {
+    mission: { target_description: 'Bigger companies (Fortune 500)', clear_icp: true, draft_directive_append: 'Lead on the $20k win.' },
+    emphasize_fact_ids: ['f1'],
+    changes: [{ label: 'Audience', from: 'a', to: 'b' }],
+  };
+  const proposal = normalizeProposal(roundTripped);
+  assert.equal(proposal.mission?.targetDescription, 'Bigger companies (Fortune 500)');
+  assert.equal(proposal.mission?.clearIcp, true);
+
+  const { missionUpdate } = buildSteerUpdates(mission, policy, proposal);
+  assert.equal(missionUpdate.targetDescription, 'Bigger companies (Fortune 500)');
+  assert.equal(missionUpdate.contactIcp, null);
+  assert.equal(missionUpdate.draftDirective, 'Lead on the $20k win.');
+  assert.deepEqual(missionUpdate.emphasizedFactIds, ['f1']);
+  assert.equal(isEmptyUpdate({ missionUpdate, policyUpdate: {} }), false);
 });

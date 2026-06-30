@@ -16,7 +16,7 @@ import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { forUser } from '../_lib/db';
 import { generateJson, MODEL_PRO } from '../_lib/llm';
 import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
-import { buildSteerUpdates, isEmptyUpdate } from '../_lib/steer';
+import { buildSteerUpdates, isEmptyUpdate, normalizeProposal } from '../_lib/steer';
 import type {
   CampaignPolicyDoc,
   ContextFactDoc,
@@ -178,8 +178,11 @@ export async function apply(req: Request, res: Response) {
   if (!user) return;
   const scope = forUser(user.id);
 
-  const { mission_id, proposal } = (req.body ?? {}) as { mission_id?: string; proposal?: SteerProposal };
-  if (!mission_id || !proposal) return res.status(400).json({ error: 'missing_mission_or_proposal' });
+  const { mission_id, proposal: rawProposal } = (req.body ?? {}) as { mission_id?: string; proposal?: unknown };
+  if (!mission_id || !rawProposal) return res.status(400).json({ error: 'missing_mission_or_proposal' });
+  // The proposal round-trips through the frontend data shim, which snake_cases
+  // nested keys; normalize back to camelCase so buildSteerUpdates sees the fields.
+  const proposal = normalizeProposal(rawProposal);
 
   const mission = await scope.collection<MissionDoc>('missions').findById(mission_id);
   if (!mission) return res.status(404).json({ error: 'mission_not_found' });
