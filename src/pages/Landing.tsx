@@ -18,12 +18,6 @@ import { PLANS, PLAN_ORDER, formatPriceMonthly } from '../../shared/plans';
 
 const REPLACES = ['Apollo', 'LinkedIn', 'ChatGPT', 'Spreadsheets', 'Gmail'];
 
-const HOW = [
-  { step: '01', title: 'Tell us the mission', body: 'Pick a mode, say what you are sending and who you want to reach, and set a voice from your own facts and tone. What you enter is what the agent cites.' },
-  { step: '02', title: 'Agents do the legwork', body: 'Targeting, evidence, contacts, and sequence agents run in one click. They research the web for the right companies and people, then verify the details.' },
-  { step: '03', title: 'Review, send, follow up', body: 'Approve drafts in your voice and send via Gmail. Follow-ups go out on their cadence and stop the moment you mark a contact as replied.' },
-];
-
 const MODES = [
   {
     title: 'Sponsorship',
@@ -73,10 +67,11 @@ const VOICE_POINTS = [
 ];
 
 const FAQ = [
+  { q: 'Will it make things up about my prospects?', a: 'No, by design. Every personalized line is anchored to a sourced bullet the agents actually found and cited. If there is no evidence for a claim, it does not get written, so personalization is never a guess.' },
+  { q: 'Does it get my Gmail password?', a: 'Never. You connect through Google with send-only access, so OutreachOS never sees your password and can never read your inbox. It can only send the emails you approve.' },
+  { q: 'Can I edit everything before it sends?', a: 'Yes. Nothing goes out without your approval. Edit any draft you like, and when you correct one, the voice agent learns the rule behind your edit and applies it to every draft after.' },
+  { q: 'Why not just use ChatGPT?', a: 'ChatGPT writes a paragraph once you paste in the context. OutreachOS finds the companies, ranks them by why-now, verifies the decision-maker and their email, sources the evidence, drafts in your voice with citations, and runs the follow-ups. The writing is the last step, not the whole job.' },
   { q: 'Do I need a data-provider subscription?', a: 'No. The agents research the open web to find high-fit companies and the right decision-makers, then verify contact details. Just connect Gmail and go.' },
-  { q: 'How does it send email?', a: 'Through your own Gmail with send-only access. OutreachOS can send the emails you approve, and it can never read your inbox.' },
-  { q: 'Is it autonomous, or do I stay in control?', a: 'Initial emails always wait for your approval. After you send, follow-ups go out on cadence and stop the moment a contact replies, with a suppression list as a backstop.' },
-  { q: 'What does it run on?', a: 'Google Gemini powers the agents. Your data lives in your account; emails send from your Gmail.' },
 ];
 
 /* Fades + lifts its children into place when they scroll into view (once).
@@ -166,10 +161,9 @@ export function Landing() {
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5 md:px-8">
           <Logo size={24} variant="mono-light" />
           <nav className="hidden items-center gap-9 text-sm text-muted-foreground md:flex">
-            <a href="#features" className="transition-colors hover:text-foreground">Features</a>
-            <a href="#how" className="transition-colors hover:text-foreground">How it works</a>
-            <a href="#agents" className="transition-colors hover:text-foreground">Agents</a>
+            <a href="#agents" className="transition-colors hover:text-foreground">How it works</a>
             <a href="#voice" className="transition-colors hover:text-foreground">Voice</a>
+            <a href="#features" className="transition-colors hover:text-foreground">Features</a>
             <a href="#modes" className="transition-colors hover:text-foreground">Modes</a>
             <a href="#pricing" className="transition-colors hover:text-foreground">Pricing</a>
             <a href="#faq" className="transition-colors hover:text-foreground">FAQ</a>
@@ -234,7 +228,7 @@ export function Landing() {
                 variant="outline"
                 className="border-border bg-transparent px-6 font-medium text-foreground hover:bg-secondary/60"
               >
-                <a href="#how">See how it works</a>
+                <a href="#agents">See how it works</a>
               </Button>
             </Reveal>
           </div>
@@ -266,34 +260,17 @@ export function Landing() {
           </div>
         </section>
 
-        {/* How it works - the simple 3-step loop, before the deep feature dives */}
-        <section id="how">
-          <div className="mx-auto max-w-6xl px-5 py-20 md:px-8 md:py-24">
-            <Reveal>
-              <SectionHead
-                title="Three steps, start to sent."
-                sub="One mission in, a reviewable pipeline out. You stay in the approval seat the whole way."
-              />
-            </Reveal>
-            <div className="grid gap-px overflow-hidden rounded-xl border border-border bg-border md:grid-cols-3">
-              {HOW.map((h, i) => (
-                <Reveal key={h.step} delay={i * 90} className="flex flex-col bg-card p-7 transition-colors duration-200 hover:bg-secondary/40">
-                  <span className="font-mono text-sm text-primary">{h.step}</span>
-                  <h3 className="mt-5 text-lg font-semibold tracking-[-0.01em] text-foreground">{h.title}</h3>
-                  <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">{h.body}</p>
-                </Reveal>
-              ))}
-            </div>
-          </div>
-        </section>
+        {/* TODO(social-proof): add a credibility line or logo row here once we have an
+            accurate claim to make (e.g. hackathon wins, "X emails sent", customer logos).
+            Intentionally skipped for now rather than ship an unverifiable claim. */}
 
-        {/* Agents - illustrative animated pipeline, bridging the 3 steps and the deep dives */}
+        {/* Agents - the pipeline, told once: animated flow from mission to sent */}
         <section id="agents" className="section-tint border-t border-border/70">
           <div className="mx-auto max-w-6xl px-5 py-16 md:px-8 md:py-20">
             <Reveal>
               <SectionHead
-                title="Four agents. One click."
-                sub="Targeting, evidence, contacts, and sequence run as a single pipeline, each handing off to the next, every claim sourced along the way."
+                title="Research. Write. Review. Sent."
+                sub="One mission in, a reviewable pipeline out. Targeting, evidence, contacts, and sequence run in a single click, each handing off to the next, every claim sourced, and you stay in the approval seat the whole way."
               />
             </Reveal>
             <Reveal delay={80}>
@@ -302,8 +279,48 @@ export function Landing() {
           </div>
         </section>
 
+        {/* Voice calibration - the marquee demo: correct a draft, it learns your voice */}
+        <section id="voice" className="border-t border-border/70">
+          <div className="mx-auto max-w-6xl px-5 py-20 md:px-8 md:py-24">
+            <Reveal>
+              <div className="mb-10 max-w-2xl">
+                <span className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                  <AudioLines className="h-4 w-4 text-primary" /> Voice calibration
+                </span>
+                <h2 className="mt-4 text-balance font-display text-3xl font-semibold tracking-[-0.02em] text-foreground md:text-[2.5rem] md:leading-[1.08]">
+                  Fix one draft. It sounds like you on every draft after.
+                </h2>
+                <p className="mt-4 max-w-xl text-base leading-relaxed text-muted-foreground">
+                  Tell the agent what's off in plain English. It learns the rule behind your edit, not just the line, and
+                  threads that voice from targeting through every draft and follow-up. Watch it live.
+                </p>
+              </div>
+            </Reveal>
+            <Reveal delay={80}>
+              <BrowserFrame url="outreach-os.ca/draft" bodyClassName="p-0">
+                <VoiceCalibrationMock />
+              </BrowserFrame>
+            </Reveal>
+            <Reveal delay={140}>
+              <div className="mt-6 grid gap-3 sm:grid-cols-3">
+                {VOICE_POINTS.map((p) => (
+                  <div key={p.title} className="flex items-start gap-3 rounded-xl border border-border bg-card p-5">
+                    <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-primary/30 bg-primary/10 text-primary">
+                      <p.icon className="h-4 w-4" />
+                    </span>
+                    <div>
+                      <h3 className="text-sm font-semibold text-foreground">{p.title}</h3>
+                      <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{p.body}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Reveal>
+          </div>
+        </section>
+
         {/* Features - the deep dives behind each step */}
-        <section id="features" className="border-t border-border/70">
+        <section id="features" className="section-tint border-t border-border/70">
           <div className="mx-auto max-w-6xl px-5 py-20 md:px-8 md:py-24">
             <Reveal>
               <SectionHead
@@ -340,46 +357,6 @@ export function Landing() {
                 </Reveal>
               ))}
             </div>
-          </div>
-        </section>
-
-        {/* Voice calibration - the marquee demo: correct a draft, it learns your voice */}
-        <section id="voice" className="section-tint border-t border-border/70">
-          <div className="mx-auto max-w-6xl px-5 py-20 md:px-8 md:py-24">
-            <Reveal>
-              <div className="mb-10 max-w-2xl">
-                <span className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                  <AudioLines className="h-4 w-4 text-primary" /> Voice calibration
-                </span>
-                <h2 className="mt-4 text-balance font-display text-3xl font-semibold tracking-[-0.02em] text-foreground md:text-[2.5rem] md:leading-[1.08]">
-                  Fix one draft. It sounds like you on every draft after.
-                </h2>
-                <p className="mt-4 max-w-xl text-base leading-relaxed text-muted-foreground">
-                  Tell the agent what's off in plain English. It learns the rule behind your edit, not just the line, and
-                  threads that voice from targeting through every draft and follow-up. Watch it live.
-                </p>
-              </div>
-            </Reveal>
-            <Reveal delay={80}>
-              <BrowserFrame url="outreach-os.ca/draft" bodyClassName="p-0">
-                <VoiceCalibrationMock />
-              </BrowserFrame>
-            </Reveal>
-            <Reveal delay={140}>
-              <div className="mt-6 grid gap-3 sm:grid-cols-3">
-                {VOICE_POINTS.map((p) => (
-                  <div key={p.title} className="flex items-start gap-3 rounded-xl border border-border bg-card p-5">
-                    <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-primary/30 bg-primary/10 text-primary">
-                      <p.icon className="h-4 w-4" />
-                    </span>
-                    <div>
-                      <h3 className="text-sm font-semibold text-foreground">{p.title}</h3>
-                      <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{p.body}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Reveal>
           </div>
         </section>
 
@@ -506,11 +483,11 @@ export function Landing() {
             <Reveal className="flex flex-col items-start gap-8 rounded-2xl border border-border bg-card p-10 md:flex-row md:items-center md:justify-between md:p-14">
               <div className="max-w-lg">
                 <h2 className="text-balance font-display text-3xl font-semibold tracking-[-0.02em] text-foreground md:text-[2.5rem] md:leading-[1.08]">
-                  Stop tab-hopping. Start sending.
+                  One mission in. A campaign in your voice out.
                 </h2>
                 <p className="mt-4 text-base leading-relaxed text-muted-foreground">
-                  Replace the LinkedIn, ChatGPT, spreadsheets, and Gmail juggling with one mission, one click,
-                  one inbox.
+                  Researched companies, sourced lines, drafts in your voice, and follow-ups that stop the moment
+                  they reply. Set the mission and review what comes back.
                 </p>
               </div>
               <Button asChild size="lg" className="btn-glow shrink-0 gap-2 border-0 px-7 font-medium text-primary-foreground">
@@ -532,9 +509,9 @@ export function Landing() {
           <div className="flex gap-16 sm:gap-24">
             <div className="flex flex-col gap-3 text-sm">
               <h4 className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground/70">Product</h4>
-              <a href="#features" className="text-muted-foreground transition-colors hover:text-foreground">Features</a>
-              <a href="#how" className="text-muted-foreground transition-colors hover:text-foreground">How it works</a>
+              <a href="#agents" className="text-muted-foreground transition-colors hover:text-foreground">How it works</a>
               <a href="#voice" className="text-muted-foreground transition-colors hover:text-foreground">Voice</a>
+              <a href="#features" className="text-muted-foreground transition-colors hover:text-foreground">Features</a>
               <a href="#modes" className="text-muted-foreground transition-colors hover:text-foreground">Modes</a>
               <a href="#pricing" className="text-muted-foreground transition-colors hover:text-foreground">Pricing</a>
               <a href="#faq" className="text-muted-foreground transition-colors hover:text-foreground">FAQ</a>
