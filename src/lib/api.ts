@@ -16,6 +16,7 @@ import type {
   StyleProfile,
 } from '../types';
 import type { PlanId, PlanStatus } from '../../shared/plans';
+import type { SteerProposal } from '../../shared/schemas';
 // Mongo stores docs in camelCase + `_id`; frontend types use snake_case + `id`.
 // Shared with src/lib/db.ts so the two clients can't drift.
 import { toFrontend, readJson } from './caseMap';
@@ -151,6 +152,15 @@ export const agents = {
       scope: 'person' | 'mission';
       mission_id: string | null;
     }>('/api/agents/extract-context', input),
+  // Autopilot steering chat: interpret one instruction into a reviewable proposal.
+  steer: (input: { mission_id: string; instruction: string }) =>
+    authedFetch<{ run_id: string; summary: string; proposal: SteerProposal }>('/api/agents/steer', input),
+  // Commit a proposal the user confirmed.
+  steerApply: (input: { mission_id: string; proposal: SteerProposal }) =>
+    authedFetch<{ ok: true; applied: Array<{ label: string; from: string; to: string }> }>(
+      '/api/agents/steer/apply',
+      input
+    ),
 };
 
 export type CoachField =

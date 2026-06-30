@@ -22,6 +22,22 @@ export type {
 } from '../shared/types';
 import type { MissionMode, FindMode } from '../shared/types';
 import type { PlanId, PlanStatus } from '../shared/plans';
+import type { SteerProposal } from '../shared/schemas';
+
+export type { SteerProposal } from '../shared/schemas';
+
+// One turn in a mission's autopilot steering chat (frontend mirror of
+// MissionSteeringDoc, snake_cased by the data shim).
+export interface MissionSteeringMessage {
+  id: string;
+  user_id: string;
+  mission_id: string;
+  role: 'user' | 'assistant';
+  text: string;
+  proposal?: SteerProposal | null;
+  status?: 'proposed' | 'applied' | 'dismissed' | null;
+  created_at: string;
+}
 
 export type OnboardingStep = 1 | 2 | 3 | 4;
 
@@ -80,6 +96,11 @@ export interface Mission {
   // Optional profile_assets id (kind 'mission_attachment') attached to every
   // email sent for this mission. null/absent = no attachment.
   attach_asset_id?: string | null;
+  // Free-text standing instructions injected into every draft for this mission.
+  // Distinct from `notes` (private, never drafted on). null/absent = none.
+  draft_directive?: string | null;
+  // Context-fact ids the user pinned to always feature in this mission's drafts.
+  emphasized_fact_ids?: string[];
   created_at: string;
   updated_at: string;
 }

@@ -60,6 +60,9 @@ export const COL = {
   personaVersions: 'persona_versions',
   contextFacts: 'context_facts',
   styleExemplars: 'style_exemplars',
+  // Autopilot steering chat: NL instructions + the structured proposals the
+  // steer agent returns, so an un-applied proposal survives a reload.
+  steeringMessages: 'steering_messages',
 } as const;
 
 export type CollectionName = (typeof COL)[keyof typeof COL];
@@ -95,6 +98,7 @@ const OWNERSHIP: Record<CollectionName, OwnershipMode> = {
   persona_versions: 'userId',
   context_facts: 'userId',
   style_exemplars: 'userId',
+  steering_messages: 'userId',
 };
 
 // ---------------------------------------------------------------------------

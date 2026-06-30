@@ -191,6 +191,8 @@ export async function assembleDraftContext(
   });
   const facts = await assembleAllowedFacts(scope, uid, mission._id, target._id, retrievalQuery, {
     excludedFactIds: persona?.excludedFactIds ?? [],
+    // Facts the user pinned on this mission - always featured, cap-exempt.
+    emphasizedFactIds: mission.emphasizedFactIds ?? [],
     recipient: { role: contact.role, headline: contact.headline },
     // Individualized research from the verification gate - facts about THIS
     // person, so the draft can reference the human, not just their employer.
@@ -221,6 +223,7 @@ export async function assembleDraftContext(
     missionGoal: mission.goal,
     audience: mission.targetDescription,
     whyNow: target.whyNow ?? undefined,
+    directive: mission.draftDirective ?? null,
     allowedFacts: facts,
     exemplars: exemplarDocs.map((e) => ({ subject: e.subject, body: e.body })),
     styleProfile: persona?.styleProfile ?? emptyStyleProfile(),
@@ -249,6 +252,7 @@ export async function assembleAllowedFacts(
   query: string,
   opts: {
     excludedFactIds?: string[];
+    emphasizedFactIds?: string[];
     recipient?: { role?: string | null; headline?: string | null };
     personResearch?: ContactDoc['personResearch'];
     contactId?: string;
@@ -259,8 +263,9 @@ export async function assembleAllowedFacts(
   // Memory-bank (person-level) facts this voice opted out of - drop them from
   // grounding so a cleared default never resurfaces in a generated email.
   const excluded = new Set(opts.excludedFactIds ?? []);
+  const emphasized = new Set(opts.emphasizedFactIds ?? []);
 
-  const contextFacts = await fetchContextAllowedFacts(scope, uid, missionId, query, excluded, cache);
+  const contextFacts = await fetchContextAllowedFacts(scope, uid, missionId, query, excluded, emphasized, cache);
   for (const f of contextFacts) {
     facts.push(f);
   }
@@ -321,42 +326,73 @@ async function fetchContextAllowedFacts(
   missionId: string | null,
   missionGoal: string,
   excluded: Set<string>,
+  emphasized: Set<string>,
   cache?: DraftContextCache
 ): Promise<AllowedFact[]> {
-  const key = `${uid}|${missionId ?? ''}|${missionGoal}|${[...excluded].sort().join(',')}`;
+  const key = `${uid}|${missionId ?? ''}|${missionGoal}|${[...excluded].sort().join(',')}|${[...emphasized].sort().join(',')}`;
   if (cache) {
     let p = cache.contextFacts.get(key);
     if (!p) {
-      p = loadContextAllowedFacts(scope, uid, missionId, missionGoal, excluded, cache);
+      p = loadContextAllowedFacts(scope, uid, missionId, missionGoal, excluded, emphasized, cache);
       cache.contextFacts.set(key, p);
     }
     return p;
   }
-  return loadContextAllowedFacts(scope, uid, missionId, missionGoal, excluded);
+  return loadContextAllowedFacts(scope, uid, missionId, missionGoal, excluded, emphasized);
 }
 
+/**
+ * Build the sender's context-bank facts for one draft.
+ *
+ * Vector search RANKS relevance but must never FILTER: a fact without an
+ * embedding (best-effort embedding can silently fail on insert) used to vanish
+ * the moment any other fact had one, which is why a whole bank collapsed to the
+ * same 1-2 facts on every email. So we always load the full candidate set and
+ * use the ranked ids only to order it; un-ranked facts fall in behind by recency.
+ *
+ * Pinned facts (`emphasized`) are always included and cap-exempt, and carry
+ * `emphasized: true` so the engine can tell the writer to feature them.
+ */
 async function loadContextAllowedFacts(
   scope: Scope,
   uid: string,
   missionId: string | null,
   missionGoal: string,
   excluded: Set<string>,
+  emphasized: Set<string>,
   cache?: DraftContextCache
 ): Promise<AllowedFact[]> {
-  const ranked = await fetchRankedContextFacts(uid, missionId, missionGoal, cache);
-  let contextFacts = ranked;
-  if (contextFacts === null) {
-    const candidates = await scope.collection<ContextFactDoc>('context_facts').find(
+  const candidates = (
+    await scope.collection<ContextFactDoc>('context_facts').find(
       missionId
         ? ({ $or: [{ scope: 'person' }, { scope: 'mission', missionId }] } as Record<string, unknown>)
         : { scope: 'person' }
-    );
-    candidates.sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0));
-    contextFacts = candidates.slice(0, MAX_FACTS);
-  }
-  return contextFacts
-    .filter((f) => !excluded.has(f._id))
-    .map((f) => ({ id: f._id, claim: f.claim, source: 'context_fact' }));
+    )
+  ).filter((f) => !excluded.has(f._id));
+
+  // Relevance order from vector search (null when unavailable). Only used to sort.
+  const ranked = await fetchRankedContextFacts(uid, missionId, missionGoal, cache);
+  const rankOf = new Map<string, number>();
+  ranked?.forEach((r, i) => rankOf.set(r._id, i));
+
+  const recency = (f: ContextFactDoc) => f.createdAt?.getTime() ?? 0;
+  // Ranked facts first (in relevance order); everything else by recency behind them.
+  const ordered = [...candidates].sort((a, b) => {
+    const ra = rankOf.has(a._id) ? rankOf.get(a._id)! : Infinity;
+    const rb = rankOf.has(b._id) ? rankOf.get(b._id)! : Infinity;
+    if (ra !== rb) return ra - rb;
+    return recency(b) - recency(a);
+  });
+
+  const pinned = ordered.filter((f) => emphasized.has(f._id));
+  const rest = ordered.filter((f) => !emphasized.has(f._id)).slice(0, MAX_FACTS);
+
+  return [...pinned, ...rest].map((f) => ({
+    id: f._id,
+    claim: f.claim,
+    source: 'context_fact',
+    ...(emphasized.has(f._id) ? { emphasized: true } : {}),
+  }));
 }
 
 async function queryVectorForMissionGoal(missionGoal: string, cache?: DraftContextCache): Promise<number[]> {

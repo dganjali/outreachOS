@@ -4,7 +4,7 @@ import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Send, Sparkles, Lock, Undo2, Paperclip, Pencil,
   Plane, PlaneTakeoff, Radar, Search, Users, PenLine, Clock, Eye, MessageSquare, Check, ChevronRight, Gauge as GaugeIcon,
-  AlertTriangle, Plus, Trash2, X, Pin,
+  AlertTriangle, Plus, Trash2, X, Pin, Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
@@ -29,6 +29,8 @@ import type {
   Reply,
   CampaignPolicy,
   ContextFact,
+  MissionSteeringMessage,
+  SteerProposal,
 } from '../types';
 
 const MODE_LABEL: Record<string, string> = {
@@ -986,6 +988,12 @@ export function MissionPage() {
           entityLabel={isPeople ? 'People' : 'Companies'}
           hasReview={metrics.review > 0}
           onSaveField={saveAutopilotField}
+          missionId={mission.id}
+          userId={user?.id ?? ''}
+          onApplied={() => {
+            loadMission();
+            loadPolicy();
+          }}
         />
       ) : (
         <>
@@ -1535,6 +1543,9 @@ function AutopilotCockpit({
   entityLabel,
   hasReview,
   onSaveField,
+  missionId,
+  userId,
+  onApplied,
 }: {
   policy: CampaignPolicy;
   metrics: Metrics;
@@ -1544,8 +1555,12 @@ function AutopilotCockpit({
   entityLabel: string;
   hasReview: boolean;
   onSaveField: (patch: Partial<CampaignPolicy>) => void | Promise<void>;
+  missionId: string;
+  userId: string;
+  onApplied: () => void;
 }) {
   const [capDraft, setCapDraft] = useState(String(policy.daily_send_cap));
+  const [editingSchedule, setEditingSchedule] = useState(false);
 
   // Flight phase drives the headline + lamp. Holding (someone must act) > taxiing
   // (enabled, nothing sourced yet) > cruising (running normally).
@@ -1567,7 +1582,8 @@ function AutopilotCockpit({
     : null;
   const nextRunLabel = nextRunMs == null ? 'next cycle' : nextRunMs > Date.now() ? `in ${untilLabel(nextRunMs)}` : 'due now';
   const sw = policy.send_window ?? { start_hour: 9, end_hour: 17 };
-  const sendWindow = `${fmtHour(sw.start_hour)}–${fmtHour(sw.end_hour)}`;
+  const sendWindow =
+    sw.start_hour <= 0 && sw.end_hour >= 24 ? 'any time' : `${fmtHour(sw.start_hour)}-${fmtHour(sw.end_hour)}`;
   const tzCity = (policy.timezone || '').split('/').pop()?.replace(/_/g, ' ') ?? '';
 
   return (
@@ -1619,7 +1635,17 @@ function AutopilotCockpit({
             <span className="plan-v">{formatScheduleStamp(nextScheduledAt)}</span>
           </span>
         )}
+        <button
+          type="button"
+          className="plan-edit"
+          onClick={() => setEditingSchedule((v) => !v)}
+          aria-expanded={editingSchedule}
+        >
+          <Pencil size={12} aria-hidden /> {editingSchedule ? 'Done' : 'Adjust'}
+        </button>
       </div>
+
+      {editingSchedule && <ScheduleEditor policy={policy} onSaveField={onSaveField} />}
 
       <CompanyBoard flights={flights} label={entityLabel} />
 
@@ -1678,10 +1704,282 @@ function AutopilotCockpit({
         )}
       </div>
 
+      {userId && <SteeringChat missionId={missionId} userId={userId} onApplied={onApplied} />}
+
       <p className="cockpit-note">
         Autopilot only sends to verified addresses, during business hours, and sources a few new companies a day.
         Low-confidence drafts wait in the <strong>Activity</strong> tab for you. Switch to <strong>Manual</strong> any time, up top.
       </p>
+    </div>
+  );
+}
+
+// A short list of common IANA zones for the timezone picker; the mission's own
+// value is prepended when it isn't already here.
+const TZ_OPTIONS = [
+  'America/Toronto', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
+  'America/Sao_Paulo', 'Europe/London', 'Europe/Berlin', 'Europe/Paris',
+  'Asia/Kolkata', 'Asia/Singapore', 'Asia/Tokyo', 'Australia/Sydney',
+];
+
+function clampInterval(v: string): number {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 24;
+  return Math.max(1, Math.min(24 * 14, Math.round(n)));
+}
+
+function tzCityLabel(tz: string): string {
+  return tz.split('/').pop()?.replace(/_/g, ' ') ?? tz;
+}
+
+// Inline editor for the cockpit's schedule readout: send window (or "any time"),
+// timezone, and sourcing cadence. Each control saves immediately via onSaveField,
+// so the plan row above updates live.
+function ScheduleEditor({
+  policy,
+  onSaveField,
+}: {
+  policy: CampaignPolicy;
+  onSaveField: (patch: Partial<CampaignPolicy>) => void | Promise<void>;
+}) {
+  const sw = policy.send_window ?? { start_hour: 9, end_hour: 17 };
+  const allDay = sw.start_hour <= 0 && sw.end_hour >= 24;
+  const [intervalDraft, setIntervalDraft] = useState(String(policy.cycle_interval_hours ?? 24));
+  const tzOptions = TZ_OPTIONS.includes(policy.timezone) ? TZ_OPTIONS : [policy.timezone, ...TZ_OPTIONS];
+
+  return (
+    <div className="cockpit-schedule">
+      <label className="sched-anytime">
+        <input
+          type="checkbox"
+          checked={allDay}
+          onChange={(e) => onSaveField({ send_window: e.target.checked ? { start_hour: 0, end_hour: 24 } : { start_hour: 9, end_hour: 17 } })}
+        />
+        <span>Send any time (no office hours)</span>
+      </label>
+
+      {!allDay && (
+        <div className="sched-row">
+          <span className="sched-k">Send between</span>
+          <select
+            className="sched-select"
+            value={sw.start_hour}
+            onChange={(e) => {
+              const start = Number(e.target.value);
+              onSaveField({ send_window: { start_hour: start, end_hour: Math.max(sw.end_hour, start + 1) } });
+            }}
+          >
+            {Array.from({ length: 24 }, (_, h) => (
+              <option key={h} value={h}>{fmtHour(h)}</option>
+            ))}
+          </select>
+          <span className="sched-and">and</span>
+          <select
+            className="sched-select"
+            value={sw.end_hour}
+            onChange={(e) => {
+              const end = Number(e.target.value);
+              onSaveField({ send_window: { start_hour: Math.min(sw.start_hour, end - 1), end_hour: end } });
+            }}
+          >
+            {Array.from({ length: 24 }, (_, i) => i + 1).map((h) => (
+              <option key={h} value={h}>{h === 24 ? 'midnight' : fmtHour(h)}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      <div className="sched-row">
+        <span className="sched-k">Timezone</span>
+        <select className="sched-select" value={policy.timezone} onChange={(e) => onSaveField({ timezone: e.target.value })}>
+          {tzOptions.map((tz) => (
+            <option key={tz} value={tz}>{tzCityLabel(tz)}</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="sched-row">
+        <span className="sched-k">Source a new batch every</span>
+        <input
+          className="sched-num"
+          type="number"
+          min={1}
+          max={24 * 14}
+          value={intervalDraft}
+          onChange={(e) => setIntervalDraft(e.target.value)}
+          onBlur={() => {
+            const hours = clampInterval(intervalDraft);
+            setIntervalDraft(String(hours));
+            onSaveField({ cycle_interval_hours: hours });
+          }}
+        />
+        <span className="sched-unit">hours</span>
+      </div>
+    </div>
+  );
+}
+
+// Steering chat: tell Autopilot what to change in plain English ("go for bigger
+// companies", "emphasize that I shipped X"). The steer agent proposes a concrete
+// set of setting changes; the user reviews and applies. History persists per
+// mission so an un-applied proposal survives a reload.
+function SteeringChat({ missionId, userId, onApplied }: { missionId: string; userId: string; onApplied: () => void }) {
+  const [messages, setMessages] = useState<MissionSteeringMessage[]>([]);
+  const [input, setInput] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [applyingId, setApplyingId] = useState<string | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  const reload = useCallback(async () => {
+    const { data } = await supabase
+      .from('steering_messages')
+      .select('*')
+      .eq('mission_id', missionId)
+      .order('created_at', { ascending: true });
+    setMessages((data as MissionSteeringMessage[] | null) ?? []);
+  }, [missionId]);
+
+  useEffect(() => {
+    reload().catch(() => {/* best-effort; chat is non-critical */});
+  }, [reload]);
+
+  useEffect(() => {
+    listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
+  }, [messages]);
+
+  async function persist(row: {
+    role: 'user' | 'assistant';
+    text: string;
+    proposal?: SteerProposal | null;
+    status?: 'proposed' | 'applied' | 'dismissed' | null;
+  }): Promise<MissionSteeringMessage | null> {
+    const { data } = await supabase
+      .from('steering_messages')
+      .insert({ mission_id: missionId, ...row })
+      .select('*')
+      .single();
+    return (data as MissionSteeringMessage | null) ?? null;
+  }
+
+  async function send() {
+    const instruction = input.trim();
+    if (!instruction || busy) return;
+    setBusy(true);
+    setInput('');
+    try {
+      const userMsg = await persist({ role: 'user', text: instruction });
+      if (userMsg) setMessages((m) => [...m, userMsg]);
+
+      const { summary, proposal } = await agents.steer({ mission_id: missionId, instruction });
+      const hasChanges = !proposal.clarification && (proposal.changes?.length ?? 0) > 0;
+      const text = proposal.clarification?.trim() || summary || 'No changes proposed.';
+      const asstMsg = await persist({
+        role: 'assistant',
+        text,
+        proposal: hasChanges ? proposal : null,
+        status: hasChanges ? 'proposed' : null,
+      });
+      if (asstMsg) setMessages((m) => [...m, asstMsg]);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not reach the steering agent');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function setStatus(id: string, status: 'applied' | 'dismissed') {
+    await supabase.from('steering_messages').update({ status }).eq('id', id);
+    setMessages((m) => m.map((msg) => (msg.id === id ? { ...msg, status } : msg)));
+  }
+
+  async function applyProposal(msg: MissionSteeringMessage) {
+    if (!msg.proposal) return;
+    setApplyingId(msg.id);
+    try {
+      await agents.steerApply({ mission_id: missionId, proposal: msg.proposal });
+      await setStatus(msg.id, 'applied');
+      onApplied();
+      toast.success('Applied. Autopilot picks it up on the next cycle.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not apply those changes');
+    } finally {
+      setApplyingId(null);
+    }
+  }
+
+  return (
+    <div className="steer">
+      <div className="steer-head">
+        <Sparkles size={14} aria-hidden />
+        <span>Steer Autopilot</span>
+      </div>
+      <p className="steer-hint">
+        Tell it what to change in plain English. It proposes the exact settings; you review and apply.
+      </p>
+
+      {messages.length > 0 && (
+        <div className="steer-log" ref={listRef}>
+          {messages.map((msg) => (
+            <div key={msg.id} className={`steer-msg steer-${msg.role}`}>
+              <div className="steer-bubble">{msg.text}</div>
+              {msg.role === 'assistant' && msg.proposal && (msg.proposal.changes?.length ?? 0) > 0 && (
+                <div className="steer-proposal">
+                  <ul className="steer-changes">
+                    {msg.proposal.changes.map((c, i) => (
+                      <li key={i}>
+                        <span className="steer-change-label">{c.label}</span>
+                        <span className="steer-change-val">
+                          {c.from} <span aria-hidden>{'->'}</span> <strong>{c.to}</strong>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  {msg.status === 'applied' ? (
+                    <span className="steer-applied">
+                      <Check size={12} aria-hidden /> Applied
+                    </span>
+                  ) : msg.status === 'dismissed' ? (
+                    <span className="steer-dismissed">Dismissed</span>
+                  ) : (
+                    <div className="steer-actions">
+                      <button
+                        type="button"
+                        className="btn-send steer-apply"
+                        onClick={() => applyProposal(msg)}
+                        disabled={applyingId === msg.id}
+                      >
+                        {applyingId === msg.id ? 'Applying…' : 'Apply'}
+                      </button>
+                      <button type="button" className="link-button" onClick={() => setStatus(msg.id, 'dismissed')}>
+                        Dismiss
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="steer-input-row">
+        <input
+          className="pw-input"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="e.g. go for bigger companies, or emphasize that I shipped X"
+          disabled={busy}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              send();
+            }
+          }}
+        />
+        <button type="button" className="pw-btn-add" onClick={send} disabled={busy || !input.trim()}>
+          {busy ? <Loader2 size={14} className="pw-spin" /> : <Send size={14} />} Send
+        </button>
+      </div>
     </div>
   );
 }
@@ -3393,6 +3691,7 @@ function MissionBriefCard({
   const [audience, setAudience] = useState(mission.target_description);
   const [geo, setGeo] = useState(mission.geo ?? '');
   const [notes, setNotes] = useState(mission.notes ?? '');
+  const [directive, setDirective] = useState(mission.draft_directive ?? '');
   const [saving, setSaving] = useState(false);
 
   // Re-sync from the source when it changes and we're not mid-edit.
@@ -3402,6 +3701,7 @@ function MissionBriefCard({
       setAudience(mission.target_description);
       setGeo(mission.geo ?? '');
       setNotes(mission.notes ?? '');
+      setDirective(mission.draft_directive ?? '');
     }
   }, [mission, editing]);
 
@@ -3419,6 +3719,7 @@ function MissionBriefCard({
           target_description: audience.trim(),
           geo: geo.trim() || null,
           notes: notes.trim() || null,
+          draft_directive: directive.trim() || null,
         })
         .eq('id', mission.id);
       if (error) throw new Error(error.message);
@@ -3452,6 +3753,14 @@ function MissionBriefCard({
             value={geo}
             onChange={(e) => setGeo(e.target.value)}
             placeholder="e.g. Toronto, Canada — scopes contact discovery"
+          />
+          <label className="email-field-label">Standing instructions for drafting (optional)</label>
+          <textarea
+            className="reply-body-input"
+            rows={3}
+            value={directive}
+            onChange={(e) => setDirective(e.target.value)}
+            placeholder="Applied to every draft in this mission. For example: “always mention I built and sold a startup”, “never lead on price”, “keep a warm, peer-to-peer tone”."
           />
           <label className="email-field-label">Notes (optional)</label>
           <textarea
@@ -3494,6 +3803,12 @@ function MissionBriefCard({
             <span>{mission.geo}</span>
           </div>
         )}
+        {mission.draft_directive && (
+          <div className="mission-overview-row">
+            <strong>Drafting</strong>
+            <span className="mission-overview-notes">{mission.draft_directive}</span>
+          </div>
+        )}
         {mission.notes && (
           <div className="mission-overview-row">
             <strong>Notes</strong>
@@ -3511,21 +3826,52 @@ function MissionBriefCard({
 // about you lives in the Memory bank (ME → Memory bank), not here.
 function MissionMemoryCard({ mission, userId }: { mission: Mission; userId: string }) {
   const [facts, setFacts] = useState<ContextFact[]>([]);
+  // Memory-bank (person-scope) facts about the sender - shown here read-only so
+  // the user can pin which ones THIS mission should feature.
+  const [personFacts, setPersonFacts] = useState<ContextFact[]>([]);
   const [newFact, setNewFact] = useState('');
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [tuning, setTuning] = useState(false);
+  // Pinned fact ids for this mission (persisted on mission.emphasized_fact_ids).
+  // Local state so a toggle is instant; synced from the prop when it changes.
+  const [emphasized, setEmphasized] = useState<Set<string>>(new Set(mission.emphasized_fact_ids ?? []));
   const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setEmphasized(new Set(mission.emphasized_fact_ids ?? []));
+  }, [mission.emphasized_fact_ids]);
 
   const reload = useCallback(async () => {
     const all = await listContextFacts(userId, mission.id);
     setFacts(all.filter((f) => f.scope === 'mission' && f.mission_id === mission.id));
+    setPersonFacts(all.filter((f) => f.scope === 'person'));
   }, [userId, mission.id]);
 
   useEffect(() => {
     reload().catch((e) => setErr(e instanceof Error ? e.message : 'Could not load mission memory'));
   }, [reload]);
+
+  const togglePin = useCallback(
+    async (factId: string) => {
+      const next = new Set(emphasized);
+      if (next.has(factId)) next.delete(factId);
+      else next.add(factId);
+      setEmphasized(next); // optimistic
+      try {
+        const { error } = await supabase
+          .from('missions')
+          .update({ emphasized_fact_ids: Array.from(next) })
+          .eq('id', mission.id);
+        if (error) throw new Error(error.message);
+      } catch (e) {
+        setEmphasized(new Set(emphasized)); // revert on failure
+        setErr(e instanceof Error ? e.message : 'Could not update pinned facts');
+      }
+    },
+    [emphasized, mission.id]
+  );
 
   async function addFact() {
     const claim = newFact.trim();
@@ -3647,7 +3993,16 @@ function MissionMemoryCard({ mission, userId }: { mission: Mission; userId: stri
       {facts.length > 0 ? (
         <ul className="pw-ov-list mission-memory-list">
           {facts.map((f) => (
-            <li key={f.id} className="mission-memory-fact">
+            <li key={f.id} className={`mission-memory-fact${emphasized.has(f.id) ? ' is-pinned' : ''}`}>
+              <button
+                type="button"
+                className={`mission-memory-fact-pin${emphasized.has(f.id) ? ' is-pinned' : ''}`}
+                onClick={() => togglePin(f.id)}
+                aria-pressed={emphasized.has(f.id)}
+                title={emphasized.has(f.id) ? 'Pinned - always featured in drafts. Click to unpin.' : 'Pin to always feature this in drafts'}
+              >
+                <Pin size={13} />
+              </button>
               <span>{f.claim}</span>
               <button type="button" className="mission-memory-fact-del" onClick={() => removeFact(f.id)} aria-label="Remove fact">
                 <Trash2 size={13} />
@@ -3657,6 +4012,32 @@ function MissionMemoryCard({ mission, userId }: { mission: Mission; userId: stri
         </ul>
       ) : (
         <p className="pw-empty">No mission facts yet - add what makes this campaign concrete.</p>
+      )}
+
+      {personFacts.length > 0 && (
+        <div className="mission-memory-bank">
+          <h4 className="mission-memory-subtitle">Pin facts about you</h4>
+          <p className="mission-memory-hint">
+            From your Memory bank. Pin the ones this campaign should feature more often - pinned facts are always worked
+            into every draft for this mission.
+          </p>
+          <ul className="pw-ov-list mission-memory-list">
+            {personFacts.map((f) => (
+              <li key={f.id} className={`mission-memory-fact${emphasized.has(f.id) ? ' is-pinned' : ''}`}>
+                <button
+                  type="button"
+                  className={`mission-memory-fact-pin${emphasized.has(f.id) ? ' is-pinned' : ''}`}
+                  onClick={() => togglePin(f.id)}
+                  aria-pressed={emphasized.has(f.id)}
+                  title={emphasized.has(f.id) ? 'Pinned - always featured in drafts. Click to unpin.' : 'Pin to always feature this in drafts'}
+                >
+                  <Pin size={13} />
+                </button>
+                <span>{f.claim}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </section>
   );

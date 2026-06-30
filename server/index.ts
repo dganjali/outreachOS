@@ -20,6 +20,7 @@ import agentEnrichProfile from '../api/agents/enrich-profile';
 import agentCoach from '../api/agents/coach';
 import agentParseResume from '../api/agents/parse-resume';
 import agentExtractContext from '../api/agents/extract-context';
+import agentSteer, { apply as agentSteerApply } from '../api/agents/steer';
 import agentPipeline, { cancel as agentPipelineCancel } from '../api/agents/pipeline';
 
 import gmailSend from '../api/gmail/send';
@@ -142,6 +143,8 @@ app.post('/api/agents/enrich-profile', wrap(agentEnrichProfile));
 app.post('/api/agents/coach', wrap(agentCoach));
 app.post('/api/agents/parse-resume', wrap(agentParseResume));
 app.post('/api/agents/extract-context', wrap(agentExtractContext));
+app.post('/api/agents/steer/apply', wrap(agentSteerApply));
+app.post('/api/agents/steer', wrap(agentSteer));
 
 // server-side durable pipeline (replaces browser orchestration)
 app.post('/api/agents/pipeline/cancel', wrap(agentPipelineCancel));

@@ -9,13 +9,16 @@ import {
   hasBlocker,
   isWeakDraft,
   shouldRevise,
+  buildDraftUserPrompt,
   QUALITY_MIN_VOICE,
   templateStrictnessDirective,
   ensureSignOff,
   type AllowedFact,
+  type AssembledContext,
   type DraftOutput,
   type Violation,
 } from './engine';
+import { emptyStyleProfile } from '../../shared/schemas';
 
 const FACTS: AllowedFact[] = [
   { id: 'f1', claim: 'Ran a 1,400-person developer conference', source: 'context_fact' },
@@ -199,4 +202,59 @@ test('appends a bare closing when the sender name is unknown', () => {
   const out = ensureSignOff('Worth a chat?', null);
   assert.match(out, /Best,$/);
   assert.ok(!/\[your name\]/i.test(out));
+});
+
+// ---------------------------------------------------------------------------
+// Prompt assembly - pinned ("emphasized") sender facts get their own FEATURE
+// block, the mission's standing directive is injected, and unpinned proof stays
+// in the background YOUR PROOF block. These are the levers behind per-mission
+// drafting controls.
+// ---------------------------------------------------------------------------
+
+function ctx(over: Partial<AssembledContext> = {}): AssembledContext {
+  return {
+    mode: 'sales',
+    recipient: { name: 'Dana Lee', role: 'VP Eng', company: 'Acme' },
+    sender: { name: 'Sam Sender', role: 'Founder', organization: 'OutreachOS' },
+    missionGoal: 'Sell the offer',
+    audience: 'Developer-tools companies',
+    allowedFacts: [],
+    exemplars: [],
+    styleProfile: emptyStyleProfile(),
+    ...over,
+  };
+}
+
+test('a pinned sender fact renders in a FEATURE block, unpinned in YOUR PROOF', () => {
+  const prompt = buildDraftUserPrompt(
+    ctx({
+      allowedFacts: [
+        { id: 'p1', claim: 'Built and sold a startup', source: 'context_fact', emphasized: true },
+        { id: 'p2', claim: 'Background note', source: 'context_fact' },
+      ],
+    })
+  );
+  assert.match(prompt, /FEATURE THESE ABOUT THE SENDER/);
+  // The pinned fact appears under FEATURE, ahead of the YOUR PROOF section.
+  const featureIdx = prompt.indexOf('FEATURE THESE ABOUT THE SENDER');
+  const proofIdx = prompt.indexOf('YOUR PROOF');
+  assert.ok(featureIdx >= 0 && proofIdx > featureIdx);
+  assert.ok(prompt.indexOf('Built and sold a startup') < proofIdx, 'pinned fact is in the FEATURE block');
+  assert.ok(prompt.indexOf('Background note') > proofIdx, 'unpinned fact is in YOUR PROOF');
+});
+
+test('no FEATURE block when nothing is pinned', () => {
+  const prompt = buildDraftUserPrompt(
+    ctx({ allowedFacts: [{ id: 'p2', claim: 'Background note', source: 'context_fact' }] })
+  );
+  assert.ok(!/FEATURE THESE ABOUT THE SENDER/.test(prompt));
+});
+
+test('the mission standing directive is injected; absent when unset', () => {
+  const withDirective = buildDraftUserPrompt(ctx({ directive: 'Always mention I built a startup' }));
+  assert.match(withDirective, /STANDING INSTRUCTIONS/);
+  assert.match(withDirective, /Always mention I built a startup/);
+
+  const without = buildDraftUserPrompt(ctx({ directive: null }));
+  assert.ok(!/STANDING INSTRUCTIONS/.test(without));
 });

@@ -264,6 +264,14 @@ export interface MissionDoc extends BaseDoc {
   // email sent for this mission - a deck, one-pager, or résumé the user wants on
   // all outreach. null/absent = no attachment.
   attachAssetId?: string | null;
+  // Free-text standing instructions injected into EVERY draft for this mission
+  // ("always mention I built X", "never lead on price"). Distinct from `notes`,
+  // which is private and never reaches the writer. null/absent = none.
+  draftDirective?: string | null;
+  // Context-fact ids (person- or mission-scope) the user pinned to always feature
+  // in this mission's drafts. They bypass the relevance cap in assemble.ts and the
+  // writer is told to work one in. Mirrors PersonaDoc.excludedFactIds.
+  emphasizedFactIds?: string[];
 }
 
 export interface TargetDoc extends BaseDoc {
@@ -487,7 +495,8 @@ export interface AgentRunDoc extends BaseDoc {
     | 'onboard_questions'
     | 'refine'
     | 'extract_style'
-    | 'extract_context';
+    | 'extract_context'
+    | 'steer';
   status: 'running' | 'completed' | 'failed';
   input: Record<string, unknown> | null;
   output: Record<string, unknown> | null;
@@ -625,6 +634,58 @@ export interface CampaignPolicyDoc extends BaseDoc {
 }
 
 // ---------------------------------------------------------------------------
+// Autopilot steering chat. The steer agent (api/agents/steer.ts) turns one NL
+// instruction ("go for bigger companies", "emphasize this fact") into a
+// structured proposal over the mission's targeting/drafting/sending settings.
+// The user reviews and confirms before anything is applied.
+// ---------------------------------------------------------------------------
+
+// One change the proposal would make, rendered as a row in the review card.
+export interface SteerChange {
+  label: string; // human-readable, e.g. "Daily send cap"
+  from: string; // current value, stringified for display ("10")
+  to: string; // proposed value ("25")
+}
+
+// The structured patch the steer agent proposes. Every field is optional; only
+// what the instruction implies is set. `clarification` is the ambiguous/unsupported
+// path - when present the agent is asking a question instead of proposing changes.
+export interface SteerProposal {
+  mission?: {
+    goal?: string;
+    targetDescription?: string;
+    geo?: string | null;
+    sectors?: string[]; // replaces sectorSuggestions (all marked recommended)
+    draftDirective?: string; // replace the standing directive
+    draftDirectiveAppend?: string; // or append a line to it
+    clearIcp?: boolean; // force ICP/sector regen on the next sourcing cycle
+  };
+  policy?: {
+    dailySendCap?: number;
+    minConfidence?: number;
+    cycleIntervalHours?: number;
+    targetsPerCycle?: number;
+    autoSend?: boolean;
+    sendWindow?: { startHour: number; endHour: number };
+    timezone?: string;
+  };
+  emphasizeFactIds?: string[]; // pin these context-fact ids on the mission
+  deemphasizeFactIds?: string[]; // unpin these
+  changes: SteerChange[]; // review-card rows describing the above
+  clarification?: string | null; // set instead of a patch when the ask is unclear
+}
+
+// A single turn in a mission's steering chat. Assistant turns carry the proposal
+// and its lifecycle so an un-applied proposal survives a reload.
+export interface MissionSteeringDoc extends BaseDoc {
+  missionId: string;
+  role: 'user' | 'assistant';
+  text: string; // the user's instruction, or the assistant's summary/clarification
+  proposal?: SteerProposal | null;
+  status?: 'proposed' | 'applied' | 'dismissed' | null; // assistant turns only
+}
+
+// ---------------------------------------------------------------------------
 // Index spec - read by scripts/init-mongo.ts. Plain JS so the script doesn't
 // need to import any types.
 // ---------------------------------------------------------------------------
@@ -717,6 +778,10 @@ export const INDEX_SPEC: Record<string, Array<{ keys: Record<string, 1 | -1>; op
   ],
   style_exemplars: [
     { keys: { userId: 1, personaId: 1, createdAt: -1 } },
+  ],
+  steering_messages: [
+    // The chat panel loads one mission's turns in order.
+    { keys: { userId: 1, missionId: 1, createdAt: 1 } },
   ],
 };
 

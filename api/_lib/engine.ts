@@ -45,6 +45,9 @@ export interface AllowedFact {
   signal?: string;
   /** Evidence-only: freeform recency ("2 weeks ago") so freshness is visible. */
   recency?: string;
+  /** Sender-fact only: the user pinned this fact on the mission, so the writer
+   *  must feature it (assemble.ts always includes pinned facts, bypassing caps). */
+  emphasized?: boolean;
 }
 
 export interface DraftClaim {
@@ -95,6 +98,9 @@ export interface AssembledContext {
   missionGoal: string;
   audience: string;
   whyNow?: string;
+  /** Free-text standing instructions the user set on the mission - honored on
+   *  every draft. null/absent = none. NOT a citable fact. */
+  directive?: string | null;
   /** The grounding universe - ONLY these may be asserted. */
   allowedFacts: AllowedFact[];
   /** The persona's gold emails - few-shot voice anchors. */
@@ -260,10 +266,15 @@ export function buildDraftUserPrompt(ctx: AssembledContext): string {
   // undifferentiated list is a big reason drafts read same-y and unfocused.
   const recipientFacts = ctx.allowedFacts.filter((f) => f.source === 'evidence');
   const senderFacts = ctx.allowedFacts.filter((f) => f.source !== 'evidence');
+  // Pinned ("emphasized") sender facts the user wants featured vs the rest, which
+  // stay background credibility. Splitting them is what makes a pin actually bite.
+  const featuredFacts = senderFacts.filter((f) => f.emphasized);
+  const otherFacts = senderFacts.filter((f) => !f.emphasized);
   const signalsBlock = recipientFacts.length
     ? recipientFacts.map(renderFact).join('\n')
     : '  (none found - lead on why the offer is specifically relevant to their role; do NOT invent a signal)';
-  const proofBlock = senderFacts.length ? senderFacts.map(renderFact).join('\n') : '  (none)';
+  const proofBlock = otherFacts.length ? otherFacts.map(renderFact).join('\n') : '  (none)';
+  const featuredBlock = featuredFacts.length ? featuredFacts.map(renderFact).join('\n') : '';
   const exemplars = ctx.exemplars.length
     ? ctx.exemplars
         .map((e, i) => `--- Exemplar ${i + 1} ---\n${e.subject ? `Subject: ${e.subject}\n` : ''}${e.body}`)
@@ -289,6 +300,8 @@ export function buildDraftUserPrompt(ctx: AssembledContext): string {
       ? `\nBackground (for relevance + tone only, NOT a citable fact):${recipHeadline ? `\n- LinkedIn headline: ${recipHeadline}` : ''}${recipLocation ? `\n- Location: ${recipLocation}` : ''}`
       : '';
 
+  const directive = ctx.directive?.trim();
+
   return [
     `MODE: ${ctx.mode}`,
     '',
@@ -297,12 +310,21 @@ export function buildDraftUserPrompt(ctx: AssembledContext): string {
     senderLine,
     '',
     `MISSION\nGoal / offer: ${ctx.missionGoal}\nAudience: ${ctx.audience}${ctx.whyNow ? `\nWhy now: ${ctx.whyNow}` : ''}`,
+    ...(directive
+      ? ['', `STANDING INSTRUCTIONS (the sender set these for every email in this mission - always honor them):\n${directive}`]
+      : []),
     '',
     'GROUNDING CONTRACT: cite the id of every factual claim in "claims". You may assert ONLY the facts listed below - nothing else.',
     '',
     `SIGNALS ABOUT ${ctx.recipient.company || 'THE RECIPIENT'} (their world - LEAD with the single strongest, freshest one; ignore the rest):\n${signalsBlock}`,
+    ...(featuredBlock
+      ? [
+          '',
+          `FEATURE THESE ABOUT THE SENDER (the sender pinned these - work at least one in naturally and prominently; if several drafts go out, vary which one you lead with so emails don't read identically):\n${featuredBlock}`,
+        ]
+      : []),
     '',
-    `YOUR PROOF (the sender's facts - credibility only, used sparingly, never the opener):\n${proofBlock}`,
+    `YOUR PROOF (the sender's other facts - credibility only, used sparingly, never the opener; rotate which you draw on across emails):\n${proofBlock}`,
     '',
     `SENDER STYLE PROFILE\n${styleProfileBlock(ctx.styleProfile)}`,
     '',

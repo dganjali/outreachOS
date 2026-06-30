@@ -295,3 +295,83 @@ test('evidence ranking caps to the strongest five and keeps the best signal firs
   assert.equal(evidence[0].signal, 'funding');
   assert.equal(evidence[0].recency, '2 weeks ago');
 });
+
+// ---------------------------------------------------------------------------
+// Emphasis (pinned facts) - the per-mission "feature these about me" lever.
+// Pinned facts are always included (cap-exempt), tagged emphasized, and ordered
+// first. Vector search is unavailable in tests, so this also exercises the
+// no-embedding contract: every candidate fact surfaces via the find() path
+// rather than being silently dropped because it lacks an embedding.
+// ---------------------------------------------------------------------------
+
+test('a pinned fact is always included, cap-exempt, and tagged emphasized', async () => {
+  // 13 person facts (> MAX_FACTS of 12), newest first by createdAt. The oldest
+  // (mem12) would normally fall off the cap; pinning it forces it in.
+  const facts = Array.from({ length: 13 }, (_, i) => ({
+    _id: `mem${i}`,
+    userId: 'u1',
+    scope: 'person',
+    missionId: null,
+    personaId: null,
+    type: 'proof',
+    claim: `Fact number ${i}`,
+    createdAt: new Date(2026, 0, 13 - i), // mem0 newest ... mem12 oldest
+    updatedAt: now(),
+  }));
+  const scope = factScope(facts);
+
+  const baseline = await assembleAllowedFacts(scope as never, 'u1', null, 'targetX', 'Sell the offer');
+  assert.equal(baseline.length, 12, 'unpinned bank is capped at MAX_FACTS');
+  assert.ok(!baseline.some((f) => f.id === 'mem12'), 'oldest fact falls off the cap');
+
+  const pinned = await assembleAllowedFacts(scope as never, 'u1', null, 'targetX', 'Sell the offer', {
+    emphasizedFactIds: ['mem12'],
+  });
+  const pin = pinned.find((f) => f.id === 'mem12');
+  assert.ok(pin, 'pinned fact is included despite being over the cap');
+  assert.equal(pin?.emphasized, true, 'pinned fact is tagged emphasized');
+  assert.equal(pinned[0].id, 'mem12', 'pinned facts are ordered first');
+  assert.equal(pinned.length, 13, 'pinned fact is cap-exempt (12 others + 1 pinned)');
+});
+
+test('an excluded fact stays out even if also pinned-eligible', async () => {
+  const facts = [
+    { _id: 'keep', userId: 'u1', scope: 'person', missionId: null, type: 'proof', claim: 'Keep me', createdAt: now(), updatedAt: now() },
+    { _id: 'drop', userId: 'u1', scope: 'person', missionId: null, type: 'proof', claim: 'Drop me', createdAt: now(), updatedAt: now() },
+  ];
+  const out = await assembleAllowedFacts(factScope(facts) as never, 'u1', null, 'targetX', 'Sell the offer', {
+    excludedFactIds: ['drop'],
+  });
+  const ids = out.map((f) => f.id);
+  assert.ok(ids.includes('keep'));
+  assert.ok(!ids.includes('drop'));
+});
+
+test('the mission draft directive flows into the assembled context', async () => {
+  const { scope } = fakeScope();
+  const mission = {
+    _id: 'mission1',
+    mode: 'sales',
+    goal: 'Sell the offer',
+    targetDescription: 'Developer tools companies',
+    personaId: 'persona1',
+    draftDirective: 'Always mention I built a startup',
+    emphasizedFactIds: ['fact1'],
+  } as unknown as MissionDoc;
+  const persona = { _id: 'persona1', styleProfile: emptyStyleProfile(), styleProfileVersion: 1, excludedFactIds: [] } as unknown as PersonaDoc;
+
+  const bundle = await assembleDraftContext(
+    scope as never,
+    'u1',
+    {
+      contact: { _id: 'c1', name: 'A One', role: 'Partnerships', targetId: 'target1' } as ContactDoc,
+      target: { _id: 'target1', companyName: 'Target One', whyNow: null } as TargetDoc,
+      mission,
+      persona,
+    }
+  );
+
+  assert.equal(bundle.ctx.directive, 'Always mention I built a startup');
+  const pinned = bundle.ctx.allowedFacts.find((f) => f.id === 'fact1');
+  assert.equal(pinned?.emphasized, true, 'mission-pinned fact is tagged emphasized in ctx');
+});
