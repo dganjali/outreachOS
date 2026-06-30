@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ComponentType, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowRight,
@@ -121,6 +121,34 @@ function countDistinctByMission(
   return map;
 }
 
+// Last-known dashboard payload, cached per user so a return visit paints real
+// numbers immediately instead of flashing "0 missions" + skeletons for the 2-3s
+// the fetch takes. Fresh data still loads in the background and replaces it.
+const DASH_CACHE_VERSION = 'v1';
+function dashCacheKey(uid: string) {
+  return `dash:${DASH_CACHE_VERSION}:${uid}`;
+}
+interface DashCache {
+  missions: MissionWithStats[];
+  stats: Stats;
+  runs: AgentRun[];
+}
+function readDashCache(uid: string): DashCache | null {
+  try {
+    const raw = localStorage.getItem(dashCacheKey(uid));
+    return raw ? (JSON.parse(raw) as DashCache) : null;
+  } catch {
+    return null;
+  }
+}
+function writeDashCache(uid: string, value: DashCache) {
+  try {
+    localStorage.setItem(dashCacheKey(uid), JSON.stringify(value));
+  } catch {
+    /* quota / private mode - cache is a best-effort nicety, never fatal */
+  }
+}
+
 function profileCompleteness(profile: Record<string, unknown> | null | undefined): number {
   if (!profile) return 0;
   const filled = PROFILE_FIELDS.filter((f) => {
@@ -215,6 +243,23 @@ export function Dashboard() {
   const [reloadKey, setReloadKey] = useState(0);
   const [barsIn, setBarsIn] = useState(false);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Whether this render was seeded from cache (so the load effect can refresh
+  // silently in the background instead of flipping back to skeletons).
+  const hadCacheRef = useRef(false);
+
+  // Hydrate from the per-user cache before paint. Runs as a layout effect so the
+  // first frame already shows real numbers - no "0 missions" flash on the way in.
+  useLayoutEffect(() => {
+    hadCacheRef.current = false;
+    if (!user?.id) return;
+    const cached = readDashCache(user.id);
+    if (!cached) return;
+    setMissions(cached.missions);
+    setStats(cached.stats);
+    setRuns(cached.runs);
+    hadCacheRef.current = true;
+    setLoading(false);
+  }, [user?.id]);
 
   const refetchRuns = useCallback(async () => {
     if (!user?.id) return;
@@ -230,7 +275,9 @@ export function Dashboard() {
   useEffect(() => {
     if (!user?.id) return;
     let cancelled = false;
-    setLoading(true);
+    // With cached data already on screen, refresh quietly - flipping loading on
+    // would throw away the seeded numbers and re-show skeletons.
+    setLoading(!hadCacheRef.current);
     setError(null);
 
     async function load() {
@@ -285,16 +332,20 @@ export function Dashboard() {
 
       if (cancelled) return;
 
-      setMissions(missionsWithStats);
-      setStats({
+      const freshStats: Stats = {
         missions: missionsList.length,
         drafts: draftCount ?? 0,
         contacted: contactedCount ?? 0,
         repliesToHandle: repliesToHandle ?? 0,
         runsToday: runsToday24h ?? 0,
-      });
-      setRuns((runsData ?? []) as AgentRun[]);
+      };
+      const freshRuns = (runsData ?? []) as AgentRun[];
+      setMissions(missionsWithStats);
+      setStats(freshStats);
+      setRuns(freshRuns);
       setLoading(false);
+      hadCacheRef.current = true; // subsequent reloads (retry/refocus) stay silent
+      writeDashCache(user!.id, { missions: missionsWithStats, stats: freshStats, runs: freshRuns });
 
       // First-run only needs Gmail status (for the setup nudge).
       if (missionsList.length === 0) {
@@ -591,6 +642,9 @@ export function Dashboard() {
             {firstName ? `${greet.label}, ${firstName}` : greet.label}
           </h1>
         </div>
+        {loading ? (
+          <Skeleton className="h-4 w-56" />
+        ) : (
         <p className="text-sm text-muted-foreground">
           <span className="font-medium text-foreground/90">{stats.missions}</span>{' '}
           {stats.missions === 1 ? 'mission' : 'missions'}
@@ -609,6 +663,7 @@ export function Dashboard() {
           )}
           .
         </p>
+        )}
       </header>
 
       {error && (

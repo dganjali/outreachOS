@@ -91,6 +91,8 @@ export function MissionPage() {
   // Bumped after a bulk send so SequenceCards remount and re-read their sent state.
   const [refreshKey, setRefreshKey] = useState(0);
   const [sendingAll, setSendingAll] = useState(false);
+  // Whether the bulk subject-line editor panel is open.
+  const [subjectsOpen, setSubjectsOpen] = useState(false);
   // Bulk contact selection (checkboxes + floating action bar).
   const [selectedContactIds, setSelectedContactIds] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -105,6 +107,15 @@ export function MissionPage() {
   // when this policy is enabled, and as the manual action console otherwise.
   const paid = isPaidPlan(profile?.plan, profile?.plan_status);
   const [policy, setPolicy] = useState<CampaignPolicy | null>(null);
+  // The headline stat strip (targets / contacts / sent) is derived from a chain
+  // of dependent fetches: targets → contacts → sequences. Until that chain
+  // resolves, every count reads 0 - which on a direct-nav arrival looks like the
+  // mission is empty (and contradicts the counts shown in the missions list).
+  // These flags gate the topbar so it shows a loading placeholder instead of a
+  // false "0 contacts · 0 sent".
+  const [targetsLoaded, setTargetsLoaded] = useState(false);
+  const [contactsLoaded, setContactsLoaded] = useState(false);
+  const [sequencesLoaded, setSequencesLoaded] = useState(false);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -142,6 +153,7 @@ export function MissionPage() {
       .order('score', { ascending: false, nullsFirst: false })
       .order('created_at', { ascending: false });
     setTargets((data ?? []) as Target[]);
+    setTargetsLoaded(true);
   }, [id]);
 
   const loadContactsForTarget = useCallback(async (targetId: string) => {
@@ -199,6 +211,7 @@ export function MissionPage() {
     if (ids.length === 0) {
       setContactsByTarget({});
       setPacksByTarget({});
+      setContactsLoaded(true);
       return;
     }
     let cancelled = false;
@@ -217,6 +230,7 @@ export function MissionPage() {
         if (!packs[p.target_id]) packs[p.target_id] = p; // ordered desc → first is newest
       }
       setPacksByTarget(packs);
+      setContactsLoaded(true);
     })();
     return () => {
       cancelled = true;
@@ -236,6 +250,7 @@ export function MissionPage() {
     const ids = contactIdsKey ? contactIdsKey.split(',') : [];
     if (ids.length === 0) {
       setSequencesByContact({});
+      setSequencesLoaded(true);
       return;
     }
     let cancelled = false;
@@ -252,6 +267,7 @@ export function MissionPage() {
         if (!map[s.contact_id]) map[s.contact_id] = s; // ordered desc → first is newest
       }
       setSequencesByContact(map);
+      setSequencesLoaded(true);
 
       // Which of these sequences have already had their initial email sent.
       const seqIds = Object.values(map).filter(Boolean).map((s) => (s as EmailSequence).id);
@@ -646,6 +662,9 @@ export function MissionPage() {
     replies: repliesCount,
     review: reviewItems.length,
   };
+  // True once the targets → contacts → sequences fetch chain has resolved, so the
+  // headline stats reflect real data rather than mid-load zeros.
+  const statsReady = targetsLoaded && contactsLoaded && sequencesLoaded;
 
   // One "flight" per company for the cockpit Airspace view: how far each has
   // travelled down the pipeline (sourced → researched → contacted → drafted →
@@ -732,11 +751,31 @@ export function MissionPage() {
     })
     .sort((a, b) => (a.scheduledSendAt ?? '').localeCompare(b.scheduledSendAt ?? ''));
 
+  // Every initial-email draft, flattened for the bulk subject editor. The subject
+  // line is half the battle on a cold email, so this surface lets the user tune
+  // them all at once without opening each draft. Already-sent ones are read-only.
+  const subjectRows: SubjectRow[] = visibleTargets.flatMap((t) =>
+    (contactsByTarget[t.id] ?? []).flatMap((c) => {
+      const seq = sequencesByContact[c.id];
+      if (!seq) return [];
+      return [
+        {
+          sequenceId: seq.id,
+          subject: seq.subject,
+          recipient: c.name ?? null,
+          company: isPeople ? (c.name ?? t.company_name) : t.company_name,
+          sent: initialSentSeqIds.has(seq.id),
+        },
+      ];
+    })
+  );
+
   return (
     <div className="mx">
       <MissionTopbar
         mission={mission}
         metrics={metrics}
+        statsReady={statsReady}
         paid={paid}
         autopilotOn={autopilotOn}
         onToggleAutopilot={toggleAutopilot}
@@ -798,6 +837,16 @@ export function MissionPage() {
                     )}
                   </button>
                 )}
+                {subjectRows.length > 0 && (
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => setSubjectsOpen((v) => !v)}
+                    title="Edit the subject line of every draft in one place"
+                  >
+                    {subjectsOpen ? 'Hide subjects' : `Subjects (${subjectRows.length})`}
+                  </button>
+                )}
                 <CsvImport missionId={mission.id} onImported={loadTargets} />
                 {visibleTargets.length > 0 && (
                   <button
@@ -812,6 +861,14 @@ export function MissionPage() {
                 )}
               </div>
             </div>
+
+            {subjectsOpen && subjectRows.length > 0 && (
+              <BulkSubjectEditor
+                rows={subjectRows}
+                onClose={() => setSubjectsOpen(false)}
+                onSaved={() => setRefreshKey((k) => k + 1)}
+              />
+            )}
 
             {visibleTargets.length === 0 ? (
               <div className="empty-illo">
@@ -944,9 +1001,30 @@ type Flight = {
   replied: number;
 };
 
+// A small muted block stands in for a stat while the count is still loading, so
+// the topbar never shows a misleading "0" on arrival.
+function StatNum({ ready, value }: { ready: boolean; value: number }) {
+  if (ready) return <>{value}</>;
+  return (
+    <span
+      aria-hidden
+      style={{
+        display: 'inline-block',
+        width: '1.4ch',
+        height: '0.7em',
+        verticalAlign: 'middle',
+        borderRadius: 3,
+        background: 'currentColor',
+        opacity: 0.18,
+      }}
+    />
+  );
+}
+
 function MissionTopbar({
   mission,
   metrics,
+  statsReady,
   paid,
   autopilotOn,
   onToggleAutopilot,
@@ -954,6 +1032,7 @@ function MissionTopbar({
 }: {
   mission: Mission;
   metrics: Metrics;
+  statsReady: boolean;
   paid: boolean;
   autopilotOn: boolean;
   onToggleAutopilot: () => void;
@@ -970,10 +1049,10 @@ function MissionTopbar({
           <div className="mtop-meta">
             <span className="mode-pill">{MODE_LABEL[mission.mode] ?? mission.mode}</span>
             {mission.find_mode === 'people' && <span className="mode-pill">People</span>}
-            <span className="mtop-stats">
-              <span>{metrics.targets} targets</span>
-              <span>{metrics.contacts} contacts</span>
-              <span>{metrics.sent} sent</span>
+            <span className="mtop-stats" aria-busy={!statsReady}>
+              <span><StatNum ready={statsReady} value={metrics.targets} /> targets</span>
+              <span><StatNum ready={statsReady} value={metrics.contacts} /> contacts</span>
+              <span><StatNum ready={statsReady} value={metrics.sent} /> sent</span>
             </span>
           </div>
         </div>
@@ -2036,6 +2115,173 @@ function ContactActivity({
         ))}
       </ol>
     </details>
+  );
+}
+
+// One row in the bulk subject editor: a draft's current subject plus enough
+// context (who it's to) to tune it without opening the draft.
+type SubjectRow = {
+  sequenceId: string;
+  subject: string;
+  recipient: string | null;
+  company: string;
+  sent: boolean;
+};
+
+// Bulk subject-line editor. Lists every draft's subject in one panel so the user
+// can tune them all without opening each draft. Sent drafts are read-only (their
+// subject already left the account). Only changed, non-empty subjects are saved.
+function BulkSubjectEditor({
+  rows,
+  onClose,
+  onSaved,
+}: {
+  rows: SubjectRow[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+
+  const valueFor = (r: SubjectRow) => edits[r.sequenceId] ?? r.subject;
+  const dirty = rows.filter((r) => {
+    if (r.sent) return false;
+    const v = valueFor(r).trim();
+    return v.length > 0 && v !== r.subject.trim();
+  });
+
+  async function saveAll() {
+    if (dirty.length === 0) {
+      onClose();
+      return;
+    }
+    setSaving(true);
+    let failed = 0;
+    for (const r of dirty) {
+      const subject = valueFor(r).trim();
+      const { error } = await supabase.from('email_sequences').update({ subject }).eq('id', r.sequenceId);
+      if (error) failed++;
+    }
+    setSaving(false);
+    if (failed === 0) {
+      toast.success(`Updated ${dirty.length} subject${dirty.length === 1 ? '' : 's'}.`);
+      onSaved();
+      onClose();
+    } else {
+      toast.error(`${failed} subject${failed === 1 ? '' : 's'} could not be saved.`);
+      onSaved();
+    }
+  }
+
+  return (
+    <div
+      style={{
+        margin: '0 0 14px',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--radius)',
+        background: 'var(--card)',
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          padding: '12px 14px',
+          borderBottom: '1px solid var(--border)',
+        }}
+      >
+        <div>
+          <div style={{ fontWeight: 600, color: 'var(--fg)', fontSize: 14 }}>Tune subject lines</div>
+          <div style={{ color: 'var(--fg-muted)', fontSize: 12, marginTop: 2 }}>
+            Edit every draft's subject in one place. {rows.length} draft{rows.length === 1 ? '' : 's'}.
+          </div>
+        </div>
+        <button type="button" className="link-button" onClick={onClose}>
+          Close
+        </button>
+      </div>
+      <div style={{ maxHeight: 360, overflowY: 'auto' }}>
+        {rows.map((r) => (
+          <div
+            key={r.sequenceId}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              padding: '9px 14px',
+              borderBottom: '1px solid var(--border-soft)',
+            }}
+          >
+            <div style={{ minWidth: 0, flex: '0 0 32%' }}>
+              <div
+                style={{
+                  fontSize: 13,
+                  color: 'var(--fg)',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                {r.recipient || 'Unknown'}
+              </div>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: 'var(--fg-muted)',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                {r.company}
+              </div>
+            </div>
+            {r.sent ? (
+              <div style={{ flex: 1, fontSize: 13, color: 'var(--fg-muted)', fontStyle: 'italic' }}>
+                {valueFor(r)} <span style={{ fontStyle: 'normal' }}>(sent)</span>
+              </div>
+            ) : (
+              <input
+                type="text"
+                value={valueFor(r)}
+                onChange={(e) => setEdits((m) => ({ ...m, [r.sequenceId]: e.target.value }))}
+                aria-label={`Subject for ${r.recipient || 'contact'}`}
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  padding: '6px 9px',
+                  fontSize: 13,
+                  color: 'var(--fg)',
+                  background: 'var(--bg)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                }}
+              />
+            )}
+          </div>
+        ))}
+      </div>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+          gap: 10,
+          padding: '11px 14px',
+          borderTop: '1px solid var(--border)',
+        }}
+      >
+        <button type="button" className="link-button" onClick={onClose} disabled={saving}>
+          Cancel
+        </button>
+        <button type="button" className="btn-go" onClick={saveAll} disabled={saving || dirty.length === 0}>
+          {saving ? 'Saving…' : dirty.length > 0 ? `Save ${dirty.length} change${dirty.length === 1 ? '' : 's'}` : 'No changes'}
+        </button>
+      </div>
+    </div>
   );
 }
 
