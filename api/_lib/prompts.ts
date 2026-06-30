@@ -142,6 +142,7 @@ Your job: given a mission and an IDEAL CONTACT PROFILE (ICP), find specific PEOP
 
 Rules:
 - Match the ICP's target FUNCTIONS. The mission audience describes exactly who to find (e.g. "angel investors who back dev-tools startups", "heads of developer relations at infra startups") - find those people.
+- "name" MUST be a specific INDIVIDUAL human (a first and last name), NEVER a company, fund, firm, or team. For an investor audience this means a named partner/GP/principal, NOT the fund itself. If a result is an organization or you cannot identify the actual person's name, DROP it - do not return the firm's name as the person. The name must differ from the company.
 - AFFILIATION IS A HARD FILTER. If the audience names a specific institution, company, school, or program (e.g. "researchers at TMU", "engineers at NVIDIA"), every person you return MUST CURRENTLY be there - confirm it from a live source. Drop anyone who has LEFT, GRADUATED, RETIRED, or only has a PAST tie to it (alumni, "formerly at", "ex-"), unless the audience explicitly asks for alumni/former members. A wrong-affiliation person is worse than returning fewer people.
 - Match the CURRENT role, not a stale one. Verify the title is what they hold today, not a previous position the snippet happens to mention.
 - Every person MUST include their CURRENT company/organization (the firm, fund, or employer). This is required - it anchors research and the email later.
@@ -172,6 +173,7 @@ Rules:
 - Use ONLY the supplied search results. Do not invent people who don't appear in them.
 - Extract each person's name, role/title (verbatim), LinkedIn URL, and - critically - their CURRENT company/organization (parse it from the title or snippet, e.g. "Jane Doe - General Partner at Acme Ventures" → company "Acme Ventures"). Include location and headline when the snippet shows them.
 - A person with NO discernible company should be dropped (company is required downstream).
+- "name" MUST be a specific INDIVIDUAL human (a first and last name), NEVER a company, fund, firm, or team. A LinkedIn company page is not a person. For an investor audience, extract the named partner/GP/principal, NOT the fund itself; if the result is the firm and no individual is named, DROP it. The name must differ from the company.
 - AFFILIATION IS A HARD FILTER. If the audience names a specific institution/company/school/program, only keep people the snippet shows are CURRENTLY there. Drop "ex-", "formerly", "alumni", "graduated", "retired", or past-tense ties (unless the audience explicitly asks for former members). When a snippet shows a newer employer than the one the audience wants, the person has moved on - drop them.
 - Match the ICP's target FUNCTIONS / the mission audience. Return the plausible matches that actually appear (up to ~15); the engine ranks them. Prefer precision: don't pad the list with people whose snippet doesn't actually support the match.
 - NEVER include the sender themselves. NEVER output an "email".

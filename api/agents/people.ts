@@ -241,6 +241,7 @@ function dedupeAndClean(people: OpenPerson[], profile: ProfileDoc | null, alread
     const name = (p?.name ?? '').trim();
     const company = (p?.company ?? '').trim();
     if (!name || !company) continue; // company is required downstream
+    if (!isLikelyPersonName(name, company)) continue; // a firm/fund slipped in as a "person"
     if (isExcludedName(name, exclusions) || isExcludedName(company, exclusions)) continue;
     const key = personKey({ name, company, linkedin_url: p.linkedin_url });
     if (seen.has(key) || already.has(key)) continue;
@@ -248,6 +249,26 @@ function dedupeAndClean(people: OpenPerson[], profile: ProfileDoc | null, alread
     out.push({ ...p, name, company });
   }
   return out;
+}
+
+// Tokens that mark a name as an ORGANIZATION, not an individual. For an investor
+// audience the search often surfaces fund/firm pages, and the model sometimes
+// returns the firm AS the person ("Fin Capital", "VU Venture Partners"). These
+// almost never appear in a real human's name in this domain.
+const ORG_NAME_RE =
+  /\b(ventures?|capital|partners|holdings?|advisors|advisory|management|associates|equity|fund|funds|investor relations|vc|llc|llp|inc|incorporated|ltd|limited|gmbh|technologies|solutions|systems|labs)\b/i;
+
+/** True when `name` plausibly belongs to a PERSON, not a firm/fund. The tells of
+ *  a firm slipping in as a person: the name equals the company, it carries a
+ *  digit (human names don't), or it reads like an organization. Keeps real names
+ *  like "W. David Stern" while dropping "Fin Capital" / "2080 Ventures". */
+function isLikelyPersonName(name: string, company: string): boolean {
+  const n = name.trim();
+  if (!n) return false;
+  if (/\d/.test(n)) return false; // human names don't carry digits
+  if (n.toLowerCase() === company.trim().toLowerCase()) return false; // the firm returned as the person
+  if (ORG_NAME_RE.test(n)) return false; // reads like an org, not a person
+  return true;
 }
 
 /** Stable identity for a discovered person: their LinkedIn profile (preferred)
@@ -323,4 +344,4 @@ function clamp01(n: number): number {
 }
 
 // Exported for unit tests.
-export { dedupeAndClean, personKey, buildAlready, toTargetRow };
+export { dedupeAndClean, personKey, buildAlready, toTargetRow, isLikelyPersonName };

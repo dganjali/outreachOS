@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { dedupeAndClean, personKey, buildAlready, toTargetRow } from './people';
+import { dedupeAndClean, personKey, buildAlready, toTargetRow, isLikelyPersonName } from './people';
 import type { ProfileDoc, TargetDoc } from '../../shared/schemas';
 
 // A discovered person as the LLM hands them back (shape of OpenPerson).
@@ -63,6 +63,40 @@ describe('dedupeAndClean', () => {
     const already = new Set([personKey({ name: 'Ada Investor', company: 'Acme Ventures', linkedin_url: 'https://linkedin.com/in/adainvestor' })]);
     const out = dedupeAndClean([person()], null, already);
     assert.equal(out.length, 0);
+  });
+
+  it('drops firms/funds that the model returned as a "person"', () => {
+    const firms = [
+      person({ name: 'Fin Capital', company: 'Fin Capital', linkedin_url: null }),
+      person({ name: 'VU Venture Partners', company: 'VU Venture Partners', linkedin_url: null }),
+      person({ name: 'Wing Venture Capital', company: 'Wing Venture Capital', linkedin_url: null }),
+      person({ name: '2080 Ventures Investor Relations', company: '2080 Ventures Investor Relations', linkedin_url: null }),
+    ];
+    const out = dedupeAndClean(firms, null, new Set());
+    assert.equal(out.length, 0, 'no firm names survive as people');
+  });
+
+  it('keeps a real individual even when the firm name is fund-y', () => {
+    const out = dedupeAndClean(
+      [person({ name: 'W. David Stern', role: 'Managing Partner', company: 'Venture Group Capital', linkedin_url: null })],
+      null,
+      new Set(),
+    );
+    assert.equal(out.length, 1);
+    assert.equal(out[0].name, 'W. David Stern');
+  });
+});
+
+describe('isLikelyPersonName - firm vs individual', () => {
+  it('rejects the firm-as-person tells', () => {
+    assert.equal(isLikelyPersonName('Fin Capital', 'Fin Capital'), false); // name === company
+    assert.equal(isLikelyPersonName('VU Venture Partners', 'VU Venture Partners'), false);
+    assert.equal(isLikelyPersonName('2080 Ventures', 'Some Fund'), false); // digit + org token
+    assert.equal(isLikelyPersonName('Acme Holdings LLC', 'Acme'), false); // org tokens
+  });
+  it('accepts real individuals', () => {
+    assert.equal(isLikelyPersonName('W. David Stern', 'Venture Group Capital'), true);
+    assert.equal(isLikelyPersonName('Ada Investor', 'Acme Ventures'), true);
   });
 });
 
