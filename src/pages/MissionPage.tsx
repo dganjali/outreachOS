@@ -10,7 +10,7 @@ import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { useConfirm } from '../context/ConfirmContext';
-import { agents, gmail, pipeline, type PipelineRunView } from '../lib/api';
+import { agents, gmail, pipeline, autopilot, type PipelineRunView } from '../lib/api';
 import { isPaidPlan } from '../../shared/plans';
 import { asScore } from '../lib/score';
 import { CsvImport } from '../components/CsvImport';
@@ -774,6 +774,18 @@ export function MissionPage() {
     if (error) {
       toast.error(error.message);
       setPolicy(prev);
+      return;
+    }
+    // A send-window / timezone change must move already-queued sends into the new
+    // window. Reschedule server-side, then refresh the sent rows so the cockpit's
+    // "Next scheduled" + send queue reflect the new times.
+    if (id && ('send_window' in patch || 'timezone' in patch)) {
+      try {
+        await autopilot.reschedule(id);
+        setRefreshKey((k) => k + 1);
+      } catch {
+        /* best-effort; the window is saved, the schedule just won't have shifted */
+      }
     }
   }
 
@@ -884,8 +896,13 @@ export function MissionPage() {
   const sentCount = allSent.filter((m) => m.status === 'sent').length;
   const scheduledCount = allSent.filter((m) => m.status === 'queued').length;
   const repliesCount = allContacts.filter((c) => c.status === 'replied').length;
-  const sentToday =
-    policy?.counter && policy.counter.date === new Date().toISOString().slice(0, 10) ? policy.counter.sent : 0;
+  // "Sent today" = emails that ACTUALLY left the account today (status 'sent',
+  // sent_at on today's UTC date). NOT policy.counter, which Autopilot bumps at
+  // QUEUE time - so it counts scheduled-but-unsent emails, and ones later pulled
+  // back to review (the counter never decrements). The counter still governs the
+  // daily-cap throttle (see capReached in the cockpit); this is display only.
+  const todayUtc = new Date().toISOString().slice(0, 10);
+  const sentToday = allSent.filter((m) => m.status === 'sent' && m.sent_at?.slice(0, 10) === todayUtc).length;
 
   // Drafts the cockpit holds for the user to clear. Two sources:
   //  - Drafts Autopilot's gate already verdicted as 'ready' (passed but review-
@@ -1668,6 +1685,12 @@ function AutopilotCockpit({
   const [capDraft, setCapDraft] = useState(String(policy.daily_send_cap));
   const [editingSchedule, setEditingSchedule] = useState(false);
 
+  // Daily-cap throttle state: Autopilot's queue-time counter (NOT sentToday,
+  // which now counts only emails that truly went out). The cap is "reached" once
+  // that many sends are committed for today, so no more queue until it resets.
+  const queuedToday = policy.counter && policy.counter.date === new Date().toISOString().slice(0, 10) ? policy.counter.sent : 0;
+  const capReached = queuedToday >= policy.daily_send_cap;
+
   // Flight phase drives the headline + lamp. Holding (someone must act) > taxiing
   // (enabled, nothing sourced yet) > cruising (running normally).
   const phase: 'holding' | 'taxiing' | 'cruising' =
@@ -1724,7 +1747,7 @@ function AutopilotCockpit({
               <span className="plan-k">Today</span>
               <span className="plan-v">
                 {sentToday} / {policy.daily_send_cap} sent
-                {sentToday >= policy.daily_send_cap && (
+                {capReached && (
                   <em> · cap reached, resets {formatSendCapReset()}</em>
                 )}
               </span>

@@ -131,6 +131,68 @@ export function nextSendSlots(
   return Array.from({ length: count }, (_, i) => toUtc(startLocalMs + Math.round(i * step)));
 }
 
+/**
+ * Clamp `date`'s time-of-day into the send window while keeping its calendar day
+ * (in the policy timezone). Used for follow-ups: their multi-day cadence must
+ * stay put, but the hour they land on should honor the window. A time already
+ * inside the window is returned unchanged; one before/after is pulled to the
+ * window's open on the same local day. Degenerate windows pass through.
+ */
+export function snapToWindow(date: Date, policy: Pick<CampaignPolicyDoc, 'sendWindow' | 'timezone'>): Date {
+  const { startHour, endHour } = policy.sendWindow;
+  if (!(endHour > startHour)) return date;
+
+  const offsetMin = tzOffsetMinutes(policy.timezone, date);
+  const localMs = date.getTime() + offsetMin * 60000;
+  const local = new Date(localMs);
+  const localMidnight = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate());
+  const windowStartMs = localMidnight + startHour * 3600000;
+  const windowEndMs = localMidnight + endHour * 3600000;
+
+  // Inside the window already ⇒ keep. Otherwise snap to the window open, same day.
+  const snappedLocalMs = localMs >= windowStartMs && localMs < windowEndMs ? localMs : windowStartMs;
+  return new Date(snappedLocalMs - offsetMin * 60000);
+}
+
+/** A queued send row, reduced to the fields rescheduling needs. */
+export interface QueuedSendLite {
+  id: string;
+  touchIndex: number;
+  scheduledSendAt: Date | string | null;
+}
+
+/**
+ * Pure planner for a send-window/timezone change: recompute `scheduledSendAt`
+ * for the still-queued sends so they fall inside the new window.
+ *   - Initial touches (touchIndex 0) are redistributed across the next open
+ *     window via nextSendSlots - the same logic that first scheduled them -
+ *     ordered by their current send time so the queue order is preserved.
+ *   - Follow-ups (touchIndex > 0) keep their calendar day (the cadence) and only
+ *     have their time-of-day snapped into the window.
+ * Returns only the rows whose time actually moved.
+ */
+export function planReschedule(
+  rows: QueuedSendLite[],
+  policy: Pick<CampaignPolicyDoc, 'sendWindow' | 'timezone'>,
+  now: Date,
+): Array<{ id: string; scheduledSendAt: Date }> {
+  const ms = (v: Date | string | null): number => (v ? new Date(v).getTime() : 0);
+  const out: Array<{ id: string; scheduledSendAt: Date }> = [];
+
+  const initial = rows.filter((r) => r.touchIndex === 0).sort((a, b) => ms(a.scheduledSendAt) - ms(b.scheduledSendAt));
+  const slots = nextSendSlots(policy, initial.length, now);
+  initial.forEach((r, i) => {
+    if (slots[i] && slots[i].getTime() !== ms(r.scheduledSendAt)) out.push({ id: r.id, scheduledSendAt: slots[i] });
+  });
+
+  for (const r of rows) {
+    if (r.touchIndex === 0 || !r.scheduledSendAt) continue;
+    const snapped = snapToWindow(new Date(r.scheduledSendAt), policy);
+    if (snapped.getTime() !== ms(r.scheduledSendAt)) out.push({ id: r.id, scheduledSendAt: snapped });
+  }
+  return out;
+}
+
 /** Fill a partial/legacy policy with defaults so callers can read every field. */
 export function withPolicyDefaults(p: Partial<CampaignPolicyDoc>): Omit<CampaignPolicyDoc, keyof import('../../shared/schemas').BaseDoc | 'missionId'> {
   return {

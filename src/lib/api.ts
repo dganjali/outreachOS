@@ -303,6 +303,13 @@ export const pipeline = {
     authedFetch<{ ok: boolean }>('/api/agents/pipeline/cancel', { run_id }),
 };
 
+export const autopilot = {
+  // Recompute the schedule of still-queued sends after a send-window / timezone
+  // change so they move into the new window. Returns how many rows shifted.
+  reschedule: (mission_id: string) =>
+    authedFetch<{ ok: boolean; rescheduled: number }>('/api/autopilot/reschedule', { mission_id }),
+};
+
 // Agent-run analytics. Server aggregates over the agent_runs telemetry; keys
 // arrive snake-cased (authedFetch runs toFrontend on the payload). Data only
 // spans the agent_runs TTL, so windows are capped at 30 days server-side.

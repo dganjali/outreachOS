@@ -6,7 +6,8 @@
 // and sends each one, gated by suppression + reply-stop. No Cloud Tasks.
 
 import { newId, type UserScope, type InsertDoc } from './db';
-import type { EmailSequenceDoc, SentMessageDoc, SuppressionDoc } from '../../shared/schemas';
+import { snapToWindow } from './autopilot';
+import type { CampaignPolicyDoc, EmailSequenceDoc, SentMessageDoc, SuppressionDoc } from '../../shared/schemas';
 
 const DEFAULT_WAIT_DAYS = 3;
 
@@ -24,8 +25,11 @@ export async function scheduleFollowups(args: {
   seq: EmailSequenceDoc;
   toEmail: string;
   sentAt: Date;
+  // The mission's autopilot policy, when it has one. Given it, follow-ups land
+  // inside the send window (time-of-day snapped); the cadence day is preserved.
+  policy?: Pick<CampaignPolicyDoc, 'sendWindow' | 'timezone'> | null;
 }): Promise<number> {
-  const { scope, seq, toEmail, sentAt } = args;
+  const { scope, seq, toEmail, sentAt, policy } = args;
   const followups = seq.followups ?? [];
   if (followups.length === 0) return 0;
 
@@ -60,7 +64,7 @@ export async function scheduleFollowups(args: {
       gmailMessageId: null,
       gmailThreadId: null,
       status: 'queued',
-      scheduledSendAt: addDays(sentAt, cumulative),
+      scheduledSendAt: policy ? snapToWindow(addDays(sentAt, cumulative), policy) : addDays(sentAt, cumulative),
       sentAt: null,
       failedReason: null,
       profileVersionId: seq.profileVersionId ?? null,

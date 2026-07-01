@@ -9,12 +9,14 @@ import { requireCronSecret } from '../_lib/auth';
 import { getActiveAccessToken, sendNow, type MailAttachment } from '../_lib/gmail';
 import { getResumeAttachment, getAssetAttachment } from '../_lib/attachments';
 import { scheduleFollowups } from '../_lib/sequencing';
+import { withPolicyDefaults } from '../_lib/autopilot';
 import { evaluateSend } from '../_lib/deliverability';
 import { recordOutcome } from '../_lib/outcomes';
 import type {
   SentMessageDoc,
   EmailSequenceDoc,
   ContactDoc,
+  CampaignPolicyDoc,
   ProfileDoc,
 } from '../../shared/schemas';
 
@@ -42,6 +44,15 @@ export default async function handler(req: Request, res: Response) {
   // overrides them.
   const autoFollowupCache = new Map<string, boolean>();
   const tokenCache = new Map<string, { accessToken: string; email: string | null } | null>();
+  // Per-mission autopilot policy, so follow-ups land inside the send window.
+  const policyCache = new Map<string, Pick<CampaignPolicyDoc, 'sendWindow' | 'timezone'> | null>();
+  const policyFor = async (scope: ReturnType<typeof forUser>, missionId: string) => {
+    if (!policyCache.has(missionId)) {
+      const p = await scope.collection<CampaignPolicyDoc>('campaign_policies').findOne({ missionId });
+      policyCache.set(missionId, p ? withPolicyDefaults(p) : null);
+    }
+    return policyCache.get(missionId) ?? null;
+  };
 
   for (const msg of due) {
     const uid = (msg as SentMessageDoc & { userId: string }).userId;
@@ -192,7 +203,7 @@ export default async function handler(req: Request, res: Response) {
         await scope.collection<ContactDoc>('contacts').updateById(contact._id, { status: 'contacted' });
         await recordOutcome(uid, contact._id, 'sent');
         if (autoFollowupCache.get(uid)) {
-          await scheduleFollowups({ scope, seq, toEmail: msg.toEmail, sentAt });
+          await scheduleFollowups({ scope, seq, toEmail: msg.toEmail, sentAt, policy: await policyFor(scope, seq.missionId) });
         }
       }
       sent++;

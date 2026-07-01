@@ -17,6 +17,8 @@ import { forUser } from '../_lib/db';
 import { generateJson, MODEL_PRO } from '../_lib/llm';
 import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
 import { buildSteerUpdates, isEmptyUpdate, normalizeProposal } from '../_lib/steer';
+import { withPolicyDefaults } from '../_lib/autopilot';
+import { rescheduleQueuedSends } from '../_lib/reschedule';
 import type {
   CampaignPolicyDoc,
   ContextFactDoc,
@@ -204,6 +206,11 @@ export async function apply(req: Request, res: Response) {
     }
     if (policy && Object.keys(policyUpdate).length) {
       await scope.collection<CampaignPolicyDoc>('campaign_policies').updateById(policy._id, policyUpdate);
+      // A window/timezone change must move already-queued sends into the new
+      // window, same as the cockpit's schedule editor does.
+      if (policyUpdate.sendWindow || policyUpdate.timezone) {
+        await rescheduleQueuedSends(scope, mission_id, withPolicyDefaults({ ...policy, ...policyUpdate }), new Date());
+      }
     }
     await completeRun(scope, run._id, {
       mission_fields: Object.keys(missionUpdate),
