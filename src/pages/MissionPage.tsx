@@ -10,7 +10,7 @@ import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { useConfirm } from '../context/ConfirmContext';
-import { agents, gmail } from '../lib/api';
+import { agents, gmail, pipeline, autopilot } from '../lib/api';
 import { isPaidPlan } from '../../shared/plans';
 import { asScore } from '../lib/score';
 import { CsvImport } from '../components/CsvImport';
@@ -133,6 +133,9 @@ export function MissionPage() {
   // Bumped after a bulk send so SequenceCards remount and re-read their sent state.
   const [refreshKey, setRefreshKey] = useState(0);
   const [sendingAll, setSendingAll] = useState(false);
+  // True while an Autopilot sourcing run (manual "Run a cycle now" or the cron's
+  // own cadence) is live, so the cockpit can disable the trigger + show status.
+  const [cycleRunning, setCycleRunning] = useState(false);
   // Whether the bulk subject-line editor panel is open.
   const [subjectsOpen, setSubjectsOpen] = useState(false);
   // Pipeline filter + sort, so a long list (dozens of targets) is navigable.
@@ -423,6 +426,34 @@ export function MissionPage() {
     };
   }, [contactIdsKey, refreshKey]);
 
+  // Track whether an Autopilot sourcing run is live (manual trigger or cron), so
+  // the cockpit's "Run a cycle now" button disables while one is in flight. Polls
+  // only while a run is running; idles otherwise.
+  useEffect(() => {
+    if (!id || !paid || !policy?.enabled) {
+      setCycleRunning(false);
+      return;
+    }
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      try {
+        const { data } = await pipeline.latestForMission(id);
+        const live = data?.status === 'pending' || data?.status === 'running';
+        if (cancelled) return;
+        setCycleRunning(live);
+        if (live) timer = setTimeout(poll, 5000);
+      } catch {
+        if (!cancelled) setCycleRunning(false);
+      }
+    };
+    poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [id, paid, policy?.enabled, refreshKey]);
+
   async function runWith<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
     setBusy(label);
     setError(null);
@@ -705,6 +736,36 @@ export function MissionPage() {
     if (error) {
       toast.error(error.message);
       setPolicy(prev);
+      return;
+    }
+    // A send-window / timezone change must move already-queued sends into the new
+    // window. Reschedule server-side, then refresh the sent rows so the cockpit's
+    // "Next scheduled" + send queue reflect the new times.
+    if (id && ('send_window' in patch || 'timezone' in patch)) {
+      try {
+        await autopilot.reschedule(id);
+        setRefreshKey((k) => k + 1);
+      } catch {
+        /* best-effort; the window is saved, the schedule just won't have shifted */
+      }
+    }
+  }
+
+  // Kick off a fresh Autopilot cycle right now instead of waiting for the cron
+  // cadence. Reuses the durable pipeline (background sourcing + drafting); the
+  // server guards against a duplicate run. Resetting last_sourced_at restarts the
+  // cadence clock so the "Next sourcing" readout reflects this run.
+  async function runCycleNow() {
+    if (!id || !policy || cycleRunning) return;
+    setCycleRunning(true);
+    try {
+      const { already_running } = await pipeline.start(id, undefined, policy.targets_per_cycle);
+      await saveAutopilotField({ last_sourced_at: new Date().toISOString() });
+      setRefreshKey((k) => k + 1); // re-run the poll effect so it tracks this run to completion
+      toast.success(already_running ? 'A cycle is already running.' : 'Sourcing a fresh batch now.');
+    } catch (err) {
+      setCycleRunning(false);
+      toast.error(err instanceof Error ? err.message : 'Could not start a cycle');
     }
   }
 
@@ -807,8 +868,13 @@ export function MissionPage() {
   const sentCount = allSent.filter((m) => m.status === 'sent').length;
   const scheduledCount = allSent.filter((m) => m.status === 'queued').length;
   const repliesCount = allContacts.filter((c) => c.status === 'replied').length;
-  const sentToday =
-    policy?.counter && policy.counter.date === new Date().toISOString().slice(0, 10) ? policy.counter.sent : 0;
+  // "Sent today" = emails that ACTUALLY left the account today (status 'sent',
+  // sent_at on today's UTC date). NOT policy.counter, which Autopilot bumps at
+  // QUEUE time - so it counts scheduled-but-unsent emails, and ones later pulled
+  // back to review (the counter never decrements). The counter still governs the
+  // daily-cap throttle (see capReached in the cockpit); this is display only.
+  const todayUtc = new Date().toISOString().slice(0, 10);
+  const sentToday = allSent.filter((m) => m.status === 'sent' && m.sent_at?.slice(0, 10) === todayUtc).length;
 
   // Drafts the cockpit holds for the user to clear. Two sources:
   //  - Drafts Autopilot's gate already verdicted as 'ready' (passed but review-
@@ -988,6 +1054,8 @@ export function MissionPage() {
           entityLabel={isPeople ? 'People' : 'Companies'}
           hasReview={metrics.review > 0}
           onSaveField={saveAutopilotField}
+          onRunCycle={runCycleNow}
+          cycleRunning={cycleRunning}
           missionId={mission.id}
           userId={user?.id ?? ''}
           onApplied={() => {
@@ -1543,6 +1611,8 @@ function AutopilotCockpit({
   entityLabel,
   hasReview,
   onSaveField,
+  onRunCycle,
+  cycleRunning,
   missionId,
   userId,
   onApplied,
@@ -1555,12 +1625,20 @@ function AutopilotCockpit({
   entityLabel: string;
   hasReview: boolean;
   onSaveField: (patch: Partial<CampaignPolicy>) => void | Promise<void>;
+  onRunCycle: () => void;
+  cycleRunning: boolean;
   missionId: string;
   userId: string;
   onApplied: () => void;
 }) {
   const [capDraft, setCapDraft] = useState(String(policy.daily_send_cap));
   const [editingSchedule, setEditingSchedule] = useState(false);
+
+  // Daily-cap throttle state: Autopilot's queue-time counter (NOT sentToday,
+  // which now counts only emails that truly went out). The cap is "reached" once
+  // that many sends are committed for today, so no more queue until it resets.
+  const queuedToday = policy.counter && policy.counter.date === new Date().toISOString().slice(0, 10) ? policy.counter.sent : 0;
+  const capReached = queuedToday >= policy.daily_send_cap;
 
   // Flight phase drives the headline + lamp. Holding (someone must act) > taxiing
   // (enabled, nothing sourced yet) > cruising (running normally).
@@ -1615,7 +1693,7 @@ function AutopilotCockpit({
               <span className="plan-k">Today</span>
               <span className="plan-v">
                 {sentToday} / {policy.daily_send_cap} sent
-                {sentToday >= policy.daily_send_cap && (
+                {capReached && (
                   <em> · cap reached, resets {formatSendCapReset()}</em>
                 )}
               </span>
@@ -1642,6 +1720,15 @@ function AutopilotCockpit({
           aria-expanded={editingSchedule}
         >
           <Pencil size={12} aria-hidden /> {editingSchedule ? 'Done' : 'Adjust'}
+        </button>
+        <button
+          type="button"
+          className="plan-edit plan-run-now"
+          onClick={onRunCycle}
+          disabled={cycleRunning}
+          title="Source, research, and draft a fresh batch now instead of waiting for the next cycle."
+        >
+          <PlaneTakeoff size={12} aria-hidden /> {cycleRunning ? 'Sourcing…' : 'Run a cycle now'}
         </button>
       </div>
 

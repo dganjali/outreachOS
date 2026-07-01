@@ -9,6 +9,8 @@ import {
   sourcingDue,
   withPolicyDefaults,
   tzOffsetMinutes,
+  snapToWindow,
+  planReschedule,
   POLICY_DEFAULTS,
 } from './autopilot';
 import type { CampaignPolicyDoc, ContactDoc } from '../../shared/schemas';
@@ -119,6 +121,59 @@ describe('nextSendSlots', () => {
     assert.equal(off, -240);
     const slots = nextSendSlots(policy({ timezone: 'America/Toronto' }), 1, now);
     assert.equal(slots[0].toISOString(), '2026-06-18T13:00:00.000Z');
+  });
+});
+
+describe('snapToWindow', () => {
+  it('keeps a time already inside the window (UTC)', () => {
+    const d = new Date('2026-06-18T12:00:00Z'); // inside 9-17
+    assert.equal(snapToWindow(d, policy({ timezone: 'UTC' })).toISOString(), d.toISOString());
+  });
+  it('pulls a pre-window time up to the window open, same day (UTC)', () => {
+    const d = new Date('2026-06-18T03:00:00Z'); // before 09:00
+    assert.equal(snapToWindow(d, policy({ timezone: 'UTC' })).toISOString(), '2026-06-18T09:00:00.000Z');
+  });
+  it('pulls a post-window time back to the window open, same day (UTC)', () => {
+    const d = new Date('2026-06-18T22:00:00Z'); // after 17:00
+    assert.equal(snapToWindow(d, policy({ timezone: 'UTC' })).toISOString(), '2026-06-18T09:00:00.000Z');
+  });
+  it('preserves the calendar day in the policy timezone (Toronto EDT)', () => {
+    // 2026-06-19T01:00Z is still 2026-06-18 21:00 local (EDT, UTC-4), after the
+    // window ⇒ snap to that local day's 09:00 = 13:00Z on the 18th.
+    const d = new Date('2026-06-19T01:00:00Z');
+    assert.equal(snapToWindow(d, policy({ timezone: 'America/Toronto' })).toISOString(), '2026-06-18T13:00:00.000Z');
+  });
+  it('passes through a degenerate window', () => {
+    const d = new Date('2026-06-18T22:00:00Z');
+    assert.equal(snapToWindow(d, policy({ sendWindow: { startHour: 9, endHour: 9 } })).toISOString(), d.toISOString());
+  });
+});
+
+describe('planReschedule', () => {
+  const now = new Date('2026-06-18T12:00:00Z'); // inside 9-17 UTC
+  it('redistributes initial touches into the window, ordered by current time', () => {
+    const rows = [
+      { id: 'b', touchIndex: 0, scheduledSendAt: new Date('2026-06-18T16:00:00Z') },
+      { id: 'a', touchIndex: 0, scheduledSendAt: new Date('2026-06-18T10:00:00Z') },
+    ];
+    const moves = planReschedule(rows, policy({ timezone: 'UTC' }), now);
+    // First slot starts at now; 'a' (earlier) maps to the earliest slot.
+    const a = moves.find((m) => m.id === 'a');
+    assert.ok(a);
+    assert.equal(a!.scheduledSendAt.getTime(), now.getTime());
+  });
+  it('snaps queued follow-ups into the window but keeps their day', () => {
+    const rows = [
+      { id: 'f', touchIndex: 1, scheduledSendAt: new Date('2026-06-21T03:00:00Z') }, // 3 days out, pre-window
+    ];
+    const moves = planReschedule(rows, policy({ timezone: 'UTC' }), now);
+    assert.equal(moves.length, 1);
+    assert.equal(moves[0].scheduledSendAt.toISOString(), '2026-06-21T09:00:00.000Z');
+  });
+  it('returns no move for a follow-up already inside the window', () => {
+    const rows = [{ id: 'f', touchIndex: 1, scheduledSendAt: new Date('2026-06-21T12:00:00Z') }];
+    const moves = planReschedule(rows, policy({ timezone: 'UTC' }), now);
+    assert.equal(moves.length, 0);
   });
 });
 
