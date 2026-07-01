@@ -954,6 +954,10 @@ export function MissionPage() {
         return (s && initialSentSeqIds.has(s.id)) || c.status === 'contacted';
       }).length;
       const draftsN = cs.filter((c) => sequencesByContact[c.id]).length;
+      // Only a REAL queued send row counts as "queued". A drafted contact with no
+      // queued row is either awaiting your approval (review-first) or held back
+      // (unverified address / low confidence) - never call that "queued".
+      const queuedN = cs.filter((c) => (sentByContact[c.id] ?? []).some((m) => m.status === 'queued')).length;
       const pack = mergedPacks[t.id];
 
       let progress = 12;
@@ -970,10 +974,16 @@ export function MissionPage() {
         progress = 86; phase = 'Descending'; tone = 'sent'; stage = 'sent';
         stat = `${sentN} sent`;
         note = `${sentN} email${sentN === 1 ? '' : 's'} sent, awaiting a reply.`;
+      } else if (queuedN > 0) {
+        progress = 74; phase = 'Cruising'; tone = 'cruise'; stage = 'drafted';
+        stat = `${queuedN} queued`;
+        note = `${queuedN} email${queuedN === 1 ? '' : 's'} queued for the next send window.`;
       } else if (draftsN > 0) {
         progress = 66; phase = 'Cruising'; tone = 'cruise'; stage = 'drafted';
         stat = `${draftsN} draft${draftsN === 1 ? '' : 's'} ready`;
-        note = `${draftsN} draft${draftsN === 1 ? '' : 's'} ready, queued for the next send window.`;
+        note = reviewFirst
+          ? `${draftsN} draft${draftsN === 1 ? '' : 's'} ready, waiting for your approval.`
+          : `${draftsN} draft${draftsN === 1 ? '' : 's'} ready. Verified contacts queue automatically; the rest wait for your review.`;
       } else if (cs.length) {
         progress = 46; phase = 'Climbing'; tone = 'climb'; stage = 'contacts';
         stat = `${cs.length} contact${cs.length === 1 ? '' : 's'}`;
