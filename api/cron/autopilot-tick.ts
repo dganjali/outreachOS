@@ -47,6 +47,8 @@ interface PolicyOutcome {
   reviewed: number;
   ready: number;
   skipped?: string;
+  sourceError?: string;
+  gateError?: string;
 }
 
 export default async function handler(req: Request, res: Response) {
@@ -69,16 +71,26 @@ export default async function handler(req: Request, res: Response) {
     const uid = policy.userId;
     const scope = forUser(uid);
     const out: PolicyOutcome = { policyId: policy._id, sourced: false, gated: 0, queued: 0, reviewed: 0, ready: 0 };
+
+    // 1. Plan gate (authoritative - the UI also hides the toggle for free).
     try {
-      // 1. Plan gate (authoritative - the UI also hides the toggle for free).
       const profile = await scope.collection<ProfileDoc>('profiles').findOne();
       if (!isPaidPlan(profile?.plan, profile?.planStatus)) {
         out.skipped = 'not_paid';
         outcomes.push(out);
         continue;
       }
+    } catch (err) {
+      out.skipped = errMsg(err);
+      console.error('[autopilot] plan check failed', policy._id, err);
+      outcomes.push(out);
+      continue;
+    }
 
-      // 2. Sourcing: nudge any stale live run, else start one on cadence.
+    // 2. Sourcing: nudge any stale live run, else start one on cadence.
+    // Isolated so a sourcing failure NEVER prevents gating of drafts that already
+    // exist - the two are independent and the queue must keep moving regardless.
+    try {
       const liveRuns = (await scope
         .collection<PipelineRunDoc>('pipeline_runs')
         .find({ missionId: policy.missionId, status: { $in: ['pending', 'running'] } as never })) as PipelineRunDoc[];
@@ -89,123 +101,165 @@ export default async function handler(req: Request, res: Response) {
         await scope.collection<CampaignPolicyDoc>('campaign_policies').updateById(policy._id, { lastSourcedAt: now });
         out.sourced = true;
       }
-
-      // 3. Gate fresh drafts (status 'draft' with no autopilot verdict yet).
-      const drafts = ((await scope
-        .collection<EmailSequenceDoc>('email_sequences')
-        .find({ missionId: policy.missionId, status: 'draft' })) as EmailSequenceDoc[])
-        .filter((s) => !s.autopilotState)
-        .slice(0, MAX_DRAFTS_PER_POLICY);
-
-      const passing: Array<{ seq: EmailSequenceDoc; contact: ContactDoc }> = [];
-      for (const seq of drafts) {
-        const contact = await scope.collection<ContactDoc>('contacts').findById(seq.contactId);
-        if (!contact) continue;
-        out.gated++;
-        const toEmail = contact.email?.trim();
-        // Autopilot eligibility (verified email + confidence). Fail → human review.
-        if (!toEmail || gateDecision(contact, policy) === 'review') {
-          await setState(scope, seq._id, 'review');
-          out.reviewed++;
-          continue;
-        }
-        // Deliverability content gate: spam lint + abuse moderation + suppression.
-        // Autopilot only auto-sends CLEAN drafts; anything flagged goes to review.
-        // A cap block isn't a content problem - it just means "send later", so it
-        // doesn't downgrade the draft.
-        const verdict = await evaluateSend(scope, {
-          toEmail,
-          subject: seq.subject,
-          body: seq.body,
-          moderationCache: seq.moderation ?? null,
-          now,
-        });
-        if (verdict.moderationToPersist) {
-          await scope
-            .collection<EmailSequenceDoc>('email_sequences')
-            .updateById(seq._id, { moderation: verdict.moderationToPersist });
-        }
-        const contentBlocked =
-          verdict.blocked && verdict.blockCode !== 'account_daily_cap' && verdict.blockCode !== 'domain_daily_cap';
-        if (contentBlocked || verdict.warnings.length > 0) {
-          await setState(scope, seq._id, 'review');
-          out.reviewed++;
-          continue;
-        }
-        if (!policy.autoSend) {
-          await setState(scope, seq._id, 'ready');
-          out.ready++;
-          continue;
-        }
-        passing.push({ seq, contact });
-      }
-
-      // 4. Auto-send: queue scheduled sends within the daily cap + send window.
-      if (policy.autoSend && passing.length > 0) {
-        const cap = remainingCapToday(policy, now);
-        const queueable: Array<{ seq: EmailSequenceDoc; toEmail: string; contact: ContactDoc }> = [];
-        for (const { seq, contact } of passing) {
-          if (queueable.length >= cap) break;
-          const toEmail = contact.email?.trim();
-          if (!toEmail) {
-            await setState(scope, seq._id, 'review');
-            out.reviewed++;
-            continue;
-          }
-          // Skip one already sent/queued for THIS sequence (idempotent).
-          const existing = await scope
-            .collection<SentMessageDoc>('sent_messages')
-            .findOne({ sequenceId: seq._id, touchIndex: 0 });
-          if (existing) {
-            await setState(scope, seq._id, 'queued');
-            continue;
-          }
-          // Recipient-level dedup: never queue a second initial email to an
-          // address already contacted (sent or queued) under this mission, even
-          // when re-sourcing routed it through a fresh contact/sequence.
-          const contacted = await scope
-            .collection<SentMessageDoc>('sent_messages')
-            .findOne({
-              missionId: seq.missionId,
-              toEmail,
-              touchIndex: 0,
-              status: { $in: ['queued', 'sent'] } as never,
-            });
-          if (contacted) {
-            await setState(scope, seq._id, 'queued');
-            continue;
-          }
-          queueable.push({ seq, toEmail, contact });
-        }
-
-        const slots = nextSendSlots(policy, queueable.length, now);
-        for (let i = 0; i < queueable.length; i++) {
-          const { seq, toEmail, contact } = queueable[i];
-          await queueSend(scope, seq, toEmail, slots[i]);
-          await setState(scope, seq._id, 'queued');
-          // Record the global "already contacted" ledger + cross-account heat the
-          // moment we commit the initial touch, so no future mission re-emails them.
-          await recordContacted(scope, {
-            email: toEmail,
-            linkedinUrl: contact.linkedinUrl,
-            name: contact.name,
-            missionId: seq.missionId,
-          });
-          out.queued++;
-        }
-        if (out.queued > 0) {
-          await scope
-            .collection<CampaignPolicyDoc>('campaign_policies')
-            .updateById(policy._id, { counter: bumpedCounter(policy, now, out.queued) });
-        }
-      }
     } catch (err) {
-      out.skipped = err instanceof Error ? err.message : 'policy_failed';
+      out.sourceError = errMsg(err);
+      console.error('[autopilot] sourcing failed', policy._id, err);
     }
+
+    // 3+4. Gate fresh drafts → review/ready and, when auto-send is on, queue the
+    // clean ones. Isolated from sourcing (above) and internally per-draft, so one
+    // bad draft can't strand the rest of the batch.
+    try {
+      await gateAndQueue(scope, policy, now, out);
+    } catch (err) {
+      out.gateError = errMsg(err);
+      console.error('[autopilot] gating failed', policy._id, err);
+    }
+
     outcomes.push(out);
   }
 
+  console.info('[autopilot] tick', { policies: policies.length, outcomes });
   return res.status(200).json({ policies: policies.length, outcomes });
+}
+
+function errMsg(err: unknown): string {
+  return err instanceof Error ? err.message : 'failed';
+}
+
+/**
+ * Gate a policy's un-verdicted drafts and, when auto-send is on, queue the clean
+ * ones within the daily cap + send window. Mutates `out` with the tallies.
+ * Exported so the manual "cycle now" endpoint gates the backlog immediately
+ * instead of leaving it for the next hourly tick. Each draft is isolated: a
+ * failure on one is logged and skipped, never aborting the whole batch.
+ */
+export async function gateAndQueue(
+  scope: ReturnType<typeof forUser>,
+  policy: CampaignPolicyDoc,
+  now: Date,
+  out: PolicyOutcome,
+): Promise<void> {
+  const drafts = ((await scope
+    .collection<EmailSequenceDoc>('email_sequences')
+    .find({ missionId: policy.missionId, status: 'draft' })) as EmailSequenceDoc[])
+    .filter((s) => !s.autopilotState)
+    .slice(0, MAX_DRAFTS_PER_POLICY);
+
+  const passing: Array<{ seq: EmailSequenceDoc; contact: ContactDoc }> = [];
+  for (const seq of drafts) {
+    try {
+      const contact = await scope.collection<ContactDoc>('contacts').findById(seq.contactId);
+      if (!contact) continue;
+      out.gated++;
+      const toEmail = contact.email?.trim();
+      // Autopilot eligibility (verified email + confidence). Fail → human review.
+      if (!toEmail || gateDecision(contact, policy) === 'review') {
+        await setState(scope, seq._id, 'review');
+        out.reviewed++;
+        continue;
+      }
+      // Deliverability content gate: spam lint + abuse moderation + suppression.
+      // Autopilot only auto-sends CLEAN drafts; anything flagged goes to review.
+      // A cap block isn't a content problem - it just means "send later", so it
+      // doesn't downgrade the draft.
+      const verdict = await evaluateSend(scope, {
+        toEmail,
+        subject: seq.subject,
+        body: seq.body,
+        moderationCache: seq.moderation ?? null,
+        now,
+      });
+      if (verdict.moderationToPersist) {
+        await scope
+          .collection<EmailSequenceDoc>('email_sequences')
+          .updateById(seq._id, { moderation: verdict.moderationToPersist });
+      }
+      const contentBlocked =
+        verdict.blocked && verdict.blockCode !== 'account_daily_cap' && verdict.blockCode !== 'domain_daily_cap';
+      if (contentBlocked || verdict.warnings.length > 0) {
+        await setState(scope, seq._id, 'review');
+        out.reviewed++;
+        continue;
+      }
+      if (!policy.autoSend) {
+        await setState(scope, seq._id, 'ready');
+        out.ready++;
+        continue;
+      }
+      passing.push({ seq, contact });
+    } catch (err) {
+      console.error('[autopilot] draft gate failed', seq._id, err);
+    }
+  }
+
+  // Auto-send: queue scheduled sends within the daily cap + send window.
+  if (policy.autoSend && passing.length > 0) {
+    const cap = remainingCapToday(policy, now);
+    const queueable: Array<{ seq: EmailSequenceDoc; toEmail: string; contact: ContactDoc }> = [];
+    for (const { seq, contact } of passing) {
+      if (queueable.length >= cap) break;
+      try {
+        const toEmail = contact.email?.trim();
+        if (!toEmail) {
+          await setState(scope, seq._id, 'review');
+          out.reviewed++;
+          continue;
+        }
+        // Skip one already sent/queued for THIS sequence (idempotent).
+        const existing = await scope
+          .collection<SentMessageDoc>('sent_messages')
+          .findOne({ sequenceId: seq._id, touchIndex: 0 });
+        if (existing) {
+          await setState(scope, seq._id, 'queued');
+          continue;
+        }
+        // Recipient-level dedup: never queue a second initial email to an
+        // address already contacted (sent or queued) under this mission, even
+        // when re-sourcing routed it through a fresh contact/sequence.
+        const contacted = await scope
+          .collection<SentMessageDoc>('sent_messages')
+          .findOne({
+            missionId: seq.missionId,
+            toEmail,
+            touchIndex: 0,
+            status: { $in: ['queued', 'sent'] } as never,
+          });
+        if (contacted) {
+          await setState(scope, seq._id, 'queued');
+          continue;
+        }
+        queueable.push({ seq, toEmail, contact });
+      } catch (err) {
+        console.error('[autopilot] queue-eligibility failed', seq._id, err);
+      }
+    }
+
+    const slots = nextSendSlots(policy, queueable.length, now);
+    for (let i = 0; i < queueable.length; i++) {
+      const { seq, toEmail, contact } = queueable[i];
+      try {
+        await queueSend(scope, seq, toEmail, slots[i]);
+        await setState(scope, seq._id, 'queued');
+        // Record the global "already contacted" ledger + cross-account heat the
+        // moment we commit the initial touch, so no future mission re-emails them.
+        await recordContacted(scope, {
+          email: toEmail,
+          linkedinUrl: contact.linkedinUrl,
+          name: contact.name,
+          missionId: seq.missionId,
+        });
+        out.queued++;
+      } catch (err) {
+        console.error('[autopilot] queueSend failed', seq._id, err);
+      }
+    }
+    if (out.queued > 0) {
+      await scope
+        .collection<CampaignPolicyDoc>('campaign_policies')
+        .updateById(policy._id, { counter: bumpedCounter(policy, now, out.queued) });
+    }
+  }
 }
 
 /** Kick off a background sourcing run, reusing the mission's last run config.

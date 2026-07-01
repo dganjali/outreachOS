@@ -744,11 +744,15 @@ export function MissionPage() {
     setCycling(true);
     try {
       const r = await agents.autopilotRun(id);
+      // The run also gates any drafts already waiting, so surface that and refresh
+      // the queue immediately rather than waiting for the next poll.
+      const cleared = r.queued ? ` ${r.queued} email${r.queued === 1 ? '' : 's'} queued.` : '';
       if (r.sourcing === 'in_progress') {
-        toast.success('Already sourcing. New results land as they are found.');
+        toast.success(`Already sourcing. New results land as they are found.${cleared}`);
       } else {
-        toast.success('Sourcing now. New results land as they are found.');
+        toast.success(`Sourcing now. New results land as they are found.${cleared}`);
       }
+      setRefreshKey((k) => k + 1);
       await Promise.all([loadPolicy(), refreshRun()]);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not start sourcing');

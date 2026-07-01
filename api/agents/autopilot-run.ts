@@ -9,8 +9,17 @@ import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { forUser } from '../_lib/db';
 import { resumeIfStale } from '../_lib/pipeline';
 import { withPolicyDefaults } from '../_lib/autopilot';
-import { startSourcing } from '../cron/autopilot-tick';
+import { startSourcing, gateAndQueue } from '../cron/autopilot-tick';
 import type { CampaignPolicyDoc, PipelineRunDoc } from '../../shared/schemas';
+
+interface GateTally {
+  policyId: string;
+  sourced: boolean;
+  gated: number;
+  queued: number;
+  reviewed: number;
+  ready: number;
+}
 
 export default async function handler(req: Request, res: Response) {
   if (req.method !== 'POST') return methodNotAllowed(res, ['POST']);
@@ -25,6 +34,19 @@ export default async function handler(req: Request, res: Response) {
   if (!raw) return res.status(404).json({ error: 'no_policy' });
   const policy: CampaignPolicyDoc = { ...raw, ...withPolicyDefaults(raw) };
 
+  const now = new Date();
+
+  // Gate any drafts already sitting un-verdicted (verified → queued/ready, the
+  // rest → review) so pressing "cycle now" moves the queue immediately instead of
+  // waiting up to an hour for the cron. Best-effort: a gate hiccup must not block
+  // the sourcing kickoff below.
+  const tally: GateTally = { policyId: policy._id, sourced: false, gated: 0, queued: 0, reviewed: 0, ready: 0 };
+  try {
+    await gateAndQueue(scope, policy, now, tally);
+  } catch (err) {
+    console.error('[autopilot] cycle-now gate failed', policy._id, err);
+  }
+
   // A run is already live ⇒ don't start a duplicate; just nudge it forward if it
   // has gone silent. Sourcing is effectively already in progress.
   const liveRuns = (await scope
@@ -32,11 +54,12 @@ export default async function handler(req: Request, res: Response) {
     .find({ missionId: mission_id, status: { $in: ['pending', 'running'] } as never })) as PipelineRunDoc[];
   if (liveRuns.length > 0) {
     for (const r of liveRuns) resumeIfStale({ id: user.id, email: user.email ?? null }, r);
-    return res.status(200).json({ sourcing: 'in_progress' });
+    return res.status(200).json({ sourcing: 'in_progress', gated: tally.gated, queued: tally.queued });
   }
 
-  const now = new Date();
   await startSourcing(scope, user.id, policy);
   await scope.collection<CampaignPolicyDoc>('campaign_policies').updateById(policy._id, { lastSourcedAt: now });
-  return res.status(200).json({ sourcing: 'started', last_sourced_at: now.toISOString() });
+  return res
+    .status(200)
+    .json({ sourcing: 'started', last_sourced_at: now.toISOString(), gated: tally.gated, queued: tally.queued });
 }
