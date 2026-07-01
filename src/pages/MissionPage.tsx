@@ -10,7 +10,7 @@ import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { useConfirm } from '../context/ConfirmContext';
-import { agents, gmail } from '../lib/api';
+import { agents, gmail, pipeline, type PipelineRunView } from '../lib/api';
 import { isPaidPlan } from '../../shared/plans';
 import { asScore } from '../lib/score';
 import { CsvImport } from '../components/CsvImport';
@@ -120,6 +120,9 @@ export function MissionPage() {
   // so the cockpit's "company" copy and the manual discovery button speak "people".
   const isPeople = mission?.find_mode === 'people';
   const [targets, setTargets] = useState<Target[]>([]);
+  // Latest sourcing run for this mission, polled so the UI can show live progress
+  // ("Sourcing…") instead of feeling inert while the pipeline works in the cloud.
+  const [activeRun, setActiveRun] = useState<PipelineRunView | null>(null);
   const [contactsByTarget, setContactsByTarget] = useState<Record<string, Contact[]>>({});
   const [packsByTarget, setPacksByTarget] = useState<Record<string, EvidencePack | undefined>>({});
   // null = loaded, no sequence; undefined = not loaded yet. The distinction
@@ -296,11 +299,47 @@ export function MissionPage() {
     setPolicy((data as CampaignPolicy | null) ?? null);
   }, [id]);
 
+  // Pull the mission's latest sourcing run so we can show its live state. Silent
+  // on failure (a mission with no run yet just has nothing to show).
+  const refreshRun = useCallback(async () => {
+    if (!id) return;
+    try {
+      const { data } = await pipeline.latestForMission(id);
+      setActiveRun(data ?? null);
+    } catch {
+      setActiveRun(null);
+    }
+  }, [id]);
+
   useEffect(() => {
     loadMission();
     loadTargets();
     loadPolicy();
-  }, [loadMission, loadTargets, loadPolicy]);
+    refreshRun();
+  }, [loadMission, loadTargets, loadPolicy, refreshRun]);
+
+  const runActive = activeRun?.status === 'pending' || activeRun?.status === 'running';
+
+  // While a run is live, poll it and pull in new targets/contacts as they land,
+  // so the board fills in front of the user. Stops as soon as the run settles.
+  useEffect(() => {
+    if (!runActive) return;
+    const iv = window.setInterval(() => {
+      void refreshRun();
+      void loadTargets();
+    }, 5000);
+    return () => window.clearInterval(iv);
+  }, [runActive, refreshRun, loadTargets]);
+
+  // When a run finishes, do one final reconcile of targets + policy (last_sourced_at).
+  const wasRunActive = useRef(false);
+  useEffect(() => {
+    if (wasRunActive.current && !runActive) {
+      loadTargets();
+      loadPolicy();
+    }
+    wasRunActive.current = runActive;
+  }, [runActive, loadTargets, loadPolicy]);
 
   // Batched: contacts + evidence for ALL targets in two requests (was 2 per
   // target). Keyed on the id list so it only refires when the set changes.
@@ -710,7 +749,7 @@ export function MissionPage() {
       } else {
         toast.success('Sourcing now. New results land as they are found.');
       }
-      await loadPolicy();
+      await Promise.all([loadPolicy(), refreshRun()]);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not start sourcing');
     } finally {
@@ -785,7 +824,15 @@ export function MissionPage() {
   const totalDrafts = Object.values(sequencesByContact).filter(Boolean).length;
   // Companies the pipeline dropped for having no reachable contact are marked
   // 'rejected' - keep them out of the output so the user only sees real targets.
-  const visibleTargets = targets.filter((t) => t.status !== 'rejected');
+  // Then fold together any company sourced more than once (same domain / name)
+  // so it shows once, with every duplicate's contacts under the one row. People
+  // mode is one-person-per-target, so there is nothing to fold there.
+  const { visibleTargets, mergedContacts, mergedPacks } = dedupeCompanies(
+    targets.filter((t) => t.status !== 'rejected'),
+    contactsByTarget,
+    packsByTarget,
+    isPeople,
+  );
 
   // Pipeline stage per visible target, computed once here so the toolbar can
   // filter/sort by it (mirrors the per-row computation in TargetRow).
@@ -800,7 +847,7 @@ export function MissionPage() {
   for (const t of visibleTargets) {
     stageByTarget.set(
       t.id,
-      targetStage(packsByTarget[t.id], contactsByTarget[t.id] ?? [], sequencesByContact, initialSentSeqIds),
+      targetStage(mergedPacks[t.id], mergedContacts[t.id] ?? [], sequencesByContact, initialSentSeqIds),
     );
   }
   // Filter, then sort, then float pinned targets to the top.
@@ -853,7 +900,7 @@ export function MissionPage() {
   const reviewFirst = !policy?.auto_send;
   const reviewItems: Array<{ target: Target; contact: Contact; sequence: EmailSequence }> = [];
   for (const t of visibleTargets) {
-    for (const c of contactsByTarget[t.id] ?? []) {
+    for (const c of mergedContacts[t.id] ?? []) {
       const seq = sequencesByContact[c.id];
       if (!seq) continue;
       if (initialSentSeqIds.has(seq.id)) continue;
@@ -883,14 +930,14 @@ export function MissionPage() {
   // sent → replied), mapped to a position + flight phase.
   const flights: Flight[] = visibleTargets
     .map((t): Flight => {
-      const cs = contactsByTarget[t.id] ?? [];
+      const cs = mergedContacts[t.id] ?? [];
       const repliedN = cs.filter((c) => c.status === 'replied').length;
       const sentN = cs.filter((c) => {
         const s = sequencesByContact[c.id];
         return (s && initialSentSeqIds.has(s.id)) || c.status === 'contacted';
       }).length;
       const draftsN = cs.filter((c) => sequencesByContact[c.id]).length;
-      const pack = packsByTarget[t.id];
+      const pack = mergedPacks[t.id];
 
       let progress = 12;
       let phase = 'Taxiing';
@@ -942,7 +989,7 @@ export function MissionPage() {
   // unverified drafts are NOT here - they live in the separate review section.
   const contactLookup = new Map<string, { contact: Contact; target: Target }>();
   for (const t of visibleTargets) {
-    for (const c of contactsByTarget[t.id] ?? []) contactLookup.set(c.id, { contact: c, target: t });
+    for (const c of mergedContacts[t.id] ?? []) contactLookup.set(c.id, { contact: c, target: t });
   }
   const sendQueue: QueueItem[] = allSent
     .filter((m) => m.status === 'queued')
@@ -967,7 +1014,7 @@ export function MissionPage() {
   // line is half the battle on a cold email, so this surface lets the user tune
   // them all at once without opening each draft. Already-sent ones are read-only.
   const subjectRows: SubjectRow[] = visibleTargets.flatMap((t) =>
-    (contactsByTarget[t.id] ?? []).flatMap((c) => {
+    (mergedContacts[t.id] ?? []).flatMap((c) => {
       const seq = sequencesByContact[c.id];
       if (!seq) return [];
       return [
@@ -1008,6 +1055,8 @@ export function MissionPage() {
         </div>
       )}
 
+      {tab === 'pipeline' && runActive && <SourcingIndicator note={activeRun?.note ?? null} />}
+
       {tab === 'pipeline' && (autopilotOn && policy ? (
         <AutopilotCockpit
           policy={policy}
@@ -1019,7 +1068,7 @@ export function MissionPage() {
           hasReview={metrics.review > 0}
           onSaveField={saveAutopilotField}
           onCycleNow={cycleNow}
-          cycling={cycling}
+          cycling={cycling || runActive}
           onRejectTarget={rejectTargetById}
           missionId={mission.id}
           userId={user?.id ?? ''}
@@ -1169,8 +1218,8 @@ export function MissionPage() {
                         key={t.id}
                         target={t}
                         isPeople={isPeople}
-                        contacts={contactsByTarget[t.id] ?? []}
-                        pack={packsByTarget[t.id]}
+                        contacts={mergedContacts[t.id] ?? []}
+                        pack={mergedPacks[t.id]}
                         sequencesByContact={sequencesByContact}
                         initialSentSeqIds={initialSentSeqIds}
                         sentByContact={sentByContact}
@@ -1562,6 +1611,20 @@ function ModeSwitch({ paid, on, onToggle }: { paid: boolean; on: boolean; onTogg
         Autopilot
         {!paid && <span className="ms-pro">Pro</span>}
       </button>
+    </div>
+  );
+}
+
+// Live sourcing banner. Shown in both modes while a pipeline run is pending or
+// running, so a cycle visibly "does something" instead of feeling inert.
+function SourcingIndicator({ note }: { note: string | null }) {
+  return (
+    <div className="sourcing-live" role="status" aria-live="polite">
+      <span className="parse-toast-spinner" aria-hidden />
+      <span className="sourcing-live-text">
+        <strong>Sourcing…</strong>{' '}
+        {note || 'Finding companies and drafting outreach. New results appear below as they land.'}
+      </span>
     </div>
   );
 }
@@ -3566,6 +3629,85 @@ function formatSendCapReset(now: Date = new Date()): string {
   const time = next.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
   const sameLocalDay = next.toDateString() === now.toDateString();
   return `${sameLocalDay ? 'today' : 'tomorrow'} at ${time}`;
+}
+
+// Fold companies that were sourced more than once (across cycles or within a
+// batch) into a single row, so a company never appears twice. Group on the
+// normalized domain when there is one, else the lowercased name. The canonical
+// row is the most-progressed member (highest score, earliest as a tiebreak); the
+// other members contribute their contacts and evidence so nothing is lost.
+// People mode is one-person-per-target, so it is passed through untouched.
+function dedupeCompanies(
+  raw: Target[],
+  contactsByTarget: Record<string, Contact[]>,
+  packsByTarget: Record<string, EvidencePack | undefined>,
+  isPeople: boolean,
+): { visibleTargets: Target[]; mergedContacts: Record<string, Contact[]>; mergedPacks: Record<string, EvidencePack | undefined> } {
+  if (isPeople) {
+    const contacts: Record<string, Contact[]> = {};
+    const packs: Record<string, EvidencePack | undefined> = {};
+    for (const t of raw) {
+      contacts[t.id] = contactsByTarget[t.id] ?? [];
+      packs[t.id] = packsByTarget[t.id];
+    }
+    return { visibleTargets: raw, mergedContacts: contacts, mergedPacks: packs };
+  }
+
+  const groups = new Map<string, Target[]>();
+  const order: string[] = [];
+  for (const t of raw) {
+    const key = companyKey(t);
+    const g = groups.get(key);
+    if (g) g.push(t);
+    else {
+      groups.set(key, [t]);
+      order.push(key);
+    }
+  }
+
+  const visibleTargets: Target[] = [];
+  const mergedContacts: Record<string, Contact[]> = {};
+  const mergedPacks: Record<string, EvidencePack | undefined> = {};
+  for (const key of order) {
+    const members = groups.get(key)!;
+    const canonical = [...members].sort(
+      (a, b) => (asScore(b.score) ?? -1) - (asScore(a.score) ?? -1) || (a.created_at ?? '').localeCompare(b.created_at ?? ''),
+    )[0];
+    visibleTargets.push(canonical);
+    const seen = new Set<string>();
+    const contacts: Contact[] = [];
+    let pack: EvidencePack | undefined;
+    for (const m of members) {
+      for (const c of contactsByTarget[m.id] ?? []) {
+        if (seen.has(c.id)) continue;
+        seen.add(c.id);
+        contacts.push(c);
+      }
+      if (!pack) pack = packsByTarget[m.id];
+    }
+    mergedContacts[canonical.id] = contacts;
+    mergedPacks[canonical.id] = pack;
+  }
+  return { visibleTargets, mergedContacts, mergedPacks };
+}
+
+function companyKey(t: Target): string {
+  const d = normalizeCompanyDomain(t.domain);
+  if (d) return `d:${d}`;
+  return `n:${(t.company_name ?? '').trim().toLowerCase()}`;
+}
+
+function normalizeCompanyDomain(domain: string | null | undefined): string | null {
+  if (!domain) return null;
+  const d = domain
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/^www\./, '')
+    .split('/')[0]
+    .split('?')[0]
+    .trim();
+  return d || null;
 }
 
 function suggestEmail(contact: Contact): string {

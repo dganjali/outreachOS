@@ -3761,6 +3761,17 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
 }
 @keyframes parseSpin { to { transform: rotate(360deg); } }
 
+/* Live sourcing banner on the mission page (both modes). */
+.sourcing-live {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; margin-bottom: var(--space-3, 12px);
+  background: var(--accent-soft, var(--surface-2)); border: 1px solid var(--accent-line, var(--border));
+  border-radius: var(--radius, 10px);
+}
+.sourcing-live .parse-toast-spinner { flex: 0 0 auto; }
+.sourcing-live-text { font-size: var(--text-sm, 0.875rem); color: var(--fg, var(--text)); line-height: 1.4; }
+.sourcing-live-text strong { font-weight: 600; }
+
 @media (max-width: 640px) {
   .me-header { flex-direction: column; align-items: flex-start; }
   .me-history-diff-cols { grid-template-columns: 1fr; }
