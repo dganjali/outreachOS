@@ -208,8 +208,10 @@ export default async function handler(req: Request, res: Response) {
   return res.status(200).json({ policies: policies.length, outcomes });
 }
 
-/** Kick off a background sourcing run, reusing the mission's last run config. */
-async function startSourcing(scope: ReturnType<typeof forUser>, uid: string, policy: CampaignPolicyDoc): Promise<void> {
+/** Kick off a background sourcing run, reusing the mission's last run config.
+ *  Exported so the manual "cycle now" endpoint (api/agents/autopilot-run.ts)
+ *  sources on the same path as the cron. */
+export async function startSourcing(scope: ReturnType<typeof forUser>, uid: string, policy: CampaignPolicyDoc): Promise<void> {
   const prior = ((await scope
     .collection<PipelineRunDoc>('pipeline_runs')
     .find({ missionId: policy.missionId })) as PipelineRunDoc[])

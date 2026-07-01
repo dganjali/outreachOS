@@ -161,6 +161,12 @@ export const agents = {
       '/api/agents/steer/apply',
       input
     ),
+  // Manual "cycle now": start a sourcing run immediately rather than waiting for
+  // the hourly autopilot cron.
+  autopilotRun: (mission_id: string) =>
+    authedFetch<{ sourcing: 'started' | 'in_progress'; last_sourced_at?: string }>('/api/agents/autopilot/run', {
+      mission_id,
+    }),
 };
 
 export type CoachField =

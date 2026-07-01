@@ -3869,6 +3869,13 @@ a:hover { color: var(--accent-hover); text-decoration: underline; text-underline
   border-radius: 8px;
 }
 .email-override-label { display: block; font-size: 0.75rem; color: var(--text-muted); }
+.email-guess-use {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 0.5rem; padding: 5px 10px;
+  font-size: 0.75rem; color: var(--text); background: var(--surface, rgba(0,0,0,0.04));
+  border: 1px dashed var(--warn-line); border-radius: 999px; cursor: pointer;
+}
+.email-guess-use strong { font-weight: 600; font-variant-numeric: tabular-nums; }
+.email-guess-use:hover { border-style: solid; }
 .email-override input {
   width: 100%;
   padding: 0.4rem 0.625rem;
@@ -8298,9 +8305,18 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
 .apboard-list { list-style: none; margin: 0; padding: 0; }
 .apboard-list > li + li { border-top: 1px solid var(--border-soft); }
 
+/* Row = expandable button + always-visible one-click skip; detail wraps below. */
+.apitem { display: flex; flex-wrap: wrap; align-items: stretch; }
+.aprow-skip {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; align-self: stretch; background: none; border: 0; border-left: 1px solid var(--border-soft);
+  color: var(--fg-faint); cursor: pointer; transition: background var(--dur), color var(--dur);
+}
+.aprow-skip:hover { background: var(--danger-soft, var(--surface-2)); color: var(--danger, var(--fg)); }
+
 .aprow {
   --tone: var(--fg-subtle);
-  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
   padding: var(--space-3) var(--space-4); font: inherit; text-align: left; cursor: pointer;
   background: none; border: 0; border-left: 2px solid transparent;
   transition: background var(--dur), border-color var(--dur);
@@ -8327,6 +8343,7 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
 
 .aprow-detail {
   --tone: var(--fg-subtle);
+  flex: 0 0 100%;
   display: flex; flex-direction: column; gap: var(--space-2);
   padding: 2px var(--space-4) var(--space-4) calc(var(--space-4) + 2px);
   background: var(--surface); border-left: 2px solid var(--tone);
@@ -8347,6 +8364,9 @@ label { font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); tex
 .plan-v em { font-style: normal; color: var(--fg-muted); font-weight: 500; }
 .plan-edit { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; background: none; border: none; padding: 2px 4px; font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); cursor: pointer; border-radius: var(--radius-sm, 6px); }
 .plan-edit:hover { color: var(--fg); }
+.plan-cycle { display: inline-flex; align-items: center; margin-left: 4px; padding: 2px 9px; font-size: var(--text-xs); font-weight: 600; color: var(--fg); background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; cursor: pointer; transition: background var(--dur), border-color var(--dur); }
+.plan-cycle:hover:not(:disabled) { background: var(--surface); border-color: var(--fg-subtle); }
+.plan-cycle:disabled { opacity: 0.55; cursor: default; }
 
 /* Inline schedule editor (send window, timezone, sourcing cadence). */
 .cockpit-schedule { padding: var(--space-3) var(--space-4); background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); display: flex; flex-direction: column; gap: var(--space-3); }
