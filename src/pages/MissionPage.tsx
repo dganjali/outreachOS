@@ -10,7 +10,7 @@ import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { useConfirm } from '../context/ConfirmContext';
-import { agents, gmail, pipeline, autopilot } from '../lib/api';
+import { agents, gmail, autopilot } from '../lib/api';
 import { isPaidPlan } from '../../shared/plans';
 import { asScore } from '../lib/score';
 import { CsvImport } from '../components/CsvImport';
@@ -133,9 +133,6 @@ export function MissionPage() {
   // Bumped after a bulk send so SequenceCards remount and re-read their sent state.
   const [refreshKey, setRefreshKey] = useState(0);
   const [sendingAll, setSendingAll] = useState(false);
-  // True while an Autopilot sourcing run (manual "Run a cycle now" or the cron's
-  // own cadence) is live, so the cockpit can disable the trigger + show status.
-  const [cycleRunning, setCycleRunning] = useState(false);
   // Whether the bulk subject-line editor panel is open.
   const [subjectsOpen, setSubjectsOpen] = useState(false);
   // Pipeline filter + sort, so a long list (dozens of targets) is navigable.
@@ -426,34 +423,6 @@ export function MissionPage() {
     };
   }, [contactIdsKey, refreshKey]);
 
-  // Track whether an Autopilot sourcing run is live (manual trigger or cron), so
-  // the cockpit's "Run a cycle now" button disables while one is in flight. Polls
-  // only while a run is running; idles otherwise.
-  useEffect(() => {
-    if (!id || !paid || !policy?.enabled) {
-      setCycleRunning(false);
-      return;
-    }
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const poll = async () => {
-      try {
-        const { data } = await pipeline.latestForMission(id);
-        const live = data?.status === 'pending' || data?.status === 'running';
-        if (cancelled) return;
-        setCycleRunning(live);
-        if (live) timer = setTimeout(poll, 5000);
-      } catch {
-        if (!cancelled) setCycleRunning(false);
-      }
-    };
-    poll();
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [id, paid, policy?.enabled, refreshKey]);
-
   async function runWith<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
     setBusy(label);
     setError(null);
@@ -513,9 +482,10 @@ export function MissionPage() {
       const seq = sequencesByContact[c.id];
       if (!seq) continue;
       if (initialSentSeqIds.has(seq.id)) continue;
-      const email = c.email || suggestEmail(c);
-      if (!email) continue;
-      out.push({ sequenceId: seq.id, email, name: c.name });
+      // Bulk send only goes to a real, on-file address - never a pattern guess.
+      // Guessed addresses require an explicit per-contact opt-in (SequenceCard).
+      if (!c.email) continue;
+      out.push({ sequenceId: seq.id, email: c.email, name: c.name });
     }
     return out;
   }, [allContacts, sequencesByContact, initialSentSeqIds]);
@@ -726,6 +696,35 @@ export function MissionPage() {
     }
   }
 
+  // Kick off a sourcing run right now instead of waiting for the hourly cron.
+  // Optimistically stamp last_sourced_at so "Next sourcing" stops reading
+  // "due now"; loadPolicy() then reconciles with the server.
+  const [cycling, setCycling] = useState(false);
+  async function cycleNow() {
+    if (!id) return;
+    setCycling(true);
+    try {
+      const r = await agents.autopilotRun(id);
+      if (r.sourcing === 'in_progress') {
+        toast.success('Already sourcing. New results land as they are found.');
+      } else {
+        toast.success('Sourcing now. New results land as they are found.');
+      }
+      await loadPolicy();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not start sourcing');
+    } finally {
+      setCycling(false);
+    }
+  }
+
+  // One-click reject from the Autopilot company board. Soft-rejects (with undo)
+  // via the same path as the manual status control - no confirmation screen.
+  function rejectTargetById(targetId: string) {
+    const t = targets.find((x) => x.id === targetId);
+    if (t) void setTargetStatus(t, 'rejected');
+  }
+
   // Throttle controls (review-first vs auto-send, daily cap). Optimistic with a
   // rollback on failure so the cockpit toggles feel instant.
   async function saveAutopilotField(patch: Partial<CampaignPolicy>) {
@@ -748,24 +747,6 @@ export function MissionPage() {
       } catch {
         /* best-effort; the window is saved, the schedule just won't have shifted */
       }
-    }
-  }
-
-  // Kick off a fresh Autopilot cycle right now instead of waiting for the cron
-  // cadence. Reuses the durable pipeline (background sourcing + drafting); the
-  // server guards against a duplicate run. Resetting last_sourced_at restarts the
-  // cadence clock so the "Next sourcing" readout reflects this run.
-  async function runCycleNow() {
-    if (!id || !policy || cycleRunning) return;
-    setCycleRunning(true);
-    try {
-      const { already_running } = await pipeline.start(id, undefined, policy.targets_per_cycle);
-      await saveAutopilotField({ last_sourced_at: new Date().toISOString() });
-      setRefreshKey((k) => k + 1); // re-run the poll effect so it tracks this run to completion
-      toast.success(already_running ? 'A cycle is already running.' : 'Sourcing a fresh batch now.');
-    } catch (err) {
-      setCycleRunning(false);
-      toast.error(err instanceof Error ? err.message : 'Could not start a cycle');
     }
   }
 
@@ -1054,8 +1035,9 @@ export function MissionPage() {
           entityLabel={isPeople ? 'People' : 'Companies'}
           hasReview={metrics.review > 0}
           onSaveField={saveAutopilotField}
-          onRunCycle={runCycleNow}
-          cycleRunning={cycleRunning}
+          onCycleNow={cycleNow}
+          cycling={cycling}
+          onRejectTarget={rejectTargetById}
           missionId={mission.id}
           userId={user?.id ?? ''}
           onApplied={() => {
@@ -1275,6 +1257,7 @@ export function MissionPage() {
           refreshKey={refreshKey}
           aiEnabled={aiEnabled}
           hasResume={hasResume}
+          autopilotOn={autopilotOn}
           onReloadContacts={loadContactsForTarget}
           onReloadSequence={loadSequencesForContact}
           onSendNow={sendQueuedNow}
@@ -1336,6 +1319,7 @@ function ActivityPanel({
   refreshKey,
   aiEnabled,
   hasResume,
+  autopilotOn,
   onReloadContacts,
   onReloadSequence,
   onSendNow,
@@ -1347,6 +1331,7 @@ function ActivityPanel({
   refreshKey: number;
   aiEnabled: boolean;
   hasResume: boolean;
+  autopilotOn: boolean;
   onReloadContacts: (targetId: string) => void | Promise<void>;
   onReloadSequence: (contactId: string) => void | Promise<void>;
   onSendNow: (item: QueueItem) => void | Promise<void>;
@@ -1387,6 +1372,7 @@ function ActivityPanel({
                   contact={contact}
                   aiEnabled={aiEnabled}
                   hasResume={hasResume}
+                  autopilotOn={autopilotOn}
                   onContactUpdated={() => onReloadContacts(target.id)}
                   onSequenceUpdated={() => onReloadSequence(contact.id)}
                 />
@@ -1556,7 +1542,7 @@ function MissionTopbar({
         {!autopilotOn && (
           <button
             type="button"
-            className="btn-go btn-launch"
+            className="btn-secondary btn-launch"
             onClick={onRun}
             title="Find companies, research them, surface contacts, and draft initial emails, live."
           >
@@ -1611,8 +1597,9 @@ function AutopilotCockpit({
   entityLabel,
   hasReview,
   onSaveField,
-  onRunCycle,
-  cycleRunning,
+  onCycleNow,
+  cycling,
+  onRejectTarget,
   missionId,
   userId,
   onApplied,
@@ -1625,8 +1612,9 @@ function AutopilotCockpit({
   entityLabel: string;
   hasReview: boolean;
   onSaveField: (patch: Partial<CampaignPolicy>) => void | Promise<void>;
-  onRunCycle: () => void;
-  cycleRunning: boolean;
+  onCycleNow: () => void | Promise<void>;
+  cycling: boolean;
+  onRejectTarget: (targetId: string) => void;
   missionId: string;
   userId: string;
   onApplied: () => void;
@@ -1680,6 +1668,9 @@ function AutopilotCockpit({
           <Radar size={14} aria-hidden />
           <span className="plan-k">Next sourcing</span>
           <span className="plan-v">{nextRunLabel}</span>
+          <button type="button" className="plan-cycle" disabled={cycling} onClick={onCycleNow}>
+            {cycling ? 'Sourcing…' : 'Cycle now'}
+          </button>
         </span>
         {policy.auto_send ? (
           <>
@@ -1721,20 +1712,11 @@ function AutopilotCockpit({
         >
           <Pencil size={12} aria-hidden /> {editingSchedule ? 'Done' : 'Adjust'}
         </button>
-        <button
-          type="button"
-          className="plan-edit plan-run-now"
-          onClick={onRunCycle}
-          disabled={cycleRunning}
-          title="Source, research, and draft a fresh batch now instead of waiting for the next cycle."
-        >
-          <PlaneTakeoff size={12} aria-hidden /> {cycleRunning ? 'Sourcing…' : 'Run a cycle now'}
-        </button>
       </div>
 
       {editingSchedule && <ScheduleEditor policy={policy} onSaveField={onSaveField} />}
 
-      <CompanyBoard flights={flights} label={entityLabel} />
+      <CompanyBoard flights={flights} label={entityLabel} onReject={onRejectTarget} />
 
       {hasReview && (
         <p className="cockpit-review-pointer">
@@ -1754,7 +1736,7 @@ function AutopilotCockpit({
           >
             {!policy.auto_send && (
               <span className="ap-choice-check">
-                <Check size={12} />
+                <Check size={12} aria-hidden />
               </span>
             )}
             <span className="ap-choice-title">Review first</span>
@@ -1768,7 +1750,7 @@ function AutopilotCockpit({
           >
             {policy.auto_send && (
               <span className="ap-choice-check">
-                <Check size={12} />
+                <Check size={12} aria-hidden />
               </span>
             )}
             <span className="ap-choice-title">Send automatically</span>
@@ -2148,7 +2130,7 @@ function RunDeck({
 
 // Per-company board: each row is a name + a 6-step progress strip showing how far
 // down the funnel Autopilot has carried it. Click a row to read what's happening.
-function CompanyBoard({ flights, label }: { flights: Flight[]; label: string }) {
+function CompanyBoard({ flights, label, onReject }: { flights: Flight[]; label: string; onReject?: (targetId: string) => void }) {
   const [openId, setOpenId] = useState<string | null>(null);
   return (
     <div className="apboard">
@@ -2164,7 +2146,7 @@ function CompanyBoard({ flights, label }: { flights: Flight[]; label: string }) 
             const reached = STAGE_INDEX[f.stage];
             const open = openId === f.id;
             return (
-              <li key={f.id}>
+              <li key={f.id} className="apitem">
                 <button
                   type="button"
                   className={`aprow tone-${f.tone}${open ? ' is-open' : ''}`}
@@ -2185,6 +2167,17 @@ function CompanyBoard({ flights, label }: { flights: Flight[]; label: string }) 
                     <ChevronRight className="aprow-chev" size={15} aria-hidden />
                   </span>
                 </button>
+                {onReject && (
+                  <button
+                    type="button"
+                    className="aprow-skip"
+                    onClick={() => onReject(f.id)}
+                    title={`Skip ${f.name}`}
+                    aria-label={`Skip ${f.name}`}
+                  >
+                    <X size={14} aria-hidden />
+                  </button>
+                )}
                 {open && (
                   <div className={`aprow-detail tone-${f.tone}`}>
                     <p className="aprow-detail-note">{f.note}</p>
@@ -3180,7 +3173,7 @@ function BulkSubjectEditor({
   );
 }
 
-function SequenceCard({ sequence, contact, aiEnabled, hasResume, onContactUpdated, onSequenceUpdated }: { sequence: EmailSequence; contact: Contact; aiEnabled: boolean; hasResume: boolean; onContactUpdated?: () => void | Promise<void>; onSequenceUpdated?: () => void | Promise<void> }) {
+function SequenceCard({ sequence, contact, aiEnabled, hasResume, autopilotOn = false, onContactUpdated, onSequenceUpdated }: { sequence: EmailSequence; contact: Contact; aiEnabled: boolean; hasResume: boolean; autopilotOn?: boolean; onContactUpdated?: () => void | Promise<void>; onSequenceUpdated?: () => void | Promise<void> }) {
   // The draft is the point of opening a person, so it renders inline the moment
   // the contact row expands — no extra collapse to click through. (This card only
   // mounts when its contact row is open.) Follow-ups stay folded until asked for:
@@ -3195,8 +3188,12 @@ function SequenceCard({ sequence, contact, aiEnabled, hasResume, onContactUpdate
   // api/agents/sequence.ts), so a fresh draft shows none until they land. Poll
   // briefly and surface a "writing…" state instead of looking empty.
   const [generatingFollowups, setGeneratingFollowups] = useState(false);
-  const [overrideEmail, setOverrideEmail] = useState(() => suggestEmail(contact));
+  // Only a real, on-file address prefills the send field. A pattern-derived
+  // best-guess (e.g. first.last@domain) is NEVER auto-filled - it's offered as an
+  // explicit opt-in below, so a guess is never sent unless the user picks it.
+  const [overrideEmail, setOverrideEmail] = useState(contact.email ?? '');
   const [needsEmail, setNeedsEmail] = useState(false);
+  const guessedEmail = contact.email ? '' : suggestEmail(contact);
   const [savingEmail, setSavingEmail] = useState(false);
   const [draft, setDraft] = useState({
     subject: sequence.subject,
@@ -3400,10 +3397,10 @@ function SequenceCard({ sequence, contact, aiEnabled, hasResume, onContactUpdate
 
   return (
     <div className="sequence-card">
-      {(sequence.primary_angle || sequence.autopilot_state) && (
+      {(sequence.primary_angle || (autopilotOn && sequence.autopilot_state)) && (
         <div className="sequence-meta">
           {sequence.primary_angle && <span className="angle-pill">{sequence.primary_angle}</span>}
-          {sequence.autopilot_state && (
+          {autopilotOn && sequence.autopilot_state && (
             <span className={`badge ${autopilotBadgeTone(sequence.autopilot_state)}`}>
               {autopilotLabel(sequence.autopilot_state)}
             </span>
@@ -3411,7 +3408,7 @@ function SequenceCard({ sequence, contact, aiEnabled, hasResume, onContactUpdate
         </div>
       )}
       <div className="sequence-body">
-          {sequence.autopilot_state === 'ready' && (
+          {autopilotOn && sequence.autopilot_state === 'ready' && (
             <div className="autopilot-banner ok">
               <span>Passed the Autopilot gate: verified address, high confidence.</span>
               <button
@@ -3424,7 +3421,7 @@ function SequenceCard({ sequence, contact, aiEnabled, hasResume, onContactUpdate
               </button>
             </div>
           )}
-          {sequence.autopilot_state === 'review' && (
+          {autopilotOn && sequence.autopilot_state === 'review' && (
             <div className="autopilot-banner warn">
               Held for review: the recipient address isn't verified yet. Add or confirm a verified
               address below to send it, or switch this mission to Manual (top right) to review and
@@ -3435,9 +3432,19 @@ function SequenceCard({ sequence, contact, aiEnabled, hasResume, onContactUpdate
             <div className="email-override">
               <span className="email-override-label">
                 {contact.likely_email_pattern
-                  ? `Recipient email — no verified address (pattern suggests ${contact.likely_email_pattern})`
+                  ? `Recipient email — no verified address (pattern: ${contact.likely_email_pattern})`
                   : 'Recipient email — no verified address on file'}
               </span>
+              {guessedEmail && overrideEmail.trim().toLowerCase() !== guessedEmail.toLowerCase() && (
+                <button
+                  type="button"
+                  className="email-guess-use"
+                  onClick={() => setOverrideEmail(guessedEmail)}
+                  title="Fill the field with the pattern-based best guess. It is unverified - it may bounce."
+                >
+                  Use best guess <strong>{guessedEmail}</strong>
+                </button>
+              )}
               <div className="email-override-row">
                 <input
                   type="email"
@@ -3456,8 +3463,11 @@ function SequenceCard({ sequence, contact, aiEnabled, hasResume, onContactUpdate
                 </button>
               </div>
               <p className="email-override-hint">
-                Add an email to enable sending. <strong>Save to contact</strong> reuses it for every email to this
-                person; otherwise it applies to this send only.
+                {guessedEmail
+                  ? 'The best guess is built from the company email pattern and is unverified - it may bounce. '
+                  : 'Add an email to enable sending. '}
+                <strong>Save to contact</strong> reuses it for every email to this person; otherwise it applies to
+                this send only.
               </p>
             </div>
           )}
