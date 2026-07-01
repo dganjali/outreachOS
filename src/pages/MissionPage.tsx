@@ -3261,12 +3261,13 @@ function SequenceCard({ sequence, contact, aiEnabled, hasResume, autopilotOn = f
   // api/agents/sequence.ts), so a fresh draft shows none until they land. Poll
   // briefly and surface a "writing…" state instead of looking empty.
   const [generatingFollowups, setGeneratingFollowups] = useState(false);
-  // Only a real, on-file address prefills the send field. A pattern-derived
-  // best-guess (e.g. first.last@domain) is NEVER auto-filled - it's offered as an
-  // explicit opt-in below, so a guess is never sent unless the user picks it.
-  const [overrideEmail, setOverrideEmail] = useState(contact.email ?? '');
-  const [needsEmail, setNeedsEmail] = useState(false);
+  // When there's no verified address on file, prefill the send field with the
+  // pattern-derived best-guess (real name substituted in, e.g. jane.doe@nasa.gov
+  // - NOT the literal "first.last@nasa.gov" template) so sending "just works".
+  // The field stays editable and the "unverified - may bounce" hint stays shown.
   const guessedEmail = contact.email ? '' : suggestEmail(contact);
+  const [overrideEmail, setOverrideEmail] = useState(contact.email || guessedEmail);
+  const [needsEmail, setNeedsEmail] = useState(false);
   const [savingEmail, setSavingEmail] = useState(false);
   const [draft, setDraft] = useState({
     subject: sequence.subject,
@@ -3746,14 +3747,24 @@ function normalizeCompanyDomain(domain: string | null | undefined): string | nul
 function suggestEmail(contact: Contact): string {
   if (contact.email) return contact.email;
   const pattern = contact.likely_email_pattern?.trim();
-  if (!pattern || pattern.includes('@')) return pattern ?? '';
+  if (!pattern) return '';
   const parts = contact.name.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  if (parts.length < 2) return '';
   const [first, last] = parts;
-  if (pattern.includes('first') && pattern.includes('last')) {
-    return pattern.replace(/first/gi, first).replace(/last/gi, last);
+  // Substitute the person's real name into template tokens. A pattern like
+  // "first.last@nasa.gov" carries an '@' AND the tokens, so we must NOT early-out
+  // on the '@' - otherwise the literal "first.last@nasa.gov" gets sent verbatim.
+  const hasFirst = /first/i.test(pattern);
+  const hasLast = /last/i.test(pattern);
+  if (hasFirst || hasLast) {
+    if (!first) return '';
+    // Only fill a "last" token when we actually have a last name, else we'd
+    // leave a dangling "last" in the address.
+    if (hasLast && !last) return '';
+    return pattern.replace(/first/gi, first).replace(/last/gi, last ?? '');
   }
-  return '';
+  // No template tokens: a concrete address ("jane@nasa.gov") passes through; a
+  // bare domain/label with no tokens can't be turned into a person's address.
+  return pattern.includes('@') ? pattern : '';
 }
 
 function EmailStatusPill({ status }: { status: Contact['email_status'] }) {
