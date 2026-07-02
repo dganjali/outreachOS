@@ -22,6 +22,7 @@ import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
 import { resolveCompanyDomains } from '../_lib/company-enrich';
 import { serperEnabled, searchOpenPeoplePool, profileKey, type OpenPeopleQuerySpec, type SerperOrganicResult } from '../_lib/serper';
 import { isExcludedName, normalizeDomain, senderContextLines, senderExclusions } from '../_lib/sender-context';
+import { loadCommittedDomains } from '../_lib/targeted';
 import { getOrCreateContactIcp, narrowIcpBySelection } from './contacts';
 import { scoreContact } from '../_lib/seniority';
 import type { ContactIcp, ContactTypeFilter, SeniorityLevel } from '../../shared/types';
@@ -76,6 +77,12 @@ export default async function handler(req: Request, res: Response) {
   const priorTargets = await scope.collection<TargetDoc>('targets').find({ missionId: mission_id });
   const already = buildAlready(priorTargets);
 
+  // Cross-mission company dedup (default on): drop people whose current company
+  // was already approved/contacted in ANY mission, so the same firm doesn't get
+  // worked twice across missions. Same-mission person freshness is `already` above.
+  const allowRepeat = profile?.allowRepeatCompanies === true;
+  const committedDomains = allowRepeat ? new Set<string>() : await loadCommittedDomains(scope);
+
   const run = await startRun(scope, {
     agentType: 'targeting',
     missionId: mission_id,
@@ -112,7 +119,7 @@ export default async function handler(req: Request, res: Response) {
       }),
     }));
     const kept = scored
-      .filter((x) => !x.s.disqualified)
+      .filter((x) => !x.s.disqualified && !isCommittedCompany(x.p, domains, committedDomains))
       .sort((a, b) => b.s.score - a.s.score)
       .slice(0, desired);
     if (kept.length === 0) {
@@ -278,6 +285,18 @@ function personKey(p: { name: string; company: string; linkedin_url?: string | n
   const li = (p.linkedin_url ?? '').trim();
   if (li) return `li:${profileKey(li)}`;
   return `nc:${p.name.trim().toLowerCase()}|${p.company.trim().toLowerCase()}`;
+}
+
+// True if this person's current company was already approved/contacted in some
+// mission (cross-mission dedup). `domains` maps company name -> resolved domain.
+function isCommittedCompany(
+  p: OpenPerson,
+  domains: Map<string, string>,
+  committedDomains: Set<string>
+): boolean {
+  if (committedDomains.size === 0) return false;
+  const d = normalizeDomain(domains.get(p.company.trim()) ?? null);
+  return !!d && committedDomains.has(d);
 }
 
 function buildAlready(priorTargets: TargetDoc[]): Set<string> {

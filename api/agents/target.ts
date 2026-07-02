@@ -15,6 +15,7 @@ import {
   senderContextLines,
   senderExclusions,
 } from '../_lib/sender-context';
+import { loadCommittedDomains } from '../_lib/targeted';
 import type { MissionDoc, ProfileDoc, TargetDoc } from '../../shared/schemas';
 
 interface TargetSuggestion {
@@ -95,11 +96,19 @@ export default async function handler(req: Request, res: Response) {
   // the model picks different ones) and used to drop any that slip through, so a
   // re-run of the same mission finds NEW companies instead of the same top picks.
   const priorTargets = await scope.collection<TargetDoc>('targets').find({ missionId: mission_id });
+  const domains = new Set(
+    priorTargets.map((t) => normalizeDomain(t.domain)).filter((d): d is string => !!d)
+  );
+  // Cross-mission dedup (default on): also drop companies this account has already
+  // approved/contacted in ANY other mission. Names stay mission-scoped - the domain
+  // set is the canonical guard and the prompt hint shouldn't balloon.
+  const allowRepeat = profile?.allowRepeatCompanies === true;
+  if (!allowRepeat) {
+    for (const d of await loadCommittedDomains(scope)) domains.add(d);
+  }
   const alreadyTargeted: AlreadyTargeted = {
     names: priorTargets.map((t) => (t.companyName ?? '').trim()).filter(Boolean),
-    domains: new Set(
-      priorTargets.map((t) => normalizeDomain(t.domain)).filter((d): d is string => !!d)
-    ),
+    domains,
   };
 
   const run = await startRun(scope, {

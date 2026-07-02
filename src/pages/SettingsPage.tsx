@@ -39,6 +39,10 @@ export function SettingsPage() {
   const [autoOn, setAutoOn] = useState(false);
   const [pauseBusy, setPauseBusy] = useState(false);
   const [profileId, setProfileId] = useState<string | null>(null);
+  // Cross-mission company dedup. Repeats are OFF by default (companies never
+  // repeat across missions); this toggle turns repeats ON.
+  const [allowRepeat, setAllowRepeat] = useState(false);
+  const [repeatBusy, setRepeatBusy] = useState(false);
   const [suppressions, setSuppressions] = useState<Array<{ id: string; email: string; reason: string }>>([]);
   const [newEmail, setNewEmail] = useState('');
   const [suppressError, setSuppressError] = useState<string | null>(null);
@@ -72,6 +76,30 @@ export function SettingsPage() {
       toast.success(next ? 'Auto follow-ups on.' : 'Auto follow-ups off.');
     } finally {
       setPauseBusy(false);
+    }
+  }
+
+  async function toggleRepeat() {
+    if (!profileId) {
+      toast.error('Profile still loading, try again in a second.');
+      return;
+    }
+    const next = !allowRepeat;
+    setAllowRepeat(next);
+    setRepeatBusy(true);
+    try {
+      const { error: err } = await supabase
+        .from('profiles')
+        .update({ allow_repeat_companies: next })
+        .eq('id', profileId);
+      if (err) {
+        setAllowRepeat(!next); // revert - server state did not change
+        toast.error(`Could not update setting: ${err.message}`);
+        return;
+      }
+      toast.success(next ? 'Companies can now repeat across missions.' : 'Companies won’t repeat across missions.');
+    } finally {
+      setRepeatBusy(false);
     }
   }
 
@@ -152,8 +180,9 @@ export function SettingsPage() {
       .single()
       .then(({ data }) => {
         if (data) {
-          const row = data as { id?: string; auto_followups?: boolean };
+          const row = data as { id?: string; auto_followups?: boolean; allow_repeat_companies?: boolean };
           setAutoOn(!!row.auto_followups);
+          setAllowRepeat(!!row.allow_repeat_companies);
           setProfileId(row.id ?? null);
         }
       });
@@ -368,6 +397,28 @@ export function SettingsPage() {
             ))}
           </ul>
         )}
+      </SettingsSection>
+
+      <SettingsSection
+        title="Targeting"
+        hint="By default, a company that you've approved or emailed in one mission won't be suggested again in another - so your missions never overlap on the same companies. Turn this on to let the same company appear across multiple missions."
+      >
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            type="button"
+            variant={allowRepeat ? 'default' : 'outline'}
+            size="sm"
+            onClick={toggleRepeat}
+            disabled={repeatBusy}
+          >
+            {allowRepeat ? 'Turn off repeat companies' : 'Turn on repeat companies'}
+          </Button>
+          <span className="text-sm text-muted-foreground">
+            {allowRepeat
+              ? 'On. The same company can appear in multiple missions.'
+              : 'Off. Companies never repeat across missions.'}
+          </span>
+        </div>
       </SettingsSection>
 
       <SettingsSection title="Account">
