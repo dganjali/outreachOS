@@ -19,6 +19,7 @@ import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
 import { buildSteerUpdates, isEmptyUpdate, normalizeProposal } from '../_lib/steer';
 import { resolveRecipe, applyRecipePatch, upsertRecipe, policyView, type RecipeStages } from '../_lib/recipe';
 import { rescheduleQueuedSends } from '../_lib/reschedule';
+import { resolveCompanyDomains, enrichCompanySize } from '../_lib/company-enrich';
 import type {
   ContextFactDoc,
   MissionDoc,
@@ -28,6 +29,9 @@ import type {
 
 // Cap how many targets we surface to the agent (prompt budget) + how many a
 // single instruction may add (bounds cost/abuse).
+// Name-based removal (targets.removeNames) is deferred until missions routinely
+// exceed MAX_TARGETS_IN_PROMPT live targets; today apply() lifts the cap to
+// Infinity so id-based removal covers every non-rejected target regardless.
 const MAX_TARGETS_IN_PROMPT = 40;
 const MAX_TARGETS_ADD = 10;
 
@@ -192,10 +196,28 @@ async function missionFacts(scope: ReturnType<typeof forUser>, missionId: string
 }
 
 // The live targets the agent may edit: exclude rejected ones (already dropped).
-async function missionTargets(scope: ReturnType<typeof forUser>, missionId: string): Promise<TargetDoc[]> {
+// The interpret path keeps the MAX_TARGETS_IN_PROMPT cap (prompt budget); apply()
+// passes Infinity so the valid-id set covers ALL non-rejected targets.
+async function missionTargets(
+  scope: ReturnType<typeof forUser>,
+  missionId: string,
+  limit: number = MAX_TARGETS_IN_PROMPT
+): Promise<TargetDoc[]> {
   const all = (await scope.collection<TargetDoc>('targets').find({ missionId } as Record<string, unknown>)) as TargetDoc[];
-  return all.filter((t) => t.status !== 'rejected').slice(0, MAX_TARGETS_IN_PROMPT);
+  return all.filter((t) => t.status !== 'rejected').slice(0, limit);
 }
+
+// Injectable so the add loop's domain/size enrichment is unit-testable without
+// network. Defaults wire the real Serper/LLM domain resolver + size enrichment.
+export interface TargetAddDeps {
+  resolveDomains: (companies: Array<{ name: string; hint?: string }>) => Promise<Map<string, string>>;
+  enrichSize: (name: string, domain?: string | null) => Promise<number | null>;
+}
+
+const DEFAULT_TARGET_ADD_DEPS: TargetAddDeps = {
+  resolveDomains: resolveCompanyDomains,
+  enrichSize: enrichCompanySize,
+};
 
 // Apply the proposal's direct target edits. Best-effort per op so one bad id
 // never aborts the rest. Returns a tally for the run log.
@@ -204,8 +226,10 @@ export async function applyTargetOps(
   missionId: string,
   ops: NonNullable<SteerProposal['targets']>,
   validIds: Set<string>,
-): Promise<{ added: number; removed: number; pinned: number }> {
-  const tally = { added: 0, removed: 0, pinned: 0 };
+  hint?: string,
+  deps: TargetAddDeps = DEFAULT_TARGET_ADD_DEPS,
+): Promise<{ added: number; removed: number; pinned: number; enriched: number }> {
+  const tally = { added: 0, removed: 0, pinned: 0, enriched: 0 };
   for (const id of ops.removeIds ?? []) {
     if (!validIds.has(id)) continue;
     try {
@@ -225,13 +249,33 @@ export async function applyTargetOps(
     }
   }
   const names = [...new Set((ops.add ?? []).map((n) => n.trim()).filter(Boolean))].slice(0, MAX_TARGETS_ADD);
-  for (const companyName of names) {
+  // Resolve domains once for the whole batch. A resolver outage must not abort
+  // the adds, so fall back to an empty Map and insert bare targets.
+  let domains = new Map<string, string>();
+  try {
+    domains = await deps.resolveDomains(names.map((name) => ({ name, hint })));
+  } catch (err) {
+    console.warn('steer target domain resolve failed', err);
+  }
+  // Enrich sizes concurrently; a name without a resolved domain resolves null,
+  // and any rejection maps to null (best-effort, never blocks the insert).
+  const sizes = await Promise.allSettled(
+    names.map((name) => {
+      const domain = domains.get(name) ?? null;
+      return domain ? deps.enrichSize(name, domain) : Promise.resolve<number | null>(null);
+    }),
+  );
+  for (let i = 0; i < names.length; i++) {
+    const companyName = names[i];
+    const domain = domains.get(companyName) ?? null;
+    const sizeSettled = sizes[i];
+    const employeeCount = sizeSettled.status === 'fulfilled' ? sizeSettled.value : null;
     try {
       await scope.collection<TargetDoc>('targets').insertOne({
         _id: newId(),
         missionId,
         companyName,
-        domain: null,
+        domain,
         score: null,
         whyNow: null,
         fitReason: null,
@@ -239,10 +283,11 @@ export async function applyTargetOps(
         status: 'suggested',
         source: 'manual',
         industry: null,
-        employeeCount: null,
+        employeeCount,
         headquartersLocation: null,
       } as never);
       tally.added++;
+      if (domain) tally.enriched++;
     } catch (err) {
       console.warn('steer target add failed', companyName, err);
     }
@@ -358,11 +403,12 @@ export async function apply(req: Request, res: Response) {
         await rescheduleQueuedSends(scope, mission_id, policyView(nextStages), new Date());
       }
     }
-    let targetTally = { added: 0, removed: 0, pinned: 0 };
+    let targetTally = { added: 0, removed: 0, pinned: 0, enriched: 0 };
     if (hasTargetOps(targetOps)) {
-      // Only the user's own live targets may be removed/pinned.
-      const valid = new Set((await missionTargets(scope, mission_id)).map((t) => t._id));
-      targetTally = await applyTargetOps(scope, mission_id, targetOps!, valid);
+      // Only the user's own live targets may be removed/pinned. Lift the prompt
+      // cap so validIds covers every non-rejected target, not just the first 40.
+      const valid = new Set((await missionTargets(scope, mission_id, Infinity)).map((t) => t._id));
+      targetTally = await applyTargetOps(scope, mission_id, targetOps!, valid, mission.targetDescription);
     }
     await completeRun(scope, run._id, {
       mission_fields: Object.keys(missionUpdate),

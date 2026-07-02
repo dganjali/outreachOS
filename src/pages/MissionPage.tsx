@@ -1128,11 +1128,6 @@ export function MissionPage() {
           onRejectTarget={rejectTargetById}
           missionId={mission.id}
           userId={user?.id ?? ''}
-          recipe={recipe}
-          onRecipeChange={(r) => {
-            setRecipe(r);
-            setPolicy(recipeToPolicy(r));
-          }}
           onApplied={() => {
             loadMission();
             loadPolicy();
@@ -1717,8 +1712,6 @@ function AutopilotCockpit({
   onRejectTarget,
   missionId,
   userId,
-  recipe,
-  onRecipeChange,
   onApplied,
 }: {
   policy: CampaignPolicy;
@@ -1734,8 +1727,6 @@ function AutopilotCockpit({
   onRejectTarget: (targetId: string) => void;
   missionId: string;
   userId: string;
-  recipe: MissionRecipe | null;
-  onRecipeChange: (r: MissionRecipe) => void;
   onApplied: () => void;
 }) {
   const [capDraft, setCapDraft] = useState(String(policy.daily_send_cap));
@@ -1891,11 +1882,6 @@ function AutopilotCockpit({
           </label>
         )}
       </div>
-
-      <details className="recipe-disclosure">
-        <summary>Pipeline recipe — tune each stage</summary>
-        <RecipeEditor missionId={missionId} recipe={recipe} onSaved={onRecipeChange} />
-      </details>
 
       {userId && <SteeringChat missionId={missionId} userId={userId} onApplied={onApplied} />}
 
