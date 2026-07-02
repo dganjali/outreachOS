@@ -35,6 +35,8 @@ gcloud builds submit --config cloudbuild.yaml --substitutions _TAG=$(git rev-par
 ```
 Cloud Build step 0 runs `npm ci && npm run server:typecheck && npm test` before the Docker build, so a red typecheck/test blocks the deploy. The build uploads the working tree, not git HEAD.
 
+**Data migrations:** if a task adds/backfills a collection, run its `npm run migrate:*` against prod (reads `MONGODB_URI`) BEFORE the backend deploy, and re-run `npm run mongo:init` for new indexes. `migrate-recipes` is idempotent + non-destructive.
+
 **Health check:** `curl https://outreachos.app/api/healthz` → `{"ok":true}` (use `/api/healthz`, not `/healthz` — GFE swallows the latter on the public URL).
 
 Deploy whichever side(s) the task touched (frontend, backend, or both).
@@ -62,7 +64,8 @@ OutreachOS: agent-powered cold outreach. A React SPA talks to a Node/Express API
 | `api/_lib/` | Backend internals: `llm.ts` (Gemini), `db.ts` (Mongo), `auth.ts`, `engine.ts`/`pipeline.ts` (orchestration), `assemble.ts` (prompt assembly), `embeddings.ts`, contact/email resolution (`email-finder`, `email-resolver`, `email-verifier`, `contact-verify`), `env.ts` (fail-fast required-env check), `prompts.ts`. Tests sit next to sources as `*.test.ts`. |
 | `shared/` | Code shared by client + server: `schemas.ts` (Zod), `types.ts`, `plans.ts`, `deliverability.ts`. |
 | `server/index.ts` | Express entrypoint — wires every `/api/*` route, runs on Cloud Run. |
-| `scripts/` | One-off ops: data migrations (`migrate-*`), `init-mongo.ts`, `set-plan.ts`, `eval/` (prompt-quality eval harness). |
+| `scripts/` | One-off ops: data migrations (`migrate-*`), `init-mongo.ts`, `set-plan.ts`, `eval/` (prompt-quality eval harness). `migrate-recipes.ts` backfills `mission_recipes` from the legacy `campaign_policies` + last run (idempotent). |
+| Mission Recipe (Phase 3) | `mission_recipes` is the single source of truth for a mission's pipeline (stages: sourcing → verification → research → personSourcing → sequencing → send). It **subsumes** `campaign_policies` (now write-dead, read only as a resolve fallback; drop post-migration). `api/_lib/recipe.ts` resolves/clamps it (`resolveRecipe`, `buildRecipeStages`, `applyRecipePatch`, `policyView`); both manual runs and the autopilot cron read it. `api/autopilot/recipe.ts` is the frontend GET/POST. The steer agent + `RecipeEditor` (Setup tab + cockpit) edit any stage, plus add/remove/pin specific targets. |
 | `cloudbuild.yaml` · `Dockerfile` · `firebase.json` | Deploy config: Cloud Build pipeline, backend container, Hosting + `/api` rewrite. |
 | `*.md` (root) | Living docs: `README`, `ARCHITECTURE`, `PRODUCT`, `VISION`, `DESIGN`, `CONTACT_ENGINE`, `MONETIZATION`, `SECURITY_AUDIT`, `TODO`. Background, not instructions. |
 

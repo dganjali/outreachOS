@@ -16,6 +16,7 @@ import type {
   StyleProfile,
 } from '../types';
 import type { PlanId, PlanStatus } from '../../shared/plans';
+import type { MissionRecipe } from '../types';
 import type { SteerProposal } from '../../shared/schemas';
 // Mongo stores docs in camelCase + `_id`; frontend types use snake_case + `id`.
 // Shared with src/lib/db.ts so the two clients can't drift.
@@ -309,6 +310,28 @@ export const autopilot = {
   // change so they move into the new window. Returns how many rows shifted.
   reschedule: (mission_id: string) =>
     authedFetch<{ ok: boolean; rescheduled: number }>('/api/autopilot/reschedule', { mission_id }),
+
+  // The mission's modular pipeline recipe (created + self-healed server-side if
+  // missing). The single source of truth both manual runs and autopilot read.
+  getRecipe: (mission_id: string) =>
+    authedFetch<{ data: MissionRecipe }>(`/api/autopilot/recipe?mission_id=${encodeURIComponent(mission_id)}`, undefined, 'GET'),
+
+  // Apply a stage patch (merged + clamped server-side) and return the updated
+  // recipe. `patch` is a partial MissionRecipe (snake_case), e.g.
+  // { person_sourcing: { contacts_per_company: 3 } } or { automation_enabled: true }.
+  saveRecipe: (mission_id: string, patch: RecipePatch) =>
+    authedFetch<{ data: MissionRecipe }>('/api/autopilot/recipe', { mission_id, patch }),
+};
+
+// A partial edit over a recipe's stages (snake_case, mirrors MissionRecipe).
+export type RecipePatch = {
+  automation_enabled?: boolean;
+  sourcing?: Partial<MissionRecipe['sourcing']>;
+  verification?: Partial<MissionRecipe['verification']>;
+  research?: Partial<MissionRecipe['research']>;
+  person_sourcing?: Partial<MissionRecipe['person_sourcing']>;
+  sequencing?: Partial<MissionRecipe['sequencing']>;
+  send?: Partial<MissionRecipe['send']>;
 };
 
 // Agent-run analytics. Server aggregates over the agent_runs telemetry; keys

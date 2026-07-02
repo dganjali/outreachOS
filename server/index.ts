@@ -24,6 +24,7 @@ import agentSteer, { apply as agentSteerApply } from '../api/agents/steer';
 import agentAutopilotRun from '../api/agents/autopilot-run';
 import agentPipeline, { cancel as agentPipelineCancel } from '../api/agents/pipeline';
 import autopilotReschedule from '../api/autopilot/reschedule';
+import autopilotRecipe from '../api/autopilot/recipe';
 
 import gmailSend from '../api/gmail/send';
 import gmailReply from '../api/gmail/reply';
@@ -156,6 +157,8 @@ app.get('/api/agents/pipeline', wrap(agentPipeline));
 
 // autopilot
 app.post('/api/autopilot/reschedule', wrap(autopilotReschedule));
+app.get('/api/autopilot/recipe', wrap(autopilotRecipe));
+app.post('/api/autopilot/recipe', wrap(autopilotRecipe));
 
 // gmail
 app.post('/api/gmail/send', wrap(gmailSend));

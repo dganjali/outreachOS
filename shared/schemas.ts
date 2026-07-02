@@ -784,6 +784,13 @@ export interface SteerProposal {
   };
   emphasizeFactIds?: string[]; // pin these context-fact ids on the mission
   deemphasizeFactIds?: string[]; // unpin these
+  // Direct edits to the discovered target set - "skim and truly edit the targets".
+  // Ids come from the TARGETS list shown to the agent; names are free text.
+  targets?: {
+    add?: string[]; // company (people-mode: person/company) names to add as new targets
+    removeIds?: string[]; // target ids to drop from the run (soft-reject)
+    pinIds?: string[]; // target ids to keep + pursue (promote out of the suggested pool)
+  };
   changes: SteerChange[]; // review-card rows describing the above
   clarification?: string | null; // set instead of a patch when the ask is unclear
 }

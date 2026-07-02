@@ -10,7 +10,8 @@ import { toast } from 'sonner';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { useConfirm } from '../context/ConfirmContext';
-import { agents, gmail, pipeline, autopilot, type PipelineRunView } from '../lib/api';
+import { agents, gmail, pipeline, autopilot, type PipelineRunView, type RecipePatch } from '../lib/api';
+import { RecipeEditor } from '../components/RecipeEditor';
 import { isPaidPlan } from '../../shared/plans';
 import { asScore } from '../lib/score';
 import { CsvImport } from '../components/CsvImport';
@@ -28,6 +29,7 @@ import type {
   SentMessage,
   Reply,
   CampaignPolicy,
+  MissionRecipe,
   ContextFact,
   MissionSteeringMessage,
   SteerProposal,
@@ -58,17 +60,43 @@ const STAGE_FILTER_LABEL: Record<string, string> = {
 };
 const STAGE_FILTER_ORDER = ['research', 'contacts', 'draft', 'review', 'done'] as const;
 
-// First-write defaults for a mission's Autopilot policy. Everything the user
-// never configures directly; the cron normalizes missing fields too.
-const AP_DEFAULTS = {
-  auto_send: false,
-  targets_per_cycle: 5,
-  cycle_interval_hours: 24,
-  daily_send_cap: 10,
-  send_window: { start_hour: 9, end_hour: 17 },
-  timezone: typeof Intl !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().timeZone : 'America/Toronto',
-  min_confidence: 0.6,
-};
+// The cockpit renders from a flat CampaignPolicy view. Phase 3 stores everything
+// in the mission recipe, so we PROJECT the recipe's send + verification stages
+// into that flat shape (recipeToPolicy) and map flat cockpit edits back to recipe
+// stage patches (policyPatchToRecipe). The cockpit UI itself is unchanged.
+function recipeToPolicy(r: MissionRecipe): CampaignPolicy {
+  return {
+    id: r.id,
+    mission_id: r.mission_id,
+    enabled: r.automation_enabled,
+    auto_send: r.send.auto_send,
+    targets_per_cycle: r.sourcing.top_n,
+    cycle_interval_hours: r.send.cycle_interval_hours,
+    last_sourced_at: r.send.last_sourced_at,
+    daily_send_cap: r.send.daily_send_cap,
+    send_window: r.send.send_window,
+    timezone: r.send.timezone,
+    min_confidence: r.verification.min_confidence,
+    counter: r.send.counter,
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+  };
+}
+
+function policyPatchToRecipe(patch: Partial<CampaignPolicy>): RecipePatch {
+  const out: RecipePatch = {};
+  const send: NonNullable<RecipePatch['send']> = {};
+  if ('enabled' in patch) out.automation_enabled = patch.enabled;
+  if ('auto_send' in patch) send.auto_send = patch.auto_send;
+  if ('daily_send_cap' in patch) send.daily_send_cap = patch.daily_send_cap;
+  if ('cycle_interval_hours' in patch) send.cycle_interval_hours = patch.cycle_interval_hours;
+  if ('send_window' in patch) send.send_window = patch.send_window;
+  if ('timezone' in patch) send.timezone = patch.timezone;
+  if (Object.keys(send).length) out.send = send;
+  if ('min_confidence' in patch) out.verification = { min_confidence: patch.min_confidence };
+  if ('targets_per_cycle' in patch) out.sourcing = { top_n: patch.targets_per_cycle };
+  return out;
+}
 
 // Turn raw agent error codes into something a person can read. Falls through to
 // the original message for anything we don't have a friendlier line for.
@@ -158,6 +186,10 @@ export function MissionPage() {
   // Autopilot (paid). The mission page renders as a hands-off status "cockpit"
   // when this policy is enabled, and as the manual action console otherwise.
   const paid = isPaidPlan(profile?.plan, profile?.plan_status);
+  // The mission recipe (Phase 3) is the source of truth for the pipeline. The
+  // cockpit still renders from a flat `policy` view derived from it (recipeToPolicy)
+  // so the existing UI is untouched; writes map back to recipe stage patches.
+  const [recipe, setRecipe] = useState<MissionRecipe | null>(null);
   const [policy, setPolicy] = useState<CampaignPolicy | null>(null);
   // The headline stat strip (targets / contacts / sent) is derived from a chain
   // of dependent fetches: targets → contacts → sequences. Until that chain
@@ -295,8 +327,10 @@ export function MissionPage() {
 
   const loadPolicy = useCallback(async () => {
     if (!id) return;
-    const { data } = await supabase.from('campaign_policies').select('*').eq('mission_id', id).maybeSingle();
-    setPolicy((data as CampaignPolicy | null) ?? null);
+    // The recipe is the source of truth; the cockpit reads a flat projection of it.
+    const { data } = await autopilot.getRecipe(id);
+    setRecipe(data);
+    setPolicy(recipeToPolicy(data));
   }, [id]);
 
   // Pull the mission's latest sourcing run so we can show its live state. Silent
@@ -714,22 +748,19 @@ export function MissionPage() {
     }
     if (!id) return;
     try {
-      if (!policy) {
-        const { data, error } = await supabase
-          .from('campaign_policies')
-          .insert({ mission_id: id, enabled: true, ...AP_DEFAULTS })
-          .select('*')
-          .single();
-        if (error) throw new Error(error.message);
-        setPolicy(data as CampaignPolicy);
-        toast.success('Autopilot on. It starts sourcing and drafting on its next cycle.');
-      } else {
-        const next = !policy.enabled;
-        const { error } = await supabase.from('campaign_policies').update({ enabled: next }).eq('id', policy.id);
-        if (error) throw new Error(error.message);
-        setPolicy({ ...policy, enabled: next });
-        toast.success(next ? 'Autopilot on.' : 'Autopilot off. You are back in manual control.');
-      }
+      const wasOn = !!policy?.enabled;
+      const next = !wasOn;
+      // saveRecipe creates + clamps the recipe server-side if it doesn't exist yet.
+      const { data } = await autopilot.saveRecipe(id, { automation_enabled: next });
+      setRecipe(data);
+      setPolicy(recipeToPolicy(data));
+      toast.success(
+        next
+          ? wasOn
+            ? 'Autopilot on.'
+            : 'Autopilot on. It starts sourcing and drafting on its next cycle.'
+          : 'Autopilot off. You are back in manual control.'
+      );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not update Autopilot');
     }
@@ -771,25 +802,19 @@ export function MissionPage() {
   // Throttle controls (review-first vs auto-send, daily cap). Optimistic with a
   // rollback on failure so the cockpit toggles feel instant.
   async function saveAutopilotField(patch: Partial<CampaignPolicy>) {
-    if (!policy) return;
+    if (!policy || !id) return;
     const prev = policy;
-    setPolicy({ ...policy, ...patch });
-    const { error } = await supabase.from('campaign_policies').update(patch).eq('id', policy.id);
-    if (error) {
-      toast.error(error.message);
+    setPolicy({ ...policy, ...patch }); // optimistic
+    try {
+      const { data } = await autopilot.saveRecipe(id, policyPatchToRecipe(patch));
+      setRecipe(data);
+      setPolicy(recipeToPolicy(data));
+      // A send-window / timezone change reschedules queued sends server-side; refresh
+      // the sent rows so the cockpit's "Next scheduled" + queue reflect the new times.
+      if ('send_window' in patch || 'timezone' in patch) setRefreshKey((k) => k + 1);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not save');
       setPolicy(prev);
-      return;
-    }
-    // A send-window / timezone change must move already-queued sends into the new
-    // window. Reschedule server-side, then refresh the sent rows so the cockpit's
-    // "Next scheduled" + send queue reflect the new times.
-    if (id && ('send_window' in patch || 'timezone' in patch)) {
-      try {
-        await autopilot.reschedule(id);
-        setRefreshKey((k) => k + 1);
-      } catch {
-        /* best-effort; the window is saved, the schedule just won't have shifted */
-      }
     }
   }
 
@@ -1103,6 +1128,11 @@ export function MissionPage() {
           onRejectTarget={rejectTargetById}
           missionId={mission.id}
           userId={user?.id ?? ''}
+          recipe={recipe}
+          onRecipeChange={(r) => {
+            setRecipe(r);
+            setPolicy(recipeToPolicy(r));
+          }}
           onApplied={() => {
             loadMission();
             loadPolicy();
@@ -1307,6 +1337,14 @@ export function MissionPage() {
       {tab === 'setup' && (
         <>
           <MissionBriefCard mission={mission} onSaved={loadMission} />
+          <section className="setup-card">
+            <h3 className="setup-card-title">Pipeline recipe</h3>
+            <p className="setup-card-sub">
+              How this mission finds, verifies, researches, and reaches people. These controls apply to every run,
+              manual or Autopilot.
+            </p>
+            <RecipeEditor missionId={mission.id} />
+          </section>
           {user?.id && <MissionAttachmentCard mission={mission} userId={user.id} onSaved={loadMission} />}
           {user?.id && <MissionMemoryCard mission={mission} userId={user.id} />}
         </>
@@ -1679,6 +1717,8 @@ function AutopilotCockpit({
   onRejectTarget,
   missionId,
   userId,
+  recipe,
+  onRecipeChange,
   onApplied,
 }: {
   policy: CampaignPolicy;
@@ -1694,6 +1734,8 @@ function AutopilotCockpit({
   onRejectTarget: (targetId: string) => void;
   missionId: string;
   userId: string;
+  recipe: MissionRecipe | null;
+  onRecipeChange: (r: MissionRecipe) => void;
   onApplied: () => void;
 }) {
   const [capDraft, setCapDraft] = useState(String(policy.daily_send_cap));
@@ -1849,6 +1891,11 @@ function AutopilotCockpit({
           </label>
         )}
       </div>
+
+      <details className="recipe-disclosure">
+        <summary>Pipeline recipe — tune each stage</summary>
+        <RecipeEditor missionId={missionId} recipe={recipe} onSaved={onRecipeChange} />
+      </details>
 
       {userId && <SteeringChat missionId={missionId} userId={userId} onApplied={onApplied} />}
 

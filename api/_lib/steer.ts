@@ -19,23 +19,25 @@ function camelKey(k: string): string {
 }
 
 /**
- * Deep-camelCase every object key. The proposal round-trips through the
- * frontend data shim (src/lib/caseMap.ts), which snake_cases nested keys on
- * read - so a stored proposal comes back as `target_description`/`clear_icp`/
- * `contacts_per_company`. This restores the camelCase the patch logic reads.
- * Only KEYS are touched; string values (claims, fact ids, change text) are not.
+ * Deep-camelCase every object key. Backend counterpart to the frontend data
+ * shim (src/lib/caseMap.ts), which snake_cases nested keys - so a snake_cased
+ * payload (a stored proposal, or a recipe patch POSTed from the cockpit) comes
+ * back as `target_description`/`contacts_per_company`. This restores the
+ * camelCase the patch logic reads. Only KEYS are touched; string values (claims,
+ * fact ids, change text) are not.
  */
+export function deepCamelKeys(raw: unknown): unknown {
+  if (Array.isArray(raw)) return raw.map(deepCamelKeys);
+  if (raw && typeof raw === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(raw as Record<string, unknown>)) out[camelKey(k)] = deepCamelKeys(val);
+    return out;
+  }
+  return raw;
+}
+
 export function normalizeProposal(raw: unknown): SteerProposal {
-  const deep = (v: unknown): unknown => {
-    if (Array.isArray(v)) return v.map(deep);
-    if (v && typeof v === 'object') {
-      const out: Record<string, unknown> = {};
-      for (const [k, val] of Object.entries(v as Record<string, unknown>)) out[camelKey(k)] = deep(val);
-      return out;
-    }
-    return v;
-  };
-  return (deep(raw ?? {}) as SteerProposal) ?? ({ changes: [] } as SteerProposal);
+  return (deepCamelKeys(raw ?? {}) as SteerProposal) ?? ({ changes: [] } as SteerProposal);
 }
 
 export interface SteerUpdates {

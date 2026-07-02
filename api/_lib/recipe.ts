@@ -310,12 +310,28 @@ export function applyRecipePatch(current: RecipeStages, patch: RecipeStagesPatch
   return buildRecipeStages({ mission: { findMode: merged.sourcing?.findMode ?? null }, partial: merged });
 }
 
-/** Insert or update a mission's recipe doc with the given (already-clamped) stages. */
-export async function upsertRecipe(scope: UserScope, missionId: string, stages: RecipeStages): Promise<void> {
+/** Insert or update a mission's recipe doc with the given (already-clamped)
+ *  stages, returning the resulting doc. */
+export async function upsertRecipe(scope: UserScope, missionId: string, stages: RecipeStages): Promise<MissionRecipeDoc> {
   const existing = await scope.collection<MissionRecipeDoc>('mission_recipes').findOne({ missionId });
   if (existing) {
     await scope.collection<MissionRecipeDoc>('mission_recipes').updateById(existing._id, stages as never);
-  } else {
-    await insertRecipe(scope, missionId, stages);
+    return { ...existing, ...stages };
   }
+  return insertRecipe(scope, missionId, stages);
+}
+
+/**
+ * Return the mission's recipe as a persisted doc (with an id), creating or
+ * self-healing it as needed: an existing doc is re-normalized + clamped and
+ * written back (fixing partial/legacy docs); a missing one is synthesized from
+ * the mission + legacy policy + last run and inserted. The frontend reads this
+ * so it always has a complete, id-bearing recipe to edit.
+ */
+export async function getOrCreateRecipe(scope: UserScope, missionId: string): Promise<MissionRecipeDoc> {
+  const existing = await scope.collection<MissionRecipeDoc>('mission_recipes').findOne({ missionId });
+  const stages = existing
+    ? buildRecipeStages({ mission: { findMode: existing.sourcing?.findMode ?? null }, partial: existing })
+    : await resolveRecipe(scope, missionId);
+  return upsertRecipe(scope, missionId, stages);
 }
