@@ -1,7 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { gateAndQueue } from './autopilot-tick';
-import type { CampaignPolicyDoc } from '../../shared/schemas';
+import { gateAndQueue, type AutopilotCtx } from './autopilot-tick';
 
 // A minimal fake of the per-user scope: only the collection methods gateAndQueue
 // touches on the review path (find/findById/updateById). autoSend is left off so
@@ -34,25 +33,34 @@ function fakeScope(drafts: Array<{ _id: string; contactId: string }>, contacts: 
   return { scope, updated };
 }
 
-function policy(over: Partial<CampaignPolicyDoc> = {}): CampaignPolicyDoc {
+// review-first (autoSend off) so the gate never calls evaluateSend in this test.
+function ctx(): AutopilotCtx {
   return {
-    _id: 'p1',
-    userId: 'u1',
+    recipeId: 'r1',
     missionId: 'm1',
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    enabled: true,
-    autoSend: false, // review-first so the gate never calls evaluateSend in this test
-    targetsPerCycle: 5,
-    cycleIntervalHours: 24,
-    lastSourcedAt: null,
-    dailySendCap: 10,
-    sendWindow: { startHour: 9, endHour: 17 },
-    timezone: 'UTC',
-    minConfidence: 0.6,
-    counter: null,
-    ...over,
-  } as CampaignPolicyDoc;
+    view: {
+      enabled: true,
+      autoSend: false,
+      cycleIntervalHours: 24,
+      lastSourcedAt: null,
+      dailySendCap: 10,
+      sendWindow: { startHour: 9, endHour: 17 },
+      timezone: 'UTC',
+      minConfidence: 0.6,
+      counter: null,
+    },
+    send: {
+      type: 'send',
+      enabled: true,
+      autoSend: false,
+      cycleIntervalHours: 24,
+      dailySendCap: 10,
+      sendWindow: { startHour: 9, endHour: 17 },
+      timezone: 'UTC',
+      lastSourcedAt: null,
+      counter: null,
+    },
+  };
 }
 
 describe('gateAndQueue', () => {
@@ -68,10 +76,10 @@ describe('gateAndQueue', () => {
       c3: { emailStatus: 'none', confidence: 0.9, email: null }, // → review
     };
     const { scope, updated } = fakeScope(drafts, contacts);
-    const out = { policyId: 'p1', sourced: false, gated: 0, queued: 0, reviewed: 0, ready: 0 };
+    const out = { policyId: 'r1', sourced: false, gated: 0, queued: 0, reviewed: 0, ready: 0 };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await gateAndQueue(scope as any, policy(), new Date(), out);
+    await gateAndQueue(scope as any, ctx(), new Date(), out);
 
     // The throwing draft is skipped; the two healthy ones are still moved to review.
     assert.equal(out.gated, 2);

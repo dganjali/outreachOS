@@ -6,14 +6,14 @@
 // steering-chat apply path so a window change reschedules either way.
 
 import type { UserScope } from './db';
-import { planReschedule } from './autopilot';
-import type { CampaignPolicyDoc, SentMessageDoc } from '../../shared/schemas';
+import { planReschedule, type SendPolicy } from './autopilot';
+import type { SentMessageDoc } from '../../shared/schemas';
 
 /** Recompute scheduledSendAt for the mission's queued sends. Returns how many moved. */
 export async function rescheduleQueuedSends(
   scope: UserScope,
   missionId: string,
-  policy: Pick<CampaignPolicyDoc, 'sendWindow' | 'timezone'>,
+  policy: Pick<SendPolicy, 'sendWindow' | 'timezone'>,
   now: Date = new Date(),
 ): Promise<number> {
   const sent = scope.collection<SentMessageDoc>('sent_messages');

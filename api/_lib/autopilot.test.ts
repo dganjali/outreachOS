@@ -11,20 +11,14 @@ import {
   tzOffsetMinutes,
   snapToWindow,
   planReschedule,
-  POLICY_DEFAULTS,
+  type SendPolicy,
 } from './autopilot';
-import type { CampaignPolicyDoc, ContactDoc } from '../../shared/schemas';
+import type { ContactDoc } from '../../shared/schemas';
 
-function policy(over: Partial<CampaignPolicyDoc> = {}): CampaignPolicyDoc {
+function policy(over: Partial<SendPolicy> = {}): SendPolicy {
   return {
-    _id: 'p1',
-    userId: 'u1',
-    missionId: 'm1',
-    createdAt: new Date(),
-    updatedAt: new Date(),
     enabled: true,
     autoSend: true,
-    targetsPerCycle: 5,
     cycleIntervalHours: 24,
     lastSourcedAt: null,
     dailySendCap: 10,
@@ -177,13 +171,5 @@ describe('planReschedule', () => {
   });
 });
 
-describe('withPolicyDefaults', () => {
-  it('fills missing fields and clamps out-of-range values', () => {
-    const p = withPolicyDefaults({ dailySendCap: 9999, minConfidence: 5, targetsPerCycle: 0 });
-    assert.equal(p.autoSend, POLICY_DEFAULTS.autoSend);
-    assert.equal(p.dailySendCap, 100); // clamped to MAX
-    assert.equal(p.minConfidence, 1); // clamped to [0,1]
-    assert.equal(p.targetsPerCycle, 1); // clamped to >=1
-    assert.deepEqual(p.sendWindow, POLICY_DEFAULTS.sendWindow);
-  });
-});
+// (withPolicyDefaults was removed when campaign_policies was subsumed by the
+// recipe; its clamping is now exercised by recipe.test.ts.)

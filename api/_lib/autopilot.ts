@@ -2,10 +2,26 @@
 // scheduling + daily-counter rollover). Kept side-effect-free so it's unit
 // testable; the cron (api/cron/autopilot-tick.ts) supplies the I/O.
 
-import type { CampaignPolicyDoc, ContactDoc } from '../../shared/schemas';
+import type { ContactDoc } from '../../shared/schemas';
 
-// Defaults applied when a policy is created or a field is missing. Conservative:
-// small daily cap, business-hours window, opt-in auto-send.
+// The send/scheduling fields these pure functions reason over. Formerly the
+// relevant slice of CampaignPolicyDoc; now the flattened view of a recipe's
+// send + verification stages (see api/_lib/recipe.ts:policyView). Kept here (the
+// lower-level module) so recipe.ts can import it without a cycle.
+export interface SendPolicy {
+  enabled: boolean;
+  autoSend: boolean;
+  cycleIntervalHours: number;
+  lastSourcedAt: Date | null;
+  dailySendCap: number;
+  sendWindow: { startHour: number; endHour: number };
+  timezone: string;
+  minConfidence: number;
+  counter: { date: string; sent: number } | null;
+}
+
+// Defaults applied when a field is missing. Conservative: small daily cap,
+// business-hours window, opt-in auto-send.
 export const POLICY_DEFAULTS = {
   autoSend: false,
   targetsPerCycle: 5,
@@ -27,7 +43,7 @@ export type GateVerdict = 'auto' | 'review';
  * *verified* (deliverability floor) AND the contact clears the confidence
  * threshold. Everything else is held for a human.
  */
-export function gateDecision(contact: Pick<ContactDoc, 'emailStatus' | 'confidence'>, policy: Pick<CampaignPolicyDoc, 'minConfidence'>): GateVerdict {
+export function gateDecision(contact: Pick<ContactDoc, 'emailStatus' | 'confidence'>, policy: Pick<SendPolicy, 'minConfidence'>): GateVerdict {
   if (contact.emailStatus !== 'verified') return 'review';
   if ((contact.confidence ?? 0) < policy.minConfidence) return 'review';
   return 'auto';
@@ -39,19 +55,19 @@ export function utcDay(now: Date): string {
 }
 
 /** Today's auto-send count, rolling the counter over when the UTC day changes. */
-export function sentToday(policy: Pick<CampaignPolicyDoc, 'counter'>, now: Date): number {
+export function sentToday(policy: Pick<SendPolicy, 'counter'>, now: Date): number {
   const day = utcDay(now);
   if (!policy.counter || policy.counter.date !== day) return 0;
   return policy.counter.sent;
 }
 
 /** How many more auto-sends the cap allows right now (never negative). */
-export function remainingCapToday(policy: Pick<CampaignPolicyDoc, 'counter' | 'dailySendCap'>, now: Date): number {
+export function remainingCapToday(policy: Pick<SendPolicy, 'counter' | 'dailySendCap'>, now: Date): number {
   return Math.max(0, policy.dailySendCap - sentToday(policy, now));
 }
 
 /** A counter value reflecting `add` more sends today (rolls over on day change). */
-export function bumpedCounter(policy: Pick<CampaignPolicyDoc, 'counter'>, now: Date, add: number): { date: string; sent: number } {
+export function bumpedCounter(policy: Pick<SendPolicy, 'counter'>, now: Date, add: number): { date: string; sent: number } {
   return { date: utcDay(now), sent: sentToday(policy, now) + add };
 }
 
@@ -91,7 +107,7 @@ export function tzOffsetMinutes(tz: string, now: Date): number {
  * (later today, or tomorrow if the window has passed). Returns [] for count<=0.
  */
 export function nextSendSlots(
-  policy: Pick<CampaignPolicyDoc, 'sendWindow' | 'timezone'>,
+  policy: Pick<SendPolicy, 'sendWindow' | 'timezone'>,
   count: number,
   now: Date,
 ): Date[] {
@@ -138,7 +154,7 @@ export function nextSendSlots(
  * inside the window is returned unchanged; one before/after is pulled to the
  * window's open on the same local day. Degenerate windows pass through.
  */
-export function snapToWindow(date: Date, policy: Pick<CampaignPolicyDoc, 'sendWindow' | 'timezone'>): Date {
+export function snapToWindow(date: Date, policy: Pick<SendPolicy, 'sendWindow' | 'timezone'>): Date {
   const { startHour, endHour } = policy.sendWindow;
   if (!(endHour > startHour)) return date;
 
@@ -173,7 +189,7 @@ export interface QueuedSendLite {
  */
 export function planReschedule(
   rows: QueuedSendLite[],
-  policy: Pick<CampaignPolicyDoc, 'sendWindow' | 'timezone'>,
+  policy: Pick<SendPolicy, 'sendWindow' | 'timezone'>,
   now: Date,
 ): Array<{ id: string; scheduledSendAt: Date }> {
   const ms = (v: Date | string | null): number => (v ? new Date(v).getTime() : 0);
@@ -193,29 +209,8 @@ export function planReschedule(
   return out;
 }
 
-/** Fill a partial/legacy policy with defaults so callers can read every field. */
-export function withPolicyDefaults(p: Partial<CampaignPolicyDoc>): Omit<CampaignPolicyDoc, keyof import('../../shared/schemas').BaseDoc | 'missionId'> {
-  return {
-    enabled: p.enabled ?? false,
-    autoSend: p.autoSend ?? POLICY_DEFAULTS.autoSend,
-    targetsPerCycle: clamp(p.targetsPerCycle ?? POLICY_DEFAULTS.targetsPerCycle, 1, MAX_TARGETS_PER_CYCLE),
-    cycleIntervalHours: clamp(p.cycleIntervalHours ?? POLICY_DEFAULTS.cycleIntervalHours, 1, 24 * 14),
-    lastSourcedAt: p.lastSourcedAt ?? null,
-    dailySendCap: clamp(p.dailySendCap ?? POLICY_DEFAULTS.dailySendCap, 1, MAX_DAILY_SEND_CAP),
-    sendWindow: p.sendWindow ?? { ...POLICY_DEFAULTS.sendWindow },
-    timezone: p.timezone ?? POLICY_DEFAULTS.timezone,
-    minConfidence: clamp(p.minConfidence ?? POLICY_DEFAULTS.minConfidence, 0, 1),
-    counter: p.counter ?? null,
-  };
-}
-
-function clamp(n: number, lo: number, hi: number): number {
-  if (!Number.isFinite(n)) return lo;
-  return Math.max(lo, Math.min(hi, n));
-}
-
 /** Whether the sourcing cadence allows a new run now. */
-export function sourcingDue(policy: Pick<CampaignPolicyDoc, 'lastSourcedAt' | 'cycleIntervalHours'>, now: Date): boolean {
+export function sourcingDue(policy: Pick<SendPolicy, 'lastSourcedAt' | 'cycleIntervalHours'>, now: Date): boolean {
   if (!policy.lastSourcedAt) return true;
   const elapsedH = (now.getTime() - new Date(policy.lastSourcedAt).getTime()) / 3600000;
   return elapsedH >= policy.cycleIntervalHours;

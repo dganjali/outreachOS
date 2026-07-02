@@ -609,10 +609,12 @@ export interface PipelineRunDoc extends BaseDoc {
   completedAt: Date | null;
 }
 
-// Campaign Autopilot policy - one per mission. The "runs while I sleep" control
-// surface: the autopilot cron (api/cron/autopilot-tick.ts) sources new targets on
-// a cadence, applies the confidence gate to fresh drafts, and (when autoSend is on)
-// queues sends within the daily cap + send window. Paid-tier only.
+// LEGACY (Phase 3): superseded by MissionRecipeDoc, which subsumes these fields
+// into its send + verification stages. Nothing WRITES this collection anymore;
+// it is only READ as a migration fallback by recipe.ts:resolveRecipe for missions
+// that predate the recipe backfill (scripts/migrate-recipes.ts). Safe to drop the
+// collection + this type once the migration has run in production and been
+// verified. Kept meanwhile so un-migrated missions keep their exact settings.
 export interface CampaignPolicyDoc extends BaseDoc {
   missionId: string;
   enabled: boolean;
@@ -755,19 +757,30 @@ export interface SteerProposal {
     goal?: string;
     targetDescription?: string;
     geo?: string | null;
-    sectors?: string[]; // replaces sectorSuggestions (all marked recommended)
     draftDirective?: string; // replace the standing directive
     draftDirectiveAppend?: string; // or append a line to it
     clearIcp?: boolean; // force ICP/sector regen on the next sourcing cycle
   };
-  policy?: {
-    dailySendCap?: number;
-    minConfidence?: number;
-    cycleIntervalHours?: number;
-    targetsPerCycle?: number;
-    autoSend?: boolean;
-    sendWindow?: { startHour: number; endHour: number };
-    timezone?: string;
+  // A patch over the mission's recipe stages (the modular pipeline). Only the
+  // stages/fields the instruction implies are set; applied + clamped server-side
+  // via recipe.ts:applyRecipePatch. This is what lets the steering chat control
+  // the WHOLE pipeline (contacts per company, seniority, evidence depth, cadence),
+  // not just a fixed handful of settings.
+  recipe?: {
+    automationEnabled?: boolean;
+    sourcing?: { enabled?: boolean; count?: number; topN?: number; sectors?: string[]; findMode?: FindMode };
+    verification?: { enabled?: boolean; emailVerify?: boolean; contactVerify?: boolean; minConfidence?: number };
+    research?: { enabled?: boolean; evidence?: boolean; companyEnrich?: boolean };
+    personSourcing?: { enabled?: boolean; contactsPerCompany?: number; functions?: string[]; seniority?: SeniorityLevel[] };
+    sequencing?: { enabled?: boolean; touches?: number };
+    send?: {
+      enabled?: boolean;
+      autoSend?: boolean;
+      dailySendCap?: number;
+      cycleIntervalHours?: number;
+      sendWindow?: { startHour: number; endHour: number };
+      timezone?: string;
+    };
   };
   emphasizeFactIds?: string[]; // pin these context-fact ids on the mission
   deemphasizeFactIds?: string[]; // unpin these

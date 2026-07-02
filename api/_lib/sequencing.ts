@@ -6,8 +6,8 @@
 // and sends each one, gated by suppression + reply-stop. No Cloud Tasks.
 
 import { newId, type UserScope, type InsertDoc } from './db';
-import { snapToWindow } from './autopilot';
-import type { CampaignPolicyDoc, EmailSequenceDoc, SentMessageDoc, SuppressionDoc } from '../../shared/schemas';
+import { snapToWindow, type SendPolicy } from './autopilot';
+import type { EmailSequenceDoc, SentMessageDoc, SuppressionDoc } from '../../shared/schemas';
 
 const DEFAULT_WAIT_DAYS = 3;
 
@@ -25,9 +25,10 @@ export async function scheduleFollowups(args: {
   seq: EmailSequenceDoc;
   toEmail: string;
   sentAt: Date;
-  // The mission's autopilot policy, when it has one. Given it, follow-ups land
-  // inside the send window (time-of-day snapped); the cadence day is preserved.
-  policy?: Pick<CampaignPolicyDoc, 'sendWindow' | 'timezone'> | null;
+  // The mission's send window/timezone (from the recipe), when it has one. Given
+  // it, follow-ups land inside the window (time-of-day snapped); the cadence day
+  // is preserved.
+  policy?: Pick<SendPolicy, 'sendWindow' | 'timezone'> | null;
 }): Promise<number> {
   const { scope, seq, toEmail, sentAt, policy } = args;
   const followups = seq.followups ?? [];

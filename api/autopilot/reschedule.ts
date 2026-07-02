@@ -8,9 +8,9 @@
 import type { Request, Response } from 'express';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { forUser } from '../_lib/db';
-import { withPolicyDefaults } from '../_lib/autopilot';
+import { resolveRecipe, policyView } from '../_lib/recipe';
 import { rescheduleQueuedSends } from '../_lib/reschedule';
-import type { CampaignPolicyDoc, MissionDoc } from '../../shared/schemas';
+import type { MissionDoc } from '../../shared/schemas';
 
 export default async function handler(req: Request, res: Response) {
   if (req.method !== 'POST') return methodNotAllowed(res, ['POST']);
@@ -24,10 +24,7 @@ export default async function handler(req: Request, res: Response) {
   const mission = await scope.collection<MissionDoc>('missions').findById(mission_id);
   if (!mission) return res.status(404).json({ error: 'mission_not_found' });
 
-  const policy = await scope.collection<CampaignPolicyDoc>('campaign_policies').findOne({ missionId: mission_id });
-  if (!policy) return res.status(200).json({ ok: true, rescheduled: 0 });
-
-  const normalized = withPolicyDefaults(policy);
-  const rescheduled = await rescheduleQueuedSends(scope, mission_id, normalized, new Date());
+  const view = policyView(await resolveRecipe(scope, mission_id));
+  const rescheduled = await rescheduleQueuedSends(scope, mission_id, view, new Date());
   return res.status(200).json({ ok: true, rescheduled });
 }

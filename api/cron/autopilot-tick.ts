@@ -15,25 +15,36 @@ import type { Request, Response } from 'express';
 import { adminDb, forUser, newId, type InsertDoc } from '../_lib/db';
 import { requireCronSecret } from '../_lib/auth';
 import { evaluateSend } from '../_lib/deliverability';
-import { startPipeline, resumeIfStale, DEFAULT_TARGET_COUNT } from '../_lib/pipeline';
+import { startPipeline, resumeIfStale } from '../_lib/pipeline';
 import {
   gateDecision,
   nextSendSlots,
   remainingCapToday,
   bumpedCounter,
   sourcingDue,
-  withPolicyDefaults,
+  type SendPolicy,
 } from '../_lib/autopilot';
+import { buildRecipeStages, policyView, pipelineConfigFromRecipe, type RecipeStages } from '../_lib/recipe';
 import { isPaidPlan } from '../../shared/plans';
 import { recordContacted } from '../_lib/contacted';
 import type {
-  CampaignPolicyDoc,
   ContactDoc,
   EmailSequenceDoc,
+  MissionRecipeDoc,
   PipelineRunDoc,
   ProfileDoc,
+  SendStage,
   SentMessageDoc,
 } from '../../shared/schemas';
+
+/** What gateAndQueue needs about a recipe: the flattened send view for the gate
+ *  + scheduling, plus the ids/stage it writes the daily counter back onto. */
+export interface AutopilotCtx {
+  recipeId: string;
+  missionId: string;
+  view: SendPolicy;
+  send: SendStage;
+}
 
 // Bound work per tick so one big mission can't make the handler run long.
 const MAX_POLICIES = 200;
@@ -56,21 +67,22 @@ export default async function handler(req: Request, res: Response) {
 
   const db = await adminDb();
   const now = new Date();
-  const policies = await db
-    .collection<CampaignPolicyDoc>('campaign_policies')
-    .find({ enabled: true })
+  const recipes = await db
+    .collection<MissionRecipeDoc>('mission_recipes')
+    .find({ automationEnabled: true })
     .limit(MAX_POLICIES)
     .toArray();
 
   const outcomes: PolicyOutcome[] = [];
 
-  for (const raw of policies) {
-    // Normalize so missing/legacy fields read as sane defaults regardless of how
-    // the policy was written (the UI may persist a partial doc).
-    const policy: CampaignPolicyDoc = { ...raw, ...withPolicyDefaults(raw) };
-    const uid = policy.userId;
+  for (const raw of recipes) {
+    // Normalize so a partial/legacy stored recipe reads complete + clamped.
+    const stages = buildRecipeStages({ mission: { findMode: raw.sourcing?.findMode ?? null }, partial: raw });
+    const view = policyView(stages);
+    const uid = raw.userId;
     const scope = forUser(uid);
-    const out: PolicyOutcome = { policyId: policy._id, sourced: false, gated: 0, queued: 0, reviewed: 0, ready: 0 };
+    const ctx: AutopilotCtx = { recipeId: raw._id, missionId: raw.missionId, view, send: stages.send };
+    const out: PolicyOutcome = { policyId: raw._id, sourced: false, gated: 0, queued: 0, reviewed: 0, ready: 0 };
 
     // 1. Plan gate (authoritative - the UI also hides the toggle for free).
     try {
@@ -82,7 +94,7 @@ export default async function handler(req: Request, res: Response) {
       }
     } catch (err) {
       out.skipped = errMsg(err);
-      console.error('[autopilot] plan check failed', policy._id, err);
+      console.error('[autopilot] plan check failed', ctx.recipeId, err);
       outcomes.push(out);
       continue;
     }
@@ -93,34 +105,36 @@ export default async function handler(req: Request, res: Response) {
     try {
       const liveRuns = (await scope
         .collection<PipelineRunDoc>('pipeline_runs')
-        .find({ missionId: policy.missionId, status: { $in: ['pending', 'running'] } as never })) as PipelineRunDoc[];
+        .find({ missionId: ctx.missionId, status: { $in: ['pending', 'running'] } as never })) as PipelineRunDoc[];
       if (liveRuns.length > 0) {
         for (const r of liveRuns) resumeIfStale({ id: uid, email: null }, r);
-      } else if (sourcingDue(policy, now)) {
-        await startSourcing(scope, uid, policy);
-        await scope.collection<CampaignPolicyDoc>('campaign_policies').updateById(policy._id, { lastSourcedAt: now });
+      } else if (sourcingDue(view, now)) {
+        await startSourcing(scope, uid, ctx.missionId, stages);
+        await scope
+          .collection<MissionRecipeDoc>('mission_recipes')
+          .updateById(ctx.recipeId, { send: { ...stages.send, lastSourcedAt: now } });
         out.sourced = true;
       }
     } catch (err) {
       out.sourceError = errMsg(err);
-      console.error('[autopilot] sourcing failed', policy._id, err);
+      console.error('[autopilot] sourcing failed', ctx.recipeId, err);
     }
 
     // 3+4. Gate fresh drafts → review/ready and, when auto-send is on, queue the
     // clean ones. Isolated from sourcing (above) and internally per-draft, so one
     // bad draft can't strand the rest of the batch.
     try {
-      await gateAndQueue(scope, policy, now, out);
+      await gateAndQueue(scope, ctx, now, out);
     } catch (err) {
       out.gateError = errMsg(err);
-      console.error('[autopilot] gating failed', policy._id, err);
+      console.error('[autopilot] gating failed', ctx.recipeId, err);
     }
 
     outcomes.push(out);
   }
 
-  console.info('[autopilot] tick', { policies: policies.length, outcomes });
-  return res.status(200).json({ policies: policies.length, outcomes });
+  console.info('[autopilot] tick', { recipes: recipes.length, outcomes });
+  return res.status(200).json({ policies: recipes.length, outcomes });
 }
 
 function errMsg(err: unknown): string {
@@ -136,13 +150,13 @@ function errMsg(err: unknown): string {
  */
 export async function gateAndQueue(
   scope: ReturnType<typeof forUser>,
-  policy: CampaignPolicyDoc,
+  ctx: AutopilotCtx,
   now: Date,
   out: PolicyOutcome,
 ): Promise<void> {
   const drafts = ((await scope
     .collection<EmailSequenceDoc>('email_sequences')
-    .find({ missionId: policy.missionId, status: 'draft' })) as EmailSequenceDoc[])
+    .find({ missionId: ctx.missionId, status: 'draft' })) as EmailSequenceDoc[])
     .filter((s) => !s.autopilotState)
     .slice(0, MAX_DRAFTS_PER_POLICY);
 
@@ -154,7 +168,7 @@ export async function gateAndQueue(
       out.gated++;
       const toEmail = contact.email?.trim();
       // Autopilot eligibility (verified email + confidence). Fail → human review.
-      if (!toEmail || gateDecision(contact, policy) === 'review') {
+      if (!toEmail || gateDecision(contact, ctx.view) === 'review') {
         await setState(scope, seq._id, 'review');
         out.reviewed++;
         continue;
@@ -182,7 +196,7 @@ export async function gateAndQueue(
         out.reviewed++;
         continue;
       }
-      if (!policy.autoSend) {
+      if (!ctx.view.autoSend) {
         await setState(scope, seq._id, 'ready');
         out.ready++;
         continue;
@@ -194,8 +208,8 @@ export async function gateAndQueue(
   }
 
   // Auto-send: queue scheduled sends within the daily cap + send window.
-  if (policy.autoSend && passing.length > 0) {
-    const cap = remainingCapToday(policy, now);
+  if (ctx.view.autoSend && passing.length > 0) {
+    const cap = remainingCapToday(ctx.view, now);
     const queueable: Array<{ seq: EmailSequenceDoc; toEmail: string; contact: ContactDoc }> = [];
     for (const { seq, contact } of passing) {
       if (queueable.length >= cap) break;
@@ -235,7 +249,7 @@ export async function gateAndQueue(
       }
     }
 
-    const slots = nextSendSlots(policy, queueable.length, now);
+    const slots = nextSendSlots(ctx.view, queueable.length, now);
     for (let i = 0; i < queueable.length; i++) {
       const { seq, toEmail, contact } = queueable[i];
       try {
@@ -256,30 +270,34 @@ export async function gateAndQueue(
     }
     if (out.queued > 0) {
       await scope
-        .collection<CampaignPolicyDoc>('campaign_policies')
-        .updateById(policy._id, { counter: bumpedCounter(policy, now, out.queued) });
+        .collection<MissionRecipeDoc>('mission_recipes')
+        .updateById(ctx.recipeId, { send: { ...ctx.send, counter: bumpedCounter(ctx.view, now, out.queued) } });
     }
   }
 }
 
-/** Kick off a background sourcing run, reusing the mission's last run config.
- *  Exported so the manual "cycle now" endpoint (api/agents/autopilot-run.ts)
- *  sources on the same path as the cron. */
-export async function startSourcing(scope: ReturnType<typeof forUser>, uid: string, policy: CampaignPolicyDoc): Promise<void> {
-  const prior = ((await scope
-    .collection<PipelineRunDoc>('pipeline_runs')
-    .find({ missionId: policy.missionId })) as PipelineRunDoc[])
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
-  const cfg = prior?.config;
+/** Kick off a background sourcing run straight from the mission's recipe - the
+ *  single source of truth. (This replaces the old behavior of inheriting the last
+ *  manual run's config, which the user couldn't see or steer.) Exported so the
+ *  manual "cycle now" endpoint sources on the same path as the cron.
+ *
+ *  The pipeline config comes entirely from the recipe stages. */
+export async function startSourcing(
+  scope: ReturnType<typeof forUser>,
+  uid: string,
+  missionId: string,
+  stages: RecipeStages,
+): Promise<void> {
+  const cfg = pipelineConfigFromRecipe(stages);
   await startPipeline({
     user: { id: uid, email: null },
-    missionId: policy.missionId,
-    targetCount: Math.max(policy.targetsPerCycle, cfg?.targetCount ?? DEFAULT_TARGET_COUNT),
-    topN: policy.targetsPerCycle,
-    topContacts: cfg?.topContacts,
-    selectedFunctions: cfg?.selectedFunctions,
-    selectedSeniority: cfg?.selectedSeniority,
-    selectedSectors: cfg?.selectedSectors,
+    missionId,
+    targetCount: cfg.targetCount,
+    topN: cfg.topN,
+    topContacts: cfg.topContacts,
+    selectedFunctions: cfg.selectedFunctions,
+    selectedSeniority: cfg.selectedSeniority,
+    selectedSectors: cfg.selectedSectors,
   });
 }
 

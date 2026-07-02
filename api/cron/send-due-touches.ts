@@ -9,14 +9,14 @@ import { requireCronSecret } from '../_lib/auth';
 import { getActiveAccessToken, sendNow, type MailAttachment } from '../_lib/gmail';
 import { getResumeAttachment, getAssetAttachment } from '../_lib/attachments';
 import { scheduleFollowups } from '../_lib/sequencing';
-import { withPolicyDefaults } from '../_lib/autopilot';
+import { resolveRecipe, policyView } from '../_lib/recipe';
+import { type SendPolicy } from '../_lib/autopilot';
 import { evaluateSend } from '../_lib/deliverability';
 import { recordOutcome } from '../_lib/outcomes';
 import type {
   SentMessageDoc,
   EmailSequenceDoc,
   ContactDoc,
-  CampaignPolicyDoc,
   ProfileDoc,
 } from '../../shared/schemas';
 
@@ -44,12 +44,12 @@ export default async function handler(req: Request, res: Response) {
   // overrides them.
   const autoFollowupCache = new Map<string, boolean>();
   const tokenCache = new Map<string, { accessToken: string; email: string | null } | null>();
-  // Per-mission autopilot policy, so follow-ups land inside the send window.
-  const policyCache = new Map<string, Pick<CampaignPolicyDoc, 'sendWindow' | 'timezone'> | null>();
+  // Per-mission send window/timezone (from the recipe), so follow-ups land inside
+  // the window. resolveRecipe synthesizes a default for un-migrated missions.
+  const policyCache = new Map<string, Pick<SendPolicy, 'sendWindow' | 'timezone'>>();
   const policyFor = async (scope: ReturnType<typeof forUser>, missionId: string) => {
     if (!policyCache.has(missionId)) {
-      const p = await scope.collection<CampaignPolicyDoc>('campaign_policies').findOne({ missionId });
-      policyCache.set(missionId, p ? withPolicyDefaults(p) : null);
+      policyCache.set(missionId, policyView(await resolveRecipe(scope, missionId)));
     }
     return policyCache.get(missionId) ?? null;
   };

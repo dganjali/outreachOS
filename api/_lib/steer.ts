@@ -1,22 +1,18 @@
 // Autopilot steering - pure patch logic.
 //
 // Turns a SteerProposal (what the steer agent decided the user's instruction
-// means) into concrete `missions` + `campaign_policies` field updates. Kept
-// side-effect-free so it's unit testable and so the same clamping/merging runs
-// on apply regardless of what the (client-sent) proposal claims.
+// means) into a `missions` field update + a recipe-stage patch. Kept
+// side-effect-free so it's unit testable and so the same merging runs on apply
+// regardless of what the (client-sent) proposal claims.
 //
-// The agent does the interpretation; this module is the safety layer: clamp
-// every numeric to sane bounds, normalize sectors, and merge fact pins.
+// The agent does the interpretation; this module splits the proposal into the
+// two stores it touches: the mission doc (goal/audience/geo/directive/fact-pins)
+// and the mission recipe (every pipeline stage). Numeric clamping + list
+// cleaning for the recipe live in recipe.ts (applyRecipePatch), so this module
+// just forwards the recipe intent.
 
-import { MAX_DAILY_SEND_CAP, MAX_TARGETS_PER_CYCLE } from './autopilot';
-import type { CampaignPolicyDoc, MissionDoc, SteerProposal } from '../../shared/schemas';
-
-const MAX_CYCLE_INTERVAL_HOURS = 24 * 14; // matches withPolicyDefaults
-
-function clamp(n: number, lo: number, hi: number): number {
-  if (!Number.isFinite(n)) return lo;
-  return Math.max(lo, Math.min(hi, n));
-}
+import type { RecipeStagesPatch } from './recipe';
+import type { MissionDoc, SteerProposal } from '../../shared/schemas';
 
 function camelKey(k: string): string {
   return k.replace(/_([a-z0-9])/g, (_m, c: string) => c.toUpperCase());
@@ -25,10 +21,9 @@ function camelKey(k: string): string {
 /**
  * Deep-camelCase every object key. The proposal round-trips through the
  * frontend data shim (src/lib/caseMap.ts), which snake_cases nested keys on
- * read - so a stored proposal comes back as `target_description`/`clear_icp`.
- * This restores `targetDescription`/`clearIcp` etc. so buildSteerUpdates (which
- * reads camelCase) sees the fields. Only KEYS are touched; string values
- * (claims, fact ids, change text) are untouched.
+ * read - so a stored proposal comes back as `target_description`/`clear_icp`/
+ * `contacts_per_company`. This restores the camelCase the patch logic reads.
+ * Only KEYS are touched; string values (claims, fact ids, change text) are not.
  */
 export function normalizeProposal(raw: unknown): SteerProposal {
   const deep = (v: unknown): unknown => {
@@ -45,23 +40,23 @@ export function normalizeProposal(raw: unknown): SteerProposal {
 
 export interface SteerUpdates {
   missionUpdate: Partial<MissionDoc>;
-  policyUpdate: Partial<CampaignPolicyDoc>;
+  recipePatch: RecipeStagesPatch;
 }
 
 /**
- * Build the DB field updates for a steering proposal. `mission`/`policy` are the
- * current docs (policy may be null if the mission has no autopilot policy yet);
- * `validFactIds`, when given, restricts which ids may be pinned (server passes
- * the user's own fact ids so a tampered proposal can't pin a stranger's fact).
+ * Split a steering proposal into a mission field update + a recipe-stage patch.
+ * `mission` is the current mission doc (needed to append to the standing
+ * directive and to merge fact pins); `validFactIds`, when given, restricts which
+ * ids may be pinned (server passes the user's own fact ids so a tampered proposal
+ * can't pin a stranger's fact). The recipe patch is forwarded raw - recipe.ts
+ * clamps + cleans it on apply.
  */
 export function buildSteerUpdates(
   mission: Pick<MissionDoc, 'draftDirective' | 'emphasizedFactIds'>,
-  policy: Pick<CampaignPolicyDoc, never> | null,
   proposal: SteerProposal,
   opts: { validFactIds?: Set<string> } = {}
 ): SteerUpdates {
   const missionUpdate: Partial<MissionDoc> = {};
-  const policyUpdate: Partial<CampaignPolicyDoc> = {};
 
   const m = proposal.mission;
   if (m) {
@@ -70,11 +65,6 @@ export function buildSteerUpdates(
       missionUpdate.targetDescription = m.targetDescription.trim();
     }
     if (m.geo !== undefined) missionUpdate.geo = m.geo?.trim() || null;
-
-    if (Array.isArray(m.sectors)) {
-      const names = m.sectors.map((s) => String(s).trim()).filter(Boolean);
-      missionUpdate.sectorSuggestions = names.length ? names.map((name) => ({ name, recommended: true })) : null;
-    }
 
     // Directive: an explicit value replaces; an append tacks a line onto the
     // existing one. Replace wins if (oddly) both are present.
@@ -89,25 +79,13 @@ export function buildSteerUpdates(
     if (m.clearIcp) {
       // Force the next sourcing cycle to regenerate targeting from the new brief.
       missionUpdate.contactIcp = null;
-      // Only wipe sectors if the proposal didn't set explicit ones above.
-      if (!Array.isArray(m.sectors)) missionUpdate.sectorSuggestions = null;
+      missionUpdate.sectorSuggestions = null;
     }
   }
 
-  const p = proposal.policy;
-  if (p && policy) {
-    if (typeof p.dailySendCap === 'number') policyUpdate.dailySendCap = clamp(Math.round(p.dailySendCap), 1, MAX_DAILY_SEND_CAP);
-    if (typeof p.minConfidence === 'number') policyUpdate.minConfidence = clamp(p.minConfidence, 0, 1);
-    if (typeof p.cycleIntervalHours === 'number') policyUpdate.cycleIntervalHours = clamp(Math.round(p.cycleIntervalHours), 1, MAX_CYCLE_INTERVAL_HOURS);
-    if (typeof p.targetsPerCycle === 'number') policyUpdate.targetsPerCycle = clamp(Math.round(p.targetsPerCycle), 1, MAX_TARGETS_PER_CYCLE);
-    if (typeof p.autoSend === 'boolean') policyUpdate.autoSend = p.autoSend;
-    if (p.sendWindow && typeof p.sendWindow.startHour === 'number' && typeof p.sendWindow.endHour === 'number') {
-      const startHour = clamp(Math.round(p.sendWindow.startHour), 0, 23);
-      const endHour = clamp(Math.round(p.sendWindow.endHour), 1, 24);
-      if (endHour > startHour) policyUpdate.sendWindow = { startHour, endHour };
-    }
-    if (typeof p.timezone === 'string' && p.timezone.trim()) policyUpdate.timezone = p.timezone.trim();
-  }
+  // Recipe patch: forward the proposal's stage intent as-is. applyRecipePatch
+  // merges it onto the current recipe and clamps every value.
+  const recipePatch: RecipeStagesPatch = (proposal.recipe ?? {}) as RecipeStagesPatch;
 
   // Fact pins: merge add/remove into the current set, dropping any unowned id.
   const hasFactChange = (proposal.emphasizeFactIds?.length ?? 0) > 0 || (proposal.deemphasizeFactIds?.length ?? 0) > 0;
@@ -120,10 +98,24 @@ export function buildSteerUpdates(
     missionUpdate.emphasizedFactIds = [...set];
   }
 
-  return { missionUpdate, policyUpdate };
+  return { missionUpdate, recipePatch };
 }
 
 /** True when a proposal would change nothing (e.g. a pure clarification). */
-export function isEmptyUpdate(u: SteerUpdates): boolean {
-  return Object.keys(u.missionUpdate).length === 0 && Object.keys(u.policyUpdate).length === 0;
+export function isEmptyUpdate(u: { missionUpdate: Partial<MissionDoc>; recipePatch: RecipeStagesPatch }): boolean {
+  if (Object.keys(u.missionUpdate).length > 0) return false;
+  const p = u.recipePatch;
+  return (
+    p.automationEnabled === undefined &&
+    !hasKeys(p.sourcing) &&
+    !hasKeys(p.verification) &&
+    !hasKeys(p.research) &&
+    !hasKeys(p.personSourcing) &&
+    !hasKeys(p.sequencing) &&
+    !hasKeys(p.send)
+  );
+}
+
+function hasKeys(o: object | undefined): boolean {
+  return !!o && Object.keys(o).length > 0;
 }

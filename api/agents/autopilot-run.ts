@@ -8,9 +8,9 @@ import type { Request, Response } from 'express';
 import { requireUser, methodNotAllowed } from '../_lib/auth';
 import { forUser } from '../_lib/db';
 import { resumeIfStale } from '../_lib/pipeline';
-import { withPolicyDefaults } from '../_lib/autopilot';
-import { startSourcing, gateAndQueue } from '../cron/autopilot-tick';
-import type { CampaignPolicyDoc, PipelineRunDoc } from '../../shared/schemas';
+import { buildRecipeStages, resolveRecipe, insertRecipe, policyView, type RecipeStages } from '../_lib/recipe';
+import { startSourcing, gateAndQueue, type AutopilotCtx } from '../cron/autopilot-tick';
+import type { MissionRecipeDoc, PipelineRunDoc } from '../../shared/schemas';
 
 interface GateTally {
   policyId: string;
@@ -30,9 +30,17 @@ export default async function handler(req: Request, res: Response) {
   const { mission_id } = (req.body ?? {}) as { mission_id?: string };
   if (!mission_id) return res.status(400).json({ error: 'missing_mission' });
 
-  const raw = await scope.collection<CampaignPolicyDoc>('campaign_policies').findOne({ missionId: mission_id });
-  if (!raw) return res.status(404).json({ error: 'no_policy' });
-  const policy: CampaignPolicyDoc = { ...raw, ...withPolicyDefaults(raw) };
+  // Load the mission's recipe (the single source of truth). If it hasn't been
+  // migrated yet, synthesize + persist one now so subsequent writes have a home.
+  let recipeDoc = await scope.collection<MissionRecipeDoc>('mission_recipes').findOne({ missionId: mission_id });
+  let stages: RecipeStages;
+  if (recipeDoc) {
+    stages = buildRecipeStages({ mission: { findMode: recipeDoc.sourcing?.findMode ?? null }, partial: recipeDoc });
+  } else {
+    stages = await resolveRecipe(scope, mission_id);
+    recipeDoc = await insertRecipe(scope, mission_id, stages);
+  }
+  const ctx: AutopilotCtx = { recipeId: recipeDoc._id, missionId: mission_id, view: policyView(stages), send: stages.send };
 
   const now = new Date();
 
@@ -40,11 +48,11 @@ export default async function handler(req: Request, res: Response) {
   // rest → review) so pressing "cycle now" moves the queue immediately instead of
   // waiting up to an hour for the cron. Best-effort: a gate hiccup must not block
   // the sourcing kickoff below.
-  const tally: GateTally = { policyId: policy._id, sourced: false, gated: 0, queued: 0, reviewed: 0, ready: 0 };
+  const tally: GateTally = { policyId: ctx.recipeId, sourced: false, gated: 0, queued: 0, reviewed: 0, ready: 0 };
   try {
-    await gateAndQueue(scope, policy, now, tally);
+    await gateAndQueue(scope, ctx, now, tally);
   } catch (err) {
-    console.error('[autopilot] cycle-now gate failed', policy._id, err);
+    console.error('[autopilot] cycle-now gate failed', ctx.recipeId, err);
   }
 
   // A run is already live ⇒ don't start a duplicate; just nudge it forward if it
@@ -57,8 +65,10 @@ export default async function handler(req: Request, res: Response) {
     return res.status(200).json({ sourcing: 'in_progress', gated: tally.gated, queued: tally.queued });
   }
 
-  await startSourcing(scope, user.id, policy);
-  await scope.collection<CampaignPolicyDoc>('campaign_policies').updateById(policy._id, { lastSourcedAt: now });
+  await startSourcing(scope, user.id, mission_id, stages);
+  await scope
+    .collection<MissionRecipeDoc>('mission_recipes')
+    .updateById(ctx.recipeId, { send: { ...stages.send, lastSourcedAt: now } });
   return res
     .status(200)
     .json({ sourcing: 'started', last_sourced_at: now.toISOString(), gated: tally.gated, queued: tally.queued });

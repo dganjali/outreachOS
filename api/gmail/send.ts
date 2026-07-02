@@ -4,12 +4,11 @@ import { forUser, newId, type InsertDoc } from '../_lib/db';
 import { getActiveAccessToken, sendNow, isValidEmailAddress, type MailAttachment } from '../_lib/gmail';
 import { getResumeAttachment, getAssetAttachment, hasResume } from '../_lib/attachments';
 import { scheduleFollowups, isSuppressed } from '../_lib/sequencing';
-import { withPolicyDefaults } from '../_lib/autopilot';
+import { resolveRecipe, policyView } from '../_lib/recipe';
 import { evaluateSend } from '../_lib/deliverability';
 import { recordOutcome } from '../_lib/outcomes';
 import { recordContacted } from '../_lib/contacted';
 import type {
-  CampaignPolicyDoc,
   ContactDoc,
   EmailSequenceDoc,
   MissionDoc,
@@ -291,8 +290,10 @@ export default async function handler(req: Request, res: Response) {
       const prof = profile as ProfileDoc | null;
       const autoFollowups = prof?.autoFollowups === true && prof?.pauseFollowups !== true;
       if (autoFollowups) {
-        const apPolicy = await scope.collection<CampaignPolicyDoc>('campaign_policies').findOne({ missionId: seq.missionId });
-        await scheduleFollowups({ scope, seq, toEmail, sentAt, policy: apPolicy ? withPolicyDefaults(apPolicy) : null });
+        // Follow-ups honor the recipe's send window/timezone (resolveRecipe
+        // synthesizes a default one for un-migrated missions).
+        const stages = await resolveRecipe(scope, seq.missionId);
+        await scheduleFollowups({ scope, seq, toEmail, sentAt, policy: policyView(stages) });
       }
     }
 

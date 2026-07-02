@@ -18,11 +18,7 @@
 
 import type { UserScope } from './db';
 import { newId } from './db';
-import {
-  MAX_DAILY_SEND_CAP,
-  MAX_TARGETS_PER_CYCLE,
-  POLICY_DEFAULTS,
-} from './autopilot';
+import { MAX_DAILY_SEND_CAP, POLICY_DEFAULTS, type SendPolicy } from './autopilot';
 import {
   DEFAULT_TARGET_COUNT,
   DEFAULT_TOP_N,
@@ -34,8 +30,13 @@ import type {
   CampaignPolicyDoc,
   MissionDoc,
   MissionRecipeDoc,
+  PersonSourcingStage,
   PipelineRunDoc,
+  ResearchStage,
   SendStage,
+  SequencingStage,
+  SourcingStage,
+  VerificationStage,
 } from '../../shared/schemas';
 import type { FindMode, SeniorityLevel } from '../../shared/types';
 
@@ -188,25 +189,8 @@ function normalizeWindow(w: { startHour?: number; endHour?: number } | undefined
   return endHour > startHour ? { startHour, endHour } : null;
 }
 
-/**
- * The flattened view the pure send/scheduling logic in autopilot.ts consumes.
- * Recipe subsumed the policy, but that logic still reasons over these exact
- * fields, so we adapt rather than rewrite it. Structurally assignable to the
- * `Pick<CampaignPolicyDoc, …>` params those functions declare.
- */
-export interface SendPolicy {
-  enabled: boolean;
-  autoSend: boolean;
-  cycleIntervalHours: number;
-  lastSourcedAt: Date | null;
-  dailySendCap: number;
-  sendWindow: { startHour: number; endHour: number };
-  timezone: string;
-  minConfidence: number;
-  counter: { date: string; sent: number } | null;
-}
-
-/** Flatten a recipe's send + verification stages into the SendPolicy shape. */
+/** Flatten a recipe's send + verification stages into the SendPolicy shape the
+ *  pure send/scheduling logic in autopilot.ts consumes. */
 export function policyView(recipe: Pick<RecipeStages, 'automationEnabled' | 'send' | 'verification'>): SendPolicy {
   return {
     enabled: recipe.automationEnabled,
@@ -274,4 +258,64 @@ export async function insertRecipe(scope: UserScope, missionId: string, stages: 
   return (await scope
     .collection<MissionRecipeDoc>('mission_recipes')
     .insertOne({ _id: newId(), missionId, ...stages } as never)) as MissionRecipeDoc;
+}
+
+/** A partial edit over a recipe's stages - what the steer agent proposes. Each
+ *  stage is independently patchable; only the fields the instruction implies are
+ *  set. Clamping/validation happens in applyRecipePatch (via buildRecipeStages). */
+export interface RecipeStagesPatch {
+  automationEnabled?: boolean;
+  sourcing?: Partial<SourcingStage>;
+  verification?: Partial<VerificationStage>;
+  research?: Partial<ResearchStage>;
+  personSourcing?: Partial<PersonSourcingStage>;
+  sequencing?: Partial<SequencingStage>;
+  send?: Partial<SendStage>;
+}
+
+/** True when a patch would change nothing. */
+export function isEmptyRecipePatch(p: RecipeStagesPatch): boolean {
+  return (
+    p.automationEnabled === undefined &&
+    !hasKeys(p.sourcing) &&
+    !hasKeys(p.verification) &&
+    !hasKeys(p.research) &&
+    !hasKeys(p.personSourcing) &&
+    !hasKeys(p.sequencing) &&
+    !hasKeys(p.send)
+  );
+}
+
+function hasKeys(o: object | undefined): boolean {
+  return !!o && Object.keys(o).length > 0;
+}
+
+/**
+ * Merge a stage patch onto the current recipe and re-clamp the result. Each
+ * stage is shallow-merged (stages are flat), then the whole thing runs back
+ * through buildRecipeStages so every numeric is clamped + every list cleaned -
+ * the same safety layer that runs on a fresh build, so a tampered patch can't
+ * push a value out of bounds.
+ */
+export function applyRecipePatch(current: RecipeStages, patch: RecipeStagesPatch): RecipeStages {
+  const merged: Partial<RecipeStages> = {
+    automationEnabled: patch.automationEnabled ?? current.automationEnabled,
+    sourcing: { ...current.sourcing, ...patch.sourcing },
+    verification: { ...current.verification, ...patch.verification },
+    research: { ...current.research, ...patch.research },
+    personSourcing: { ...current.personSourcing, ...patch.personSourcing },
+    sequencing: { ...current.sequencing, ...patch.sequencing },
+    send: { ...current.send, ...patch.send },
+  };
+  return buildRecipeStages({ mission: { findMode: merged.sourcing?.findMode ?? null }, partial: merged });
+}
+
+/** Insert or update a mission's recipe doc with the given (already-clamped) stages. */
+export async function upsertRecipe(scope: UserScope, missionId: string, stages: RecipeStages): Promise<void> {
+  const existing = await scope.collection<MissionRecipeDoc>('mission_recipes').findOne({ missionId });
+  if (existing) {
+    await scope.collection<MissionRecipeDoc>('mission_recipes').updateById(existing._id, stages as never);
+  } else {
+    await insertRecipe(scope, missionId, stages);
+  }
 }

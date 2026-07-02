@@ -17,10 +17,9 @@ import { forUser } from '../_lib/db';
 import { generateJson, MODEL_PRO } from '../_lib/llm';
 import { startRun, completeRun, failRun, checkRateLimit } from '../_lib/runs';
 import { buildSteerUpdates, isEmptyUpdate, normalizeProposal } from '../_lib/steer';
-import { withPolicyDefaults } from '../_lib/autopilot';
+import { resolveRecipe, applyRecipePatch, upsertRecipe, policyView, type RecipeStages } from '../_lib/recipe';
 import { rescheduleQueuedSends } from '../_lib/reschedule';
 import type {
-  CampaignPolicyDoc,
   ContextFactDoc,
   MissionDoc,
   SteerProposal,
@@ -41,21 +40,68 @@ const SCHEMA = {
         goal: { type: 'string' },
         targetDescription: { type: 'string' },
         geo: { type: 'string' },
-        sectors: { type: 'array', items: { type: 'string' } },
         draftDirective: { type: 'string' },
         draftDirectiveAppend: { type: 'string' },
         clearIcp: { type: 'boolean' },
       },
     },
-    policy: {
+    recipe: {
       type: 'object',
       properties: {
-        dailySendCap: { type: 'number' },
-        minConfidence: { type: 'number' },
-        cycleIntervalHours: { type: 'number' },
-        targetsPerCycle: { type: 'number' },
-        autoSend: { type: 'boolean' },
-        timezone: { type: 'string' },
+        automationEnabled: { type: 'boolean' },
+        sourcing: {
+          type: 'object',
+          properties: {
+            enabled: { type: 'boolean' },
+            count: { type: 'number' },
+            topN: { type: 'number' },
+            sectors: { type: 'array', items: { type: 'string' } },
+          },
+        },
+        verification: {
+          type: 'object',
+          properties: {
+            enabled: { type: 'boolean' },
+            emailVerify: { type: 'boolean' },
+            contactVerify: { type: 'boolean' },
+            minConfidence: { type: 'number' },
+          },
+        },
+        research: {
+          type: 'object',
+          properties: {
+            enabled: { type: 'boolean' },
+            evidence: { type: 'boolean' },
+            companyEnrich: { type: 'boolean' },
+          },
+        },
+        personSourcing: {
+          type: 'object',
+          properties: {
+            enabled: { type: 'boolean' },
+            contactsPerCompany: { type: 'number' },
+            functions: { type: 'array', items: { type: 'string' } },
+            seniority: { type: 'array', items: { type: 'string' } },
+          },
+        },
+        sequencing: {
+          type: 'object',
+          properties: { enabled: { type: 'boolean' }, touches: { type: 'number' } },
+        },
+        send: {
+          type: 'object',
+          properties: {
+            enabled: { type: 'boolean' },
+            autoSend: { type: 'boolean' },
+            dailySendCap: { type: 'number' },
+            cycleIntervalHours: { type: 'number' },
+            timezone: { type: 'string' },
+            sendWindow: {
+              type: 'object',
+              properties: { startHour: { type: 'number' }, endHour: { type: 'number' } },
+            },
+          },
+        },
       },
     },
     emphasizeFactIds: { type: 'array', items: { type: 'string' } },
@@ -72,44 +118,52 @@ const SCHEMA = {
   required: ['summary', 'changes'],
 } as const;
 
-const SYSTEM = `You are the steering controller for a cold-outreach autopilot. The user gives ONE instruction to adjust a running mission. Translate it into a structured patch over the mission's settings, in three areas:
-- TARGETING (who it contacts): goal/offer, audience description (targetDescription), geo, sectors. For company-size or "bigger/smaller companies" asks, edit targetDescription to state the size preference and set mission.clearIcp=true so targeting regenerates. Targeting changes only affect the NEXT sourcing cycle, not already-found companies - say so in the summary.
-- DRAFTING (how emails read): draftDirective (replace the standing instruction) or draftDirectiveAppend (add a line), and emphasizeFactIds / deemphasizeFactIds to pin or unpin specific facts. Resolve "this fact"/"that" to ids from the FACTS list; never invent an id.
-- SENDING POLICY (autopilot pace + guardrails): dailySendCap, minConfidence (0-1), cycleIntervalHours, targetsPerCycle, autoSend, timezone.
+const SYSTEM = `You are the steering controller for a cold-outreach autopilot. The user gives ONE instruction to adjust a running mission. The mission runs a modular pipeline (a "recipe") whose every stage you can edit. Translate the instruction into a structured patch.
+
+MISSION brief (targeting intent):
+- goal/offer, audience description (targetDescription), geo. For company-size or "bigger/smaller companies" asks, edit targetDescription to state the size preference and set mission.clearIcp=true so targeting regenerates. Brief/recipe.sourcing changes only affect the NEXT sourcing cycle, not already-found companies - say so in the summary.
+- draftDirective (replace the standing drafting instruction) or draftDirectiveAppend (add a line); emphasizeFactIds / deemphasizeFactIds to pin/unpin specific facts (resolve "this fact"/"that" to ids from the FACTS list; never invent an id).
+
+RECIPE stages (recipe.*):
+- sourcing: enabled, count (companies/people to discover per run), topN (how many to actually pursue), sectors (sector bias).
+- verification: enabled, emailVerify, contactVerify, minConfidence (0-1 auto-send confidence floor).
+- research: enabled, evidence, companyEnrich.
+- personSourcing: enabled, contactsPerCompany (how many people per company), functions (e.g. "sales","engineering"), seniority (one or more of: ic, senior_ic, lead, manager, senior_manager, director, senior_director, vp, svp, cxo, founder). Use this for "find more people per company" (set contactsPerCompany) or "target the VP of Sales not the CEO" (set functions + seniority).
+- sequencing: enabled, touches (total emails in the sequence, initial + follow-ups).
+- send: enabled, autoSend, dailySendCap, cycleIntervalHours, timezone, sendWindow {startHour,endHour}.
+- automationEnabled: the autopilot master switch.
 
 Rules:
-- Change ONLY what the instruction implies. Omit every field you are not changing. Do not restate unchanged settings.
+- Change ONLY what the instruction implies. Omit every stage/field you are not changing. Do not restate unchanged settings.
 - For every field you set, add a row to "changes" with a human label and the from/to values (stringified). "summary" is one plain sentence describing the net effect.
 - If the instruction is ambiguous, unsupported, or you cannot map it to these fields, set "clarification" to a short question and leave the patch fields empty (still return an empty "changes" array).
 - Output JSON only.`;
 
-function settingsBlock(mission: MissionDoc, policy: CampaignPolicyDoc | null): string {
-  const sectors = (mission.sectorSuggestions ?? []).map((s) => s.name).join(', ') || '(none set)';
+function settingsBlock(mission: MissionDoc, recipe: RecipeStages): string {
   const pins = (mission.emphasizedFactIds ?? []).length;
-  const lines = [
-    'TARGETING',
+  const s = recipe.sourcing;
+  const v = recipe.verification;
+  const r = recipe.research;
+  const ps = recipe.personSourcing;
+  const send = recipe.send;
+  const list = (a: string[]) => (a.length ? a.join(', ') : '(any)');
+  return [
+    'MISSION BRIEF',
     `- Goal / offer: ${mission.goal}`,
     `- Audience: ${mission.targetDescription}`,
     `- Geo: ${mission.geo ?? '(anywhere)'}`,
-    `- Sectors: ${sectors}`,
-    '',
-    'DRAFTING',
     `- Standing directive: ${mission.draftDirective?.trim() || '(none)'}`,
     `- Pinned facts: ${pins} pinned`,
-  ];
-  if (policy) {
-    lines.push(
-      '',
-      'SENDING POLICY',
-      `- Auto-send: ${policy.autoSend ? 'on' : 'review first'}`,
-      `- Daily send cap: ${policy.dailySendCap}`,
-      `- Min confidence: ${policy.minConfidence}`,
-      `- Cycle interval (hours): ${policy.cycleIntervalHours}`,
-      `- Targets per cycle: ${policy.targetsPerCycle}`,
-      `- Timezone: ${policy.timezone}`
-    );
-  }
-  return lines.join('\n');
+    '',
+    'RECIPE',
+    `- Automation: ${recipe.automationEnabled ? 'on' : 'off'}`,
+    `- Sourcing: ${s.enabled ? 'on' : 'off'}, discover ${s.count}, pursue ${s.topN}; sectors ${list(s.sectors)}`,
+    `- Verification: ${v.enabled ? 'on' : 'off'}, emailVerify ${v.emailVerify}, contactVerify ${v.contactVerify}, minConfidence ${v.minConfidence}`,
+    `- Research: ${r.enabled ? 'on' : 'off'}, evidence ${r.evidence}, companyEnrich ${r.companyEnrich}`,
+    `- Person sourcing: ${ps.enabled ? 'on' : 'off'}, ${ps.contactsPerCompany} per company; functions ${list(ps.functions)}; seniority ${list(ps.seniority)}`,
+    `- Sequencing: ${recipe.sequencing.enabled ? 'on' : 'off'}, ${recipe.sequencing.touches} touches`,
+    `- Send: ${send.enabled ? 'on' : 'off'}, autoSend ${send.autoSend}, cap ${send.dailySendCap}/day, every ${send.cycleIntervalHours}h, window ${send.sendWindow.startHour}-${send.sendWindow.endHour} ${send.timezone}`,
+  ].join('\n');
 }
 
 async function missionFacts(scope: ReturnType<typeof forUser>, missionId: string): Promise<ContextFactDoc[]> {
@@ -132,7 +186,7 @@ export default async function handler(req: Request, res: Response) {
 
   const mission = await scope.collection<MissionDoc>('missions').findById(mission_id);
   if (!mission) return res.status(404).json({ error: 'mission_not_found' });
-  const policy = await scope.collection<CampaignPolicyDoc>('campaign_policies').findOne({ missionId: mission_id });
+  const recipe = await resolveRecipe(scope, mission_id);
   const facts = await missionFacts(scope, mission_id);
 
   const run = await startRun(scope, { agentType: 'steer', missionId: mission_id, targetId: null, contactId: null });
@@ -141,7 +195,7 @@ export default async function handler(req: Request, res: Response) {
     ? facts.map((f) => `[${f._id}] ${f.claim}`).join('\n')
     : '(no facts yet - cannot pin any)';
   const userPrompt = [
-    `CURRENT SETTINGS\n${settingsBlock(mission, policy)}`,
+    `CURRENT SETTINGS\n${settingsBlock(mission, recipe)}`,
     '',
     `FACTS you may pin/unpin (id -> claim):\n${factList}`,
     '',
@@ -188,33 +242,36 @@ export async function apply(req: Request, res: Response) {
 
   const mission = await scope.collection<MissionDoc>('missions').findById(mission_id);
   if (!mission) return res.status(404).json({ error: 'mission_not_found' });
-  const policy = await scope.collection<CampaignPolicyDoc>('campaign_policies').findOne({ missionId: mission_id });
+  const current = await resolveRecipe(scope, mission_id);
 
   // Only the user's own facts may be pinned.
   const facts = await missionFacts(scope, mission_id);
   const validFactIds = new Set(facts.map((f) => f._id));
 
-  const { missionUpdate, policyUpdate } = buildSteerUpdates(mission, policy, proposal, { validFactIds });
-  if (isEmptyUpdate({ missionUpdate, policyUpdate })) {
+  const { missionUpdate, recipePatch } = buildSteerUpdates(mission, proposal, { validFactIds });
+  if (isEmptyUpdate({ missionUpdate, recipePatch })) {
     return res.status(400).json({ error: 'nothing_to_apply' });
   }
+  // Merge + clamp the recipe patch onto the current recipe (server-side safety).
+  const nextStages = applyRecipePatch(current, recipePatch);
+  const recipeChanged = !isEmptyUpdate({ missionUpdate: {}, recipePatch });
 
   const run = await startRun(scope, { agentType: 'steer', missionId: mission_id, targetId: null, contactId: null });
   try {
     if (Object.keys(missionUpdate).length) {
       await scope.collection<MissionDoc>('missions').updateById(mission_id, missionUpdate);
     }
-    if (policy && Object.keys(policyUpdate).length) {
-      await scope.collection<CampaignPolicyDoc>('campaign_policies').updateById(policy._id, policyUpdate);
+    if (recipeChanged) {
+      await upsertRecipe(scope, mission_id, nextStages);
       // A window/timezone change must move already-queued sends into the new
       // window, same as the cockpit's schedule editor does.
-      if (policyUpdate.sendWindow || policyUpdate.timezone) {
-        await rescheduleQueuedSends(scope, mission_id, withPolicyDefaults({ ...policy, ...policyUpdate }), new Date());
+      if (recipePatch.send?.sendWindow || recipePatch.send?.timezone) {
+        await rescheduleQueuedSends(scope, mission_id, policyView(nextStages), new Date());
       }
     }
     await completeRun(scope, run._id, {
       mission_fields: Object.keys(missionUpdate),
-      policy_fields: Object.keys(policyUpdate),
+      recipe_changed: recipeChanged,
     });
     return res.status(200).json({ ok: true, applied: proposal.changes ?? [] });
   } catch (err: unknown) {
