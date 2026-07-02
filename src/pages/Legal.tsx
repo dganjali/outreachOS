@@ -8,7 +8,7 @@ import { Link } from 'react-router-dom';
 import { Logo } from '../components/Logo';
 
 const COMPANY = 'OutreachOS';
-const DOMAIN = 'outreach-os.ca';
+const DOMAIN = 'outreachos.app';
 const CONTACT = 'danielganjali09@gmail.com';
 const UPDATED = 'June 11, 2026';
 

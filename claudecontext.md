@@ -27,7 +27,7 @@ The standing guide for how Claude Code should work in this repo. Read it first. 
 ```
 npm run build && npx firebase-tools deploy --only hosting
 ```
-Primary domain (live site): **https://outreach-os.ca** — this is the canonical URL now. Firebase default URL https://outreachos-495414.web.app still serves the same hosting. Bare `firebase` is not on PATH, use `npx firebase-tools`.
+Primary domain (live site): **https://outreachos.app** — this is the canonical URL now. Firebase default URL https://outreachos-495414.web.app still serves the same hosting. Bare `firebase` is not on PATH, use `npx firebase-tools`.
 
 **Backend** (Cloud Run service `outreachos-api`, us-central1):
 ```
@@ -35,7 +35,7 @@ gcloud builds submit --config cloudbuild.yaml --substitutions _TAG=$(git rev-par
 ```
 Cloud Build step 0 runs `npm ci && npm run server:typecheck && npm test` before the Docker build, so a red typecheck/test blocks the deploy. The build uploads the working tree, not git HEAD.
 
-**Health check:** `curl https://outreach-os.ca/api/healthz` → `{"ok":true}` (use `/api/healthz`, not `/healthz` — GFE swallows the latter on the public URL).
+**Health check:** `curl https://outreachos.app/api/healthz` → `{"ok":true}` (use `/api/healthz`, not `/healthz` — GFE swallows the latter on the public URL).
 
 Deploy whichever side(s) the task touched (frontend, backend, or both).
 

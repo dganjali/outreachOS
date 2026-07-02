@@ -94,7 +94,7 @@ export const env = {
   // Public app origin used to build Checkout success/cancel + portal return
   // URLs. Defaults to the custom domain (must be connected to Firebase Hosting
   // with the /api/** -> Cloud Run rewrite, same as the Stripe webhook).
-  APP_URL: () => optional('APP_URL', 'https://outreach-os.ca'),
+  APP_URL: () => optional('APP_URL', 'https://outreachos.app'),
 };
 
 // Vars that every deploy must provide for the service to handle any request.

@@ -37,7 +37,7 @@ const FEATURES = [
     title: 'The right companies, ranked by why-now.',
     body: 'The targeting agent finds high-fit companies and scores each on a real reason to reach out now: a funding round, a launch, a hiring signal. No scraping, no guessing.',
     bullets: ['Web research, ranked by fit and recency', 'Verified emails and the actual decision-maker', 'Evidence sourced per company, with citations'],
-    url: 'outreach-os.ca/missions',
+    url: 'outreachos.app/missions',
     mock: <PipelineMock />,
   },
   {
@@ -46,7 +46,7 @@ const FEATURES = [
     title: 'Personalization with receipts.',
     body: 'Every line is anchored to a sourced bullet, so personalization is not a Mad Lib. The model cannot flatter what it has not read. You review, tweak, and send in your voice.',
     bullets: ['Each claim tied to a citation', 'Written in your tone, from your profile', 'A 3-touch sequence, ready to send'],
-    url: 'outreach-os.ca/draft',
+    url: 'outreachos.app/draft',
     mock: <DraftMock />,
   },
   {
@@ -55,7 +55,7 @@ const FEATURES = [
     title: 'Your inbox stays yours.',
     body: 'OutreachOS connects to Gmail with send-only access, so it can never read your mail. Replies land in your inbox like any other email; mark a contact as replied and their scheduled follow-ups stop.',
     bullets: ['Send-only Gmail access, it cannot read your mail', 'Follow-ups stop when you mark a contact replied', 'Suppressed and unsubscribed addresses are never emailed'],
-    url: 'outreach-os.ca/missions',
+    url: 'outreachos.app/missions',
     mock: <InboxMock />,
   },
 ];
@@ -235,7 +235,7 @@ export function Landing() {
 
           {/* hero product shot - matte frame, single soft shadow, no gradient ring or glow */}
           <Reveal as="div" delay={340} className="relative mx-auto mt-12 max-w-5xl md:mt-14">
-            <BrowserFrame url="outreach-os.ca/missions" bodyClassName="p-0">
+            <BrowserFrame url="outreachos.app/missions" bodyClassName="p-0">
               <HeroAppMock />
             </BrowserFrame>
           </Reveal>
@@ -297,7 +297,7 @@ export function Landing() {
               </div>
             </Reveal>
             <Reveal delay={80}>
-              <BrowserFrame url="outreach-os.ca/draft" bodyClassName="p-0">
+              <BrowserFrame url="outreachos.app/draft" bodyClassName="p-0">
                 <VoiceCalibrationMock />
               </BrowserFrame>
             </Reveal>
