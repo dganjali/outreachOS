@@ -187,3 +187,58 @@ export interface CampaignPolicy {
   created_at: string;
   updated_at: string;
 }
+
+// Mission Recipe (Phase 3) - frontend (snake_case) mirror of MissionRecipeDoc.
+// The db shim maps to/from camelCase automatically, including nested keys.
+export interface MissionRecipe {
+  id: string;
+  mission_id: string;
+  automation_enabled: boolean;
+  sourcing: {
+    type: 'sourcing';
+    enabled: boolean;
+    provider: 'web_search' | 'csv' | 'manual';
+    find_mode: FindMode;
+    count: number;
+    top_n: number;
+    sectors: string[];
+  };
+  verification: {
+    type: 'verification';
+    enabled: boolean;
+    email_verify: boolean;
+    contact_verify: boolean;
+    min_confidence: number;
+  };
+  research: {
+    type: 'research';
+    enabled: boolean;
+    evidence: boolean;
+    company_enrich: boolean;
+  };
+  person_sourcing: {
+    type: 'personSourcing';
+    enabled: boolean;
+    contacts_per_company: number;
+    functions: string[];
+    seniority: SeniorityLevel[];
+  };
+  sequencing: {
+    type: 'sequencing';
+    enabled: boolean;
+    touches: number;
+  };
+  send: {
+    type: 'send';
+    enabled: boolean;
+    auto_send: boolean;
+    cycle_interval_hours: number;
+    daily_send_cap: number;
+    send_window: { start_hour: number; end_hour: number };
+    timezone: string;
+    last_sourced_at: string | null;
+    counter: { date: string; sent: number } | null;
+  };
+  created_at: string;
+  updated_at: string;
+}

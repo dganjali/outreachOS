@@ -53,6 +53,9 @@ export const COL = {
   suppressions: 'suppressions',
   pipelineRuns: 'pipeline_runs',
   campaignPolicies: 'campaign_policies',
+  // Mission Recipe (Phase 3): the modular pipeline definition, one per mission.
+  // Subsumes campaign_policies; read by both manual runs and the autopilot cron.
+  missionRecipes: 'mission_recipes',
   // Global per-account "already contacted" ledger (permanent cross-mission dedup).
   contactLedger: 'contact_ledger',
   // Personalization layer (the persona/taste model). See shared/schemas.ts.
@@ -93,6 +96,7 @@ const OWNERSHIP: Record<CollectionName, OwnershipMode> = {
   suppressions: 'userId',
   pipeline_runs: 'userId',
   campaign_policies: 'userId',
+  mission_recipes: 'userId',
   contact_ledger: 'userId',
   personas: 'userId',
   persona_versions: 'userId',

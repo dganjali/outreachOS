@@ -18,6 +18,7 @@
     "migrate:from-supabase": "tsx scripts/migrate-from-supabase.ts",
     "migrate:personas": "tsx scripts/migrate-personas.ts",
     "migrate:voice-split": "tsx scripts/migrate-voice-mission-split.ts",
+    "migrate:recipes": "tsx scripts/migrate-recipes.ts",
     "eval": "tsx scripts/eval/run.ts"
   },
   "dependencies": {

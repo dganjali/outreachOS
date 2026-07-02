@@ -634,6 +634,106 @@ export interface CampaignPolicyDoc extends BaseDoc {
 }
 
 // ---------------------------------------------------------------------------
+// Mission Recipe (Phase 3) - the modular pipeline definition, one per mission.
+// The SINGLE source of truth both manual runs (api/agents/pipeline.ts) and the
+// autopilot cron (api/cron/autopilot-tick.ts) read, so the two can no longer
+// drift. Stages map 1:1 onto the pipeline executors and onto the product's
+// mermaid: sourcing -> verification -> research -> personSourcing ->
+// sequencing -> send. Stages are enable/disable + configure, not reorderable
+// (the pipeline is inherently sequential), so they are named fields, not a list.
+//
+// This SUBSUMES the old CampaignPolicyDoc: the `send` stage carries the
+// automation cadence, sending guardrails, and operational counters that used to
+// live on the policy doc. `automationEnabled` is the autopilot master switch.
+// Field names in the send/verification stages match the old policy fields so the
+// pure logic in api/_lib/autopilot.ts is reused unchanged via a `SendPolicy`
+// structural view (see api/_lib/recipe.ts:policyView).
+// ---------------------------------------------------------------------------
+
+export type RecipeStageType =
+  | 'sourcing'
+  | 'verification'
+  | 'research'
+  | 'personSourcing'
+  | 'sequencing'
+  | 'send';
+
+// WHO to contact: discover targets (companies, or people directly in people mode).
+export interface SourcingStage {
+  type: 'sourcing';
+  enabled: boolean; // false ⇒ pursue existing targets only, discover no new ones
+  provider: 'web_search' | 'csv' | 'manual';
+  findMode: FindMode;
+  count: number; // targets to discover per run (pipeline config.targetCount)
+  topN: number; // how many discovered targets to actually pursue
+  sectors: string[]; // sector bias, not a hard filter (config.selectedSectors)
+}
+
+// WHETHER a contact is reachable + a good fit: address resolution/verification
+// and the per-recipient fit gate. minConfidence is also the send gate's floor.
+export interface VerificationStage {
+  type: 'verification';
+  enabled: boolean;
+  emailVerify: boolean; // resolve + verify the recipient address
+  contactVerify: boolean; // per-recipient fit gate (see contact-verify.ts)
+  minConfidence: number; // 0–1 confidence floor for auto-send
+}
+
+// PROOF to personalize with: evidence pack + company enrichment.
+export interface ResearchStage {
+  type: 'research';
+  enabled: boolean; // false ⇒ skip evidence gathering (drafts run thinner)
+  evidence: boolean;
+  companyEnrich: boolean;
+}
+
+// WHICH person(s) at each company, and how many.
+export interface PersonSourcingStage {
+  type: 'personSourcing';
+  enabled: boolean;
+  contactsPerCompany: number; // pipeline config.topContacts
+  functions: string[]; // ICP function values to prioritize (config.selectedFunctions)
+  seniority: SeniorityLevel[]; // seniority levels to prioritize (config.selectedSeniority)
+}
+
+// HOW the outreach reads: number of touches (directive + pinned facts stay on
+// the mission doc, which the drafter already reads everywhere).
+export interface SequencingStage {
+  type: 'sequencing';
+  enabled: boolean;
+  touches: number; // total email touches in the sequence (initial + follow-ups)
+}
+
+// WHEN + how fast to send. Carries the automation cadence + guardrails +
+// operational counters formerly on CampaignPolicyDoc.
+export interface SendStage {
+  type: 'send';
+  enabled: boolean;
+  autoSend: boolean; // false ⇒ gate passes drafts as 'ready' for 1-click approval
+  cycleIntervalHours: number; // min hours between sourcing runs
+  dailySendCap: number; // max auto-sends per day
+  sendWindow: { startHour: number; endHour: number }; // local hours, [start,end)
+  timezone: string; // IANA tz the send window is evaluated in
+  // --- operational state (moved off the old policy doc) ---
+  lastSourcedAt: Date | null;
+  counter: { date: string; sent: number } | null; // daily auto-send counter
+}
+
+export interface MissionRecipeDoc extends BaseDoc {
+  missionId: string;
+  // Autopilot master switch (was CampaignPolicyDoc.enabled). When true, the cron
+  // runs this recipe automatically on the send stage's cadence. When false, the
+  // same recipe still drives manual runs; it just isn't triggered automatically.
+  automationEnabled: boolean;
+  sourcing: SourcingStage;
+  verification: VerificationStage;
+  research: ResearchStage;
+  personSourcing: PersonSourcingStage;
+  sequencing: SequencingStage;
+  send: SendStage;
+}
+
+// ---------------------------------------------------------------------------
 // Autopilot steering chat. The steer agent (api/agents/steer.ts) turns one NL
 // instruction ("go for bigger companies", "emphasize this fact") into a
 // structured proposal over the mission's targeting/drafting/sending settings.
@@ -763,6 +863,12 @@ export const INDEX_SPEC: Record<string, Array<{ keys: Record<string, 1 | -1>; op
     { keys: { userId: 1, missionId: 1 }, options: { unique: true } },
     // Cron sweep: all enabled policies, oldest-sourced first.
     { keys: { enabled: 1, lastSourcedAt: 1 } },
+  ],
+  mission_recipes: [
+    // One recipe per mission (the lookup the UI/pipeline/cron use).
+    { keys: { userId: 1, missionId: 1 }, options: { unique: true } },
+    // Cron sweep: all automation-enabled recipes, oldest-sourced first.
+    { keys: { automationEnabled: 1, 'send.lastSourcedAt': 1 } },
   ],
   personas: [
     { keys: { userId: 1, createdAt: -1 } },
