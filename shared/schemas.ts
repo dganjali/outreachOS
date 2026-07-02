@@ -60,6 +60,10 @@ export interface ProfileDoc extends BaseDoc {
   // Hard kill-switch: when true, the follow-up sweeper skips this user's
   // scheduled touches regardless of autoFollowups (legacy "pause" control).
   pauseFollowups?: boolean;
+  // When true, discovery may surface a company already approved/contacted in
+  // another mission. Default (absent/false): companies never repeat across
+  // missions - see loadCommittedDomains in api/_lib/targeted.ts.
+  allowRepeatCompanies?: boolean;
 
   // --- Billing / monetization (Stripe). All optional; absence == free tier. ---
   // The plan the user purchased. Effective limits also depend on planStatus -
@@ -827,6 +831,9 @@ export const INDEX_SPEC: Record<string, Array<{ keys: Record<string, 1 | -1>; op
   ],
   targets: [
     { keys: { userId: 1, missionId: 1, status: 1 } },
+    // Covering scan for cross-mission company dedup (loadCommittedDomains):
+    // filter by status, return domain only, no document fetch.
+    { keys: { userId: 1, status: 1, domain: 1 } },
   ],
   contacts: [
     { keys: { userId: 1, targetId: 1, status: 1 } },
